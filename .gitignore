@@ -1,0 +1,43 @@
+# Root gitignore — per-project ignores live alongside code:
+# legacy PHP: jhs_digitization-og-php-app/.gitignore
+# frontend:   record-room-frontend/.gitignore
+
+# Database dumps are intentional reference material — never ignore *.sql
+!*.sql
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE / editors
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# Node / frontend (covers record-room-frontend/ until it gets its own repo)
+node_modules/
+dist/
+coverage/
+.vite/
+.netlify/
+.firebase/
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Secrets — real env files are never committed; examples stay tracked
+.env
+.env.*
+!.env.example
+
+# Private scanned documents are runtime data, not source files.
+/dotnet-api/src/RecordRoom.Api/App_Data/documents/
+
+# .NET (future dotnet-api/)
+[Bb]in/
+[Oo]bj/
+*.user
+.vs/
