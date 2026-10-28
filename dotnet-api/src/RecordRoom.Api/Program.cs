@@ -115,7 +115,10 @@ builder.Services.AddSingleton<ICacheService>(sp =>
 {
     var memory = sp.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>();
     var log = sp.GetRequiredService<ILogger<Program>>();
-    var mux = sp.GetRequiredService<IConnectionMultiplexer?>();
+    // GetService, not GetRequiredService: the registered factory legitimately
+    // returns null when Redis is not configured, and resolving null must mean
+    // "degrade to memory", not "throw on every request".
+    var mux = sp.GetService<IConnectionMultiplexer>();
 
     if (mux is null)
     {

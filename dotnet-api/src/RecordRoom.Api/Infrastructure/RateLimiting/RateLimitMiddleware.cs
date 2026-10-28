@@ -151,7 +151,10 @@ public static class RateLimitingRegistration
 
         services.AddSingleton<IRateLimiter>(sp =>
         {
-            var mux = sp.GetRequiredService<IConnectionMultiplexer?>();
+            // GetService, not GetRequiredService: "no Redis configured" must
+            // degrade to the in-memory limiter, not 500 every request (D-fix
+            // from the pre-baseline history, restored 2026-10-28).
+            var mux = sp.GetService<IConnectionMultiplexer>();
             return mux is null
                 ? new MemoryRateLimiter(sp.GetRequiredService<ILogger<MemoryRateLimiter>>())
                 : new RedisRateLimiter(mux, sp.GetRequiredService<ILogger<RedisRateLimiter>>());
