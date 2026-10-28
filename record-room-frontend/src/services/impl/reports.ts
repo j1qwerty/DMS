@@ -9,7 +9,7 @@
 
 import { getFeatures } from '../../lib/features';
 import { toCsv, downloadCsv, slugify } from '../../lib/csv';
-import { FOLDER_LABELS, type ReportDefinition, type ReportKey } from '../../types';
+import { type ReportDefinition, type ReportKey } from '../../types';
 import type { ReportResult, ReportsApi } from '../contracts';
 import { store, timestamp } from '../store';
 import { log } from './audit';
@@ -66,18 +66,17 @@ const definitions: ReportDefinition[] = [
   {
     key: 'digitization-progress',
     title: 'Digitization progress',
-    description: 'Batch-level page counts with approval state per batch.',
+    description: 'Per-file scan page counts with approval state per file.',
     columns: [
-      'Batch',
-      'Employee',
-      'Code',
+      'FileNumber',
+      'Barcode',
       'Department',
-      'Folder',
+      'Year',
       'Pages',
       'Approved',
       'Rejected',
       'Pending',
-      'Status',
+      'FileStatus',
     ],
     legacySource: 'User.php · uploadservice report',
   },
@@ -219,18 +218,22 @@ export const reportsService: ReportsApi = {
           ]);
         break;
       case 'digitization-progress':
-        rows = state.batches.map((batch) => [
-          batch.code,
-          batch.employeeName,
-          batch.employeeCode,
-          batch.department,
-          FOLDER_LABELS[batch.folder],
-          batch.pages.length,
-          batch.pages.filter((page) => page.status === 'Approved').length,
-          batch.pages.filter((page) => page.status === 'Rejected').length,
-          batch.pages.filter((page) => page.status === 'Pending review').length,
-          batch.status,
-        ]);
+        rows = state.files
+          .filter((file) => state.scanPages.some((page) => page.fileBarcode === file.fileBarcode))
+          .map((file) => {
+            const pages = state.scanPages.filter((page) => page.fileBarcode === file.fileBarcode);
+            return [
+              file.fileNumber,
+              file.fileBarcode,
+              file.department,
+              file.year,
+              pages.length,
+              pages.filter((page) => page.status === 'Approved').length,
+              pages.filter((page) => page.status === 'Rejected').length,
+              pages.filter((page) => page.status === 'Pending review').length,
+              file.status,
+            ];
+          });
         break;
       case 'login-history':
         rows = state.loginHistory

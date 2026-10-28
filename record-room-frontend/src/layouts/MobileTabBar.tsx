@@ -26,7 +26,7 @@ const tabs: Tab[] = [
   { label: 'Documents', to: '/files', icon: Files },
   { label: 'Maps', to: '/maps', icon: MapTrifold, permission: 'files.view' },
   { label: 'Scan', to: '/scan', icon: ScanSmiley, barcode: 'on' },
-  { label: 'Digitize', to: '/digitization', icon: Archive, barcode: 'off' },
+  { label: 'Review', to: '/digitization', icon: Archive, barcode: 'off' },
   { label: 'Issue', to: '/issue', icon: ClipboardText, permission: 'issue.issue' },
 ];
 

@@ -9,7 +9,6 @@ import {
   FileText,
   MapPin,
   Printer,
-  ShieldCheck,
   UserCircle,
 } from '@phosphor-icons/react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
@@ -25,10 +24,10 @@ import { ShelfView } from '../components/ShelfView';
 import { DocumentUploadActions } from '../components/DocumentUploadActions';
 import { useQuery, useService, useSession } from '../hooks/useService';
 import { buildPayload } from '../lib/barcode';
-import type { Page } from '../services/contracts';
+import type { Page, Result } from '../services/contracts';
+import { err } from '../services/contracts';
 import type {
-  DigitizationBatch,
-  DigitizationPage,
+  FileScan,
   IssueRecord,
   MapUpload,
   MovementEvent,
@@ -39,13 +38,10 @@ import type {
 
 const EMPTY_ROOMS: Room[] = [];
 const EMPTY_MOVEMENTS: MovementEvent[] = [];
-const EMPTY_BATCHES: DigitizationBatch[] = [];
+const EMPTY_SCANS: FileScan[] = [];
 const EMPTY_MAPS: MapUpload[] = [];
 const EMPTY_DOCUMENTS: RecordFileDocument[] = [];
 const EMPTY_ISSUE_PAGE: Page<IssueRecord> = { items: [], total: 0, page: 1, pageSize: 500 };
-
-/** A scanned page plus the batch code it belongs to, for the stitching preview. */
-type FilePage = DigitizationPage & { batchCode: string };
 
 export function FileDetailPage() {
   const { barcode } = useFeatures();
@@ -60,6 +56,9 @@ export function FileDetailPage() {
   const [eOfficeDraft, setEOfficeDraft] = useState<string | null>(null);
   const [savingEOffice, setSavingEOffice] = useState(false);
   const [flash, setFlash] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null);
+  const [scanMode, setScanMode] = useState<'pdf' | 'page'>('pdf');
+  const [pageNoDraft, setPageNoDraft] = useState('1');
+  const [sizeDraft, setSizeDraft] = useState('');
 
   // One file id drives every read on this page. `rooms` comes back whole because
   // the location breadcrumb, the shelf picker and the shelf diagram all derive
@@ -75,10 +74,10 @@ export function FileDetailPage() {
     [fileId],
     EMPTY_MOVEMENTS,
   );
-  const { data: batches, reload: reloadBatches } = useQuery(
-    () => service.digitization.batches(),
-    [],
-    EMPTY_BATCHES,
+  const { data: scans, reload: reloadScans } = useQuery(
+    () => (fileId ? service.digitization.list(fileId) : Promise.resolve([])),
+    [fileId],
+    EMPTY_SCANS,
   );
   const { data: maps, reload: reloadMaps } = useQuery(
     () => service.uploads.maps({ fileBarcode: file?.fileBarcode ?? '' }),
@@ -127,12 +126,25 @@ export function FileDetailPage() {
   const unit =
     room?.storageUnits.find((item) => item.id === file.almirahId) ?? room?.storageUnits[0];
   const section = room?.sections.find((item) => item.id === file.sectionId);
-  const pages: FilePage[] = batches
-    .flatMap((batch) => batch.pages.map((page) => ({ ...page, batchCode: batch.code })))
-    .filter((page) => page.fileBarcode === file.fileBarcode);
   const openIssue = openIssues.items.find((issue) =>
     issue.lines.some((line) => line.fileId === file.id),
   );
+
+  // Page-by-page scan: register the page row, then attach the scanned image to
+  // it in one flow, so the user never sees an empty metadata row.
+  const addPageScan = async (upload: File): Promise<Result<FileScan>> => {
+    const pageNo = Number(pageNoDraft);
+    if (!Number.isInteger(pageNo) || pageNo < 1) {
+      return err('Page number starts at 1.', 'pageNo');
+    }
+    const added = await service.digitization.add(file.id, {
+      pageNo,
+      filename: upload.name,
+      documentSize: sizeDraft,
+    });
+    if (!added.ok) return added;
+    return service.digitization.addDocument(added.value.id, upload);
+  };
 
   const shelfOptions = rooms.flatMap((item) =>
     item.sections.flatMap((sec) =>
@@ -314,108 +326,180 @@ export function FileDetailPage() {
           <Card>
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-2">
-                <ShieldCheck className="text-accent" size={19} />
-                <p className="text-sm font-semibold">Record attachments</p>
+                <FileText className="text-accent" size={19} />
+                <p className="text-sm font-semibold">Scans</p>
               </div>
-              <Badge tone={documents.length ? 'success' : 'neutral'}>
-                {documents.length} version(s)
+              <Badge tone={documents.length + scans.length ? 'success' : 'neutral'}>
+                {documents.length + scans.length} item(s)
               </Badge>
             </div>
             <p className="muted mt-2 text-xs leading-5">
-              Attach a combined scan or supporting PDF/image to this record. Uploading again creates
-              a new version; older uploads remain available.
+              Add a full-PDF scan for the record, or page-by-page scans with a page number and sheet
+              size. Rescans become new versions; page scans await review in the Digitization queue.
             </p>
-            {documents.length === 0 ? (
-              <div className="mt-4 rounded-xl border border-dashed border-base p-4">
-                <p className="mb-3 text-sm font-semibold">No file-level scan uploaded yet.</p>
-                <DocumentUploadActions
-                  filename={
-                    (barcode ? file.fileBarcode : file.fileNumber.replace(/[\\/]+/g, '-')) + '.pdf'
-                  }
-                  hasDocument={false}
-                  canUpload={allowed('files.edit')}
-                  onUpload={(upload) => service.files.uploadDocument(file.id, upload)}
-                  getBlob={() => Promise.reject(new Error('No document has been uploaded yet.'))}
-                  onUploaded={() => reloadDocuments()}
-                />
-              </div>
-            ) : (
-              <div className="mt-4 space-y-3">
-                {documents.map((document, index) => (
-                  <div key={document.id} className="rounded-xl border border-base p-3">
-                    <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="break-all text-xs font-semibold">{document.filename}</p>
-                        <p className="muted mt-1 text-[11px]">
-                          Version {document.version} ·{' '}
-                          {new Date(document.uploadedAt).toLocaleString()} · {document.uploadedBy}
-                        </p>
-                      </div>
-                      {index === 0 && <Badge tone="success">Latest</Badge>}
-                    </div>
+            {allowed('digitization.upload') && (
+              <div className="mt-4 rounded-xl border border-base p-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setScanMode('pdf')}
+                    className={
+                      'focus-ring rounded-lg px-3 py-1.5 text-xs font-semibold ' +
+                      (scanMode === 'pdf'
+                        ? 'bg-accent text-white'
+                        : 'border border-base hover:bg-surface-muted')
+                    }
+                  >
+                    Full PDF
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setScanMode('page')}
+                    className={
+                      'focus-ring rounded-lg px-3 py-1.5 text-xs font-semibold ' +
+                      (scanMode === 'page'
+                        ? 'bg-accent text-white'
+                        : 'border border-base hover:bg-surface-muted')
+                    }
+                  >
+                    Page scan
+                  </button>
+                </div>
+                {scanMode === 'pdf' ? (
+                  <div className="mt-4">
                     <DocumentUploadActions
-                      filename={document.filename}
-                      version={document.version}
-                      hasDocument
-                      contentType={document.contentType}
-                      sizeBytes={document.sizeBytes}
-                      pageCount={document.pageCount}
-                      canUpload={index === 0 && allowed('files.edit')}
+                      filename={
+                        (barcode ? file.fileBarcode : file.fileNumber.replace(/[\\/]+/g, '-')) +
+                        '.pdf'
+                      }
+                      hasDocument={false}
+                      canUpload={allowed('files.edit')}
                       onUpload={(upload) => service.files.uploadDocument(file.id, upload)}
-                      getBlob={() => service.files.documentBlob(file.id, document.id)}
+                      getBlob={() =>
+                        Promise.reject(new Error('No document has been uploaded yet.'))
+                      }
                       onUploaded={() => reloadDocuments()}
                     />
                   </div>
-                ))}
-                {documents.some((item) => item.sha256) && (
-                  <p className="muted break-all text-[10px]">
-                    SHA-256 checksums are retained in upload metadata for integrity verification.
-                  </p>
+                ) : (
+                  <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                    <Field label="Page number" htmlFor="scan-page-no">
+                      <TextInput
+                        id="scan-page-no"
+                        type="number"
+                        min={1}
+                        value={pageNoDraft}
+                        onChange={(event) => setPageNoDraft(event.target.value)}
+                      />
+                    </Field>
+                    <Field
+                      label="Sheet size"
+                      htmlFor="scan-size"
+                      hint={file.documentSize ? `File default: ${file.documentSize}` : undefined}
+                    >
+                      <SelectInput
+                        id="scan-size"
+                        value={sizeDraft}
+                        onChange={(event) => setSizeDraft(event.target.value)}
+                      >
+                        <option value="">Inherit file size</option>
+                        {['A0', 'A1', 'A2', 'A3', 'A4', 'Other'].map((size) => (
+                          <option key={size} value={size}>
+                            {size}
+                          </option>
+                        ))}
+                      </SelectInput>
+                    </Field>
+                    <div className="sm:col-span-3">
+                      <DocumentUploadActions
+                        filename={`Page ${pageNoDraft || '?'} scan`}
+                        hasDocument={false}
+                        canUpload
+                        onUpload={(upload) => addPageScan(upload)}
+                        getBlob={() => Promise.reject(new Error('No scan uploaded yet.'))}
+                        onUploaded={() => {
+                          reloadScans();
+                          reloadFile();
+                        }}
+                      />
+                    </div>
+                  </div>
                 )}
               </div>
             )}
-          </Card>
 
-          <Card>
-            <p className="text-sm font-semibold">Digitization pages</p>
-            <p className="muted mt-1 text-xs leading-5">
-              Each row represents one page/version in a digitization batch. Uploading a rescan
-              creates a new version instead of overwriting the old content.
-            </p>
-            {pages.length === 0 ? (
-              <p className="muted mt-4 text-xs">
-                {barcode
-                  ? 'No page records are linked to this barcode yet.'
-                  : 'No page records are linked to this file yet.'}
-              </p>
-            ) : (
-              <div className="mt-4 space-y-3">
-                {pages.map((page) => (
-                  <div key={page.id} className="rounded-xl border border-base p-3">
-                    <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="break-all text-xs font-semibold">{page.filename}</p>
-                        <p className="muted mt-1 text-[11px]">
-                          {page.batchCode} · page {page.pageNo} · version {page.version}
-                        </p>
+            {documents.length > 0 && (
+              <div className="mt-5">
+                <p className="text-xs font-semibold uppercase tracking-wide muted">
+                  Full-PDF versions
+                </p>
+                <div className="mt-3 space-y-3">
+                  {documents.map((document, index) => (
+                    <div key={document.id} className="rounded-xl border border-base p-3">
+                      <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="break-all text-xs font-semibold">{document.filename}</p>
+                          <p className="muted mt-1 text-[11px]">
+                            Version {document.version} ·{' '}
+                            {new Date(document.uploadedAt).toLocaleString()} · {document.uploadedBy}
+                          </p>
+                        </div>
+                        {index === 0 && <Badge tone="success">Latest</Badge>}
                       </div>
-                      <StatusBadge status={page.status} />
+                      <DocumentUploadActions
+                        filename={document.filename}
+                        version={document.version}
+                        hasDocument
+                        contentType={document.contentType}
+                        sizeBytes={document.sizeBytes}
+                        pageCount={document.pageCount}
+                        canUpload={index === 0 && allowed('files.edit')}
+                        onUpload={(upload) => service.files.uploadDocument(file.id, upload)}
+                        getBlob={() => service.files.documentBlob(file.id, document.id)}
+                        onUploaded={() => reloadDocuments()}
+                      />
                     </div>
-                    <DocumentUploadActions
-                      filename={page.filename}
-                      version={page.version}
-                      hasDocument={page.hasDocument === true}
-                      contentType={page.contentType}
-                      sizeBytes={page.sizeBytes}
-                      canUpload={allowed('digitization.upload')}
-                      onUpload={(upload) =>
-                        service.digitization.uploadPageDocument(page.id, upload)
-                      }
-                      getBlob={() => service.digitization.pageBlob(page.id)}
-                      onUploaded={() => reloadBatches()}
-                    />
-                  </div>
-                ))}
+                  ))}
+                  {documents.some((item) => item.sha256) && (
+                    <p className="muted break-all text-[10px]">
+                      SHA-256 checksums are retained in upload metadata for integrity verification.
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {scans.length > 0 && (
+              <div className="mt-5">
+                <p className="text-xs font-semibold uppercase tracking-wide muted">Page scans</p>
+                <div className="mt-3 space-y-3">
+                  {scans.map((scan) => (
+                    <div key={scan.id} className="rounded-xl border border-base p-3">
+                      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="break-all text-xs font-semibold">{scan.filename}</p>
+                          <p className="muted mt-1 text-[11px]">
+                            Page {scan.pageNo} · v{scan.version} · {scan.documentSize}
+                          </p>
+                        </div>
+                        <StatusBadge status={scan.status} />
+                      </div>
+                      {scan.note && <p className="muted mb-2 text-[11px]">{scan.note}</p>}
+                      <DocumentUploadActions
+                        filename={scan.filename}
+                        version={scan.version}
+                        hasDocument={scan.hasDocument === true}
+                        contentType={scan.contentType}
+                        sizeBytes={scan.sizeBytes}
+                        pageCount={scan.pageCount}
+                        canUpload={allowed('digitization.upload')}
+                        onUpload={(upload) => service.digitization.addDocument(scan.id, upload)}
+                        getBlob={() => service.digitization.scanBlob(scan.id)}
+                        onUploaded={() => reloadScans()}
+                      />
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </Card>

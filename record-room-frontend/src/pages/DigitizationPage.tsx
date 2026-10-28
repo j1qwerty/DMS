@@ -1,296 +1,166 @@
-import { useFeatures } from '../lib/features';
 import { useState, type ReactNode } from 'react';
-import {
-  Archive,
-  CheckCircle,
-  Clock,
-  FolderOpen,
-  Plus,
-  Scan,
-  WarningCircle,
-} from '@phosphor-icons/react';
+import { CheckCircle, Scan, WarningCircle, XCircle } from '@phosphor-icons/react';
 import { Link } from 'react-router-dom';
 import { PageHeader } from '../components/ui/PageHeader';
-import { Button, LinkButton } from '../components/ui/Button';
+import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
-import { Badge } from '../components/ui/Badge';
 import { Modal } from '../components/ui/Modal';
-import { Field, SelectInput, TextArea, TextInput } from '../components/ui/Field';
+import { Field, TextArea, TextInput } from '../components/ui/Field';
 import { Flash } from '../components/ui/Flash';
 import { EmptyState } from '../components/ui/EmptyState';
 import { useQuery, useService, useSession } from '../hooks/useService';
-import type { Page } from '../services/contracts';
-import {
-  DIGITIZATION_FOLDERS,
-  FOLDER_LABELS,
-  type DigitizationBatch,
-  type DigitizationFolder,
-  type Employee,
-} from '../types';
-
-const STATUS_TONE = {
-  'In progress': 'info',
-  Submitted: 'warning',
-  Approved: 'success',
-  'Partially approved': 'warning',
-} as const;
+import type { FileScan } from '../types';
 
 /**
- * Employee-linked digitization batches.
- *
- * The legacy screens were per-employee (`uploads/<empcode>/<folder>/`); the
- * previous frontend had three hardcoded waves with no employee link. Batches
- * here belong to a registered employee, carry a folder, and surface the pages
- * that still need review.
+ * File-centric digitization (2026-10-28 decision): the Digitization section is
+ * the pending-review queue across files. Pages are added from the file page;
+ * here a supervisor reviews them — approve, or reject with a reason.
  */
 export function DigitizationPage() {
-  const { barcode } = useFeatures();
   const service = useService();
   const { allowed } = useSession();
 
   const [search, setSearch] = useState('');
-  const [employeeCode, setEmployeeCode] = useState('');
-  const [folder, setFolder] = useState<DigitizationFolder | 'All'>('All');
-  const [creating, setCreating] = useState(false);
+  const [busyId, setBusyId] = useState('');
+  const [rejecting, setRejecting] = useState<FileScan | null>(null);
   const [flash, setFlash] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null);
 
-  // The API owns the filtering, so the rows on screen are exactly what it
-  // returned for the current search, employee and folder.
+  // The API owns the filtering; the rows on screen are exactly the pending
+  // queue for the current search. Live updates from other screens arrive on
+  // the 'digitization' channel.
   const {
-    data: batches,
+    data: queue,
     loading,
     reload,
-  } = useQuery(
-    () => service.digitization.batches({ search, employeeCode, folder }),
-    [search, employeeCode, folder],
-    [] as DigitizationBatch[],
-    // A page uploaded or a batch reviewed elsewhere must show up here.
-    ['digitization'],
-  );
-  const { data: employees } = useQuery<Page<Employee>>(
-    () => service.employees.list({ pageSize: 100 }),
-    [],
-    { items: [], total: 0, page: 1, pageSize: 100 },
-  );
-  const { data: pending } = useQuery(() => service.digitization.pendingReviewCount(), [], 0, [
+  } = useQuery(() => service.digitization.pending({ search }), [search], [] as FileScan[], [
     'digitization',
   ]);
 
-  const employeeOptions = employees.items;
-  const allPages = batches.flatMap((batch) => batch.pages);
+  const review = async (scan: FileScan, decision: 'Approved' | 'Rejected', note = '') => {
+    setBusyId(scan.id);
+    try {
+      const result = await service.digitization.review(scan.id, decision, note);
+      if (!result.ok) {
+        setFlash({ tone: 'danger', text: result.error });
+        return;
+      }
+      setFlash({ tone: 'success', text: `${scan.filename} ${decision.toLowerCase()}.` });
+      reload();
+    } finally {
+      setBusyId('');
+    }
+  };
 
   return (
     <div className="space-y-7">
       <PageHeader
         kicker="Digitization"
-        title="Employee scanning batches"
-        description="Each batch belongs to a registered employee and one document folder, matching the legacy uploads/<empcode>/<folder>/ layout. Re-scanning a page creates a new version rather than overwriting."
-        actions={
-          allowed('digitization.upload') && (
-            <Button icon={<Plus size={17} />} onClick={() => setCreating(true)}>
-              New batch
-            </Button>
-          )
-        }
+        title="Scan review queue"
+        description="Every page scan awaiting review, across all files. Pages are added from their file; approving here marks the page complete for the registry."
       />
 
       {flash && <Flash tone={flash.tone} text={flash.text} onDismiss={() => setFlash(null)} />}
 
-      <div className="grid gap-4 md:grid-cols-4">
-        <Metric icon={<Scan />} label="Pages in view" value={String(allPages.length)} />
-        <Metric
-          icon={<CheckCircle />}
-          label="Approved"
-          value={String(allPages.filter((p) => p.status === 'Approved').length)}
-        />
+      <div className="grid gap-4 md:grid-cols-2">
+        <Metric icon={<Scan />} label="In queue" value={String(queue.length)} />
         <Metric
           icon={<WarningCircle />}
-          label="Rejected"
-          value={String(allPages.filter((p) => p.status === 'Rejected').length)}
+          label="Reviewer"
+          value={allowed('digitization.review') ? 'Supervisor+ only' : 'Read-only for you'}
           tone="warning"
-        />
-        <Metric
-          icon={<Clock />}
-          label="Awaiting review"
-          value={String(pending)}
-          tone={pending > 0 ? 'warning' : 'neutral'}
+          hint="Approve, or reject with a reason."
         />
       </div>
 
       <Card padding={false} className="overflow-hidden">
-        <div className="grid gap-3 border-b border-base p-4 lg:grid-cols-[1.4fr_1fr_1fr]">
+        <div className="border-b border-base p-4">
           <TextInput
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder={
-              barcode ? 'Batch code, employee, file barcode…' : 'Batch code, employee, file number…'
-            }
-            aria-label="Search batches"
+            placeholder="File barcode, file number or scan name…"
+            aria-label="Search the review queue"
           />
-          <SelectInput
-            value={employeeCode}
-            onChange={(event) => setEmployeeCode(event.target.value)}
-            aria-label="Filter by employee"
-          >
-            <option value="">All employees</option>
-            {employeeOptions.map((employee) => (
-              <option key={employee.id} value={employee.employeeCode}>
-                {employee.employeeCode} · {employee.name}
-              </option>
-            ))}
-          </SelectInput>
-          <SelectInput
-            value={folder}
-            onChange={(event) => setFolder(event.target.value as DigitizationFolder | 'All')}
-            aria-label="Filter by folder"
-          >
-            <option value="All">All folders</option>
-            {DIGITIZATION_FOLDERS.map((item) => (
-              <option key={item} value={item}>
-                {FOLDER_LABELS[item]}
-              </option>
-            ))}
-          </SelectInput>
         </div>
 
-        {batches.length === 0 ? (
+        {queue.length === 0 ? (
           <div className="p-6">
             <EmptyState
-              title={loading ? 'Loading batches' : 'No batches match'}
+              title={loading ? 'Loading the queue' : 'Nothing awaits review'}
               description={
                 loading
-                  ? 'Asking the digitization register for the matching batches.'
-                  : 'Clear the filters, or open a new batch for an employee.'
+                  ? 'Asking the digitization register for pending pages.'
+                  : 'Add page scans from a file page; they appear here for review.'
+              }
+              action={
+                <Link to="/files" className="focus-ring text-xs font-semibold text-accent">
+                  Open the registry
+                </Link>
               }
             />
           </div>
         ) : (
           <ul className="divide-y divide-[var(--rr-border)]">
-            {batches.map((batch) => {
-              const approved = batch.pages.filter((page) => page.status === 'Approved').length;
-              const rejected = batch.pages.filter((page) => page.status === 'Rejected').length;
-              const review = batch.pages.filter((page) => page.status === 'Pending review').length;
-              return (
-                <li key={batch.id} className="p-5">
-                  <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-mono text-xs text-accent">{batch.code}</span>
-                        <Badge tone={STATUS_TONE[batch.status]}>{batch.status}</Badge>
-                      </div>
-                      <p className="mt-2 font-semibold">{batch.employeeName}</p>
-                      <p className="muted mt-0.5 text-[11px]">
-                        {batch.employeeCode} · {batch.department} · {FOLDER_LABELS[batch.folder]}
-                      </p>
-                      <p className="muted mt-1 font-mono text-[10px]">
-                        {service.digitization.folderPath(batch)}
-                      </p>
+            {queue.map((scan) => (
+              <li key={scan.id} className="p-5">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="min-w-0">
+                    <p className="break-all font-semibold">{scan.filename}</p>
+                    <p className="muted mt-1 text-[11px]">
+                      Page {scan.pageNo} · v{scan.version} · {scan.documentSize} · uploaded{' '}
+                      {scan.uploadedAt} by {scan.uploadedBy}
+                    </p>
+                    <p className="muted mt-1 text-[11px]">
+                      File{' '}
+                      <Link
+                        to={`/files/${scan.fileId}`}
+                        className="focus-ring font-mono text-accent"
+                      >
+                        {scan.fileNumber || scan.fileBarcode}
+                      </Link>{' '}
+                      · {scan.fileBarcode}
+                    </p>
+                    {scan.note && <p className="muted mt-1 text-[11px]">{scan.note}</p>}
+                  </div>
+                  {allowed('digitization.review') && (
+                    <div className="flex shrink-0 flex-wrap gap-2">
+                      <Button
+                        icon={<CheckCircle size={16} />}
+                        disabled={busyId === scan.id}
+                        onClick={() => void review(scan, 'Approved')}
+                      >
+                        Approve
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        icon={<XCircle size={16} />}
+                        disabled={busyId === scan.id}
+                        onClick={() => setRejecting(scan)}
+                      >
+                        Reject…
+                      </Button>
                     </div>
-                    <LinkButton
-                      to={`/digitization/${batch.id}`}
-                      variant="ghost"
-                      icon={<FolderOpen size={16} />}
-                    >
-                      Open batch
-                    </LinkButton>
-                  </div>
-                  <div className="mt-5 grid gap-3 sm:grid-cols-3">
-                    <Progress label="Approved" value={approved} total={batch.pages.length} />
-                    <Progress
-                      label="Rejected"
-                      value={rejected}
-                      total={batch.pages.length}
-                      tone="danger"
-                    />
-                    <Progress
-                      label="Pending"
-                      value={review}
-                      total={batch.pages.length}
-                      tone="warning"
-                    />
-                  </div>
-                </li>
-              );
-            })}
+                  )}
+                </div>
+              </li>
+            ))}
           </ul>
         )}
       </Card>
 
-      <Card>
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <p className="text-sm font-semibold">Why versioning matters here</p>
-            <p className="muted mt-1 text-sm leading-6">
-              A page is keyed by{' '}
-              <span className="font-mono">{barcode ? 'file_barcode' : 'file number'} + pageno</span>
-              . Uploading the same pair again stores the next{' '}
-              <span className="font-mono">version</span> and marks it for review instead of silently
-              replacing a page that may already be approved.
-            </p>
-          </div>
-          <Link to="/files" className="focus-ring text-xs font-semibold text-accent">
-            Open the registry
-          </Link>
-        </div>
-      </Card>
-
-      <Modal open={creating} onClose={() => setCreating(false)} title="New digitization batch">
-        <BatchForm
-          employees={employeeOptions.map((employee) => ({
-            code: employee.employeeCode,
-            name: employee.name,
-            status: employee.status,
-          }))}
-          onSubmit={async (input) => {
-            const result = await service.digitization.createBatch(input);
-            if (!result.ok) {
-              setFlash({ tone: 'danger', text: result.error });
-              return;
-            }
-            setCreating(false);
-            setFlash({
-              tone: 'success',
-              text: `${result.value.code} opened for ${result.value.employeeName}.`,
-            });
-            // A new batch changes what the list should be showing.
-            reload();
-          }}
-        />
+      <Modal
+        open={rejecting !== null}
+        onClose={() => setRejecting(null)}
+        title={`Reject ${rejecting?.filename ?? ''}`}
+      >
+        {rejecting && (
+          <RejectForm
+            onSubmit={async (note) => {
+              await review(rejecting, 'Rejected', note);
+              setRejecting(null);
+            }}
+          />
+        )}
       </Modal>
-    </div>
-  );
-}
-
-function Progress({
-  label,
-  value,
-  total,
-  tone = 'accent',
-}: {
-  label: string;
-  value: number;
-  total: number;
-  tone?: 'accent' | 'warning' | 'danger';
-}) {
-  const pct = total === 0 ? 0 : Math.round((value / total) * 100);
-  const colour =
-    tone === 'danger'
-      ? 'var(--rr-danger)'
-      : tone === 'warning'
-        ? 'var(--rr-warning)'
-        : 'var(--rr-accent)';
-  return (
-    <div className="rounded-xl bg-[var(--rr-bg)] p-3">
-      <div className="flex justify-between text-xs">
-        <span className="font-semibold">{label}</span>
-        <span className="muted">{pct}%</span>
-      </div>
-      <div className="mt-2 h-2 rounded-full bg-[var(--rr-surface-2)]">
-        <div className="h-full rounded-full" style={{ width: `${pct}%`, background: colour }} />
-      </div>
-      <p className="muted mt-1 text-[10px]">
-        {value} / {total} page(s)
-      </p>
     </div>
   );
 }
@@ -299,11 +169,13 @@ function Metric({
   icon,
   label,
   value,
+  hint,
   tone = 'neutral',
 }: {
   icon: ReactNode;
   label: string;
   value: string;
+  hint?: string;
   tone?: 'neutral' | 'warning';
 }) {
   return (
@@ -319,24 +191,17 @@ function Metric({
         >
           {icon}
         </div>
-        <div>
+        <div className="min-w-0">
           <p className="muted text-[10px] uppercase tracking-wider">{label}</p>
           <p className="mt-1 text-xl font-semibold">{value}</p>
+          {hint && <p className="muted mt-0.5 text-[10px]">{hint}</p>}
         </div>
       </div>
     </Card>
   );
 }
 
-function BatchForm({
-  employees,
-  onSubmit,
-}: {
-  employees: Array<{ code: string; name: string; status: string }>;
-  onSubmit: (input: { employeeCode: string; folder: DigitizationFolder; note: string }) => void;
-}) {
-  const [employeeCode, setEmployeeCode] = useState('');
-  const [folder, setFolder] = useState<DigitizationFolder>('service_book');
+function RejectForm({ onSubmit }: { onSubmit: (note: string) => void }) {
   const [note, setNote] = useState('');
 
   return (
@@ -344,53 +209,19 @@ function BatchForm({
       className="space-y-4"
       onSubmit={(event) => {
         event.preventDefault();
-        onSubmit({ employeeCode, folder, note });
+        onSubmit(note);
       }}
     >
-      <Field label="Employee" htmlFor="batch-employee" required>
-        <SelectInput
-          id="batch-employee"
-          value={employeeCode}
-          onChange={(event) => setEmployeeCode(event.target.value)}
-        >
-          <option value="">Select an employee</option>
-          {employees
-            .filter((item) => item.status === 'Active')
-            .map((item) => (
-              <option key={item.code} value={item.code}>
-                {item.code} · {item.name}
-              </option>
-            ))}
-        </SelectInput>
-      </Field>
-      <Field
-        label="Document folder"
-        htmlFor="batch-folder"
-        required
-        hint="One open batch per employee and folder."
-      >
-        <SelectInput
-          id="batch-folder"
-          value={folder}
-          onChange={(event) => setFolder(event.target.value as DigitizationFolder)}
-        >
-          {DIGITIZATION_FOLDERS.map((item) => (
-            <option key={item} value={item}>
-              {FOLDER_LABELS[item]}
-            </option>
-          ))}
-        </SelectInput>
-      </Field>
-      <Field label="Note" htmlFor="batch-note">
+      <Field label="Rejection reason" htmlFor="reject-note" required>
         <TextArea
-          id="batch-note"
+          id="reject-note"
           value={note}
           onChange={(event) => setNote(event.target.value)}
-          placeholder="Requisition reference, supervisor note…"
+          placeholder="Skew beyond tolerance, missing half the page…"
         />
       </Field>
-      <Button type="submit" icon={<Archive size={17} />}>
-        Open batch
+      <Button type="submit" disabled={!note.trim()}>
+        Reject page
       </Button>
     </form>
   );

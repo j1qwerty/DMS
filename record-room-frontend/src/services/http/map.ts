@@ -19,9 +19,8 @@ import type {
   BulkImportJob,
   BulkImportRow,
   DashboardStats,
-  DigitizationBatch,
-  DigitizationPage,
   Employee,
+  FileScan,
   IssueLine,
   IssueRecord,
   LoginHistoryEntry,
@@ -348,42 +347,26 @@ export function toEmployee(dto: Record<string, unknown>): Employee {
 
 // ----------------------------------------------------------- digitization
 
-export function toPage(dto: Record<string, unknown>): DigitizationPage {
+export function toFileScan(dto: Record<string, unknown>): FileScan {
   return {
     id: toId(dto.id as number),
-    batchId: toId(dto.batchId as number),
+    fileId: dto.fileId == null ? '' : toId(dto.fileId as number),
     fileBarcode: str(dto.fileBarcode),
     fileNumber: dto.fileNumber ? str(dto.fileNumber) : undefined,
     filename: str(dto.fileName),
     pageNo: num(dto.pageNo, 1),
     version: num(dto.version, 1),
-    status: str(dto.status) as DigitizationPage['status'],
+    documentSize: str(dto.documentSize),
+    status: str(dto.status) as FileScan['status'],
     note: str(dto.note),
     uploadedAt: str(dto.uploadedAt),
     uploadedBy: str(dto.uploadedBy),
-    bulk: dto.bulk === true,
     hasDocument: dto.hasDocument === true,
     contentType: dto.contentType ? str(dto.contentType) : undefined,
     sizeBytes: dto.sizeBytes == null ? undefined : num(dto.sizeBytes),
     sha256: dto.sha256 ? str(dto.sha256) : undefined,
     pageCount: dto.pageCount == null ? undefined : num(dto.pageCount),
     pageIndex: dto.pageIndex == null ? undefined : num(dto.pageIndex),
-  };
-}
-
-export function toBatch(dto: Record<string, unknown>): DigitizationBatch {
-  return {
-    id: toId(dto.id as number),
-    code: str(dto.code),
-    employeeCode: str(dto.employeeCode),
-    employeeName: str(dto.employeeName),
-    department: str(dto.department),
-    folder: str(dto.folder) as DigitizationBatch['folder'],
-    status: str(dto.status) as DigitizationBatch['status'],
-    pages: (Array.isArray(dto.pages) ? (dto.pages as Record<string, unknown>[]) : []).map(toPage),
-    createdAt: str(dto.createdAt),
-    createdBy: str(dto.createdBy),
-    submittedAt: dto.submittedAt ? str(dto.submittedAt) : null,
   };
 }
 

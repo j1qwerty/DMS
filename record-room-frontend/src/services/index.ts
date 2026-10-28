@@ -21,7 +21,7 @@ import { authService } from './impl/auth';
 import { barcodesService } from './impl/barcodes';
 import { bulkService } from './impl/bulk';
 import { dashboardService } from './impl/dashboard';
-import { digitizationService } from './impl/digitization';
+import { scansService } from './impl/scans';
 import { employeesService } from './impl/employees';
 import { filesService } from './impl/files';
 import { issuesService } from './impl/issues';
@@ -61,7 +61,7 @@ const localService: RecordRoomService = {
   issues: issuesService,
   movements: movementsService,
   employees: employeesService,
-  digitization: digitizationService,
+  digitization: scansService,
   uploads: uploadsService,
   bulk: bulkService,
   audit: auditService,

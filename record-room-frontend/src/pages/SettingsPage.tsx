@@ -172,10 +172,7 @@ export function SettingsPage() {
             <Count label="Movement events" value={db.movements.length} />
             <Count label="Audit entries" value={db.audit.length} />
             <Count label="Employees" value={db.employees.length} />
-            <Count
-              label="Digitization pages"
-              value={db.batches.reduce((sum, batch) => sum + batch.pages.length, 0)}
-            />
+            <Count label="Digitization pages" value={db.scanPages.length} />
           </dl>
           <Button
             className="mt-5 w-full"

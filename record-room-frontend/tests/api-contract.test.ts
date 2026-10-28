@@ -304,6 +304,20 @@ describeIfLive('dashboard, reports and barcodes against the API', () => {
     expect(await httpDigitizationService.pendingReviewCount()).toBeGreaterThanOrEqual(0);
   });
 
+  it('exposes scan pages per file and in the pending queue', async () => {
+    const files = await httpFilesService.list({ pageSize: 5 });
+    expect(files.items.length).toBeGreaterThan(0);
+    const scans = await httpDigitizationService.list(files.items[0].id);
+    expect(Array.isArray(scans)).toBe(true);
+    const queue = await httpDigitizationService.pending({ search: files.items[0].fileBarcode });
+    for (const scan of queue) {
+      expect(scan.status).toBe('Pending review');
+      // The queue links to the file page, so the id has to survive the
+      // adapter round-trip as a usable route param.
+      expect(scan.fileId).not.toBe('');
+    }
+  });
+
   it('lists employees with a valid role and status word', async () => {
     const page = await httpEmployeesService.list({ pageSize: 5 });
     expect(page.items.length).toBeGreaterThan(0);

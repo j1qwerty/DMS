@@ -286,41 +286,29 @@ export interface AuditEntry {
 
 // -------------------------------------------------------------- digitization
 
-export type DigitizationFolder = 'service_book' | 'leave_report' | 'sr' | 'apar';
-
-export const DIGITIZATION_FOLDERS: DigitizationFolder[] = [
-  'service_book',
-  'leave_report',
-  'sr',
-  'apar',
-];
-
-export const FOLDER_LABELS: Record<DigitizationFolder, string> = {
-  service_book: 'Service book',
-  leave_report: 'Leave report',
-  sr: 'Service record',
-  apar: 'Annual performance appraisal',
-};
-
 export type PageStatus = 'Pending review' | 'Approved' | 'Rejected' | 'Duplicate' | 'Active';
 
-export type BatchStatus = 'In progress' | 'Submitted' | 'Approved' | 'Partially approved';
-
-/** `upload_file` — one row per scanned page + version. */
-export interface DigitizationPage {
+/**
+ * One scanned page of a file (page-by-page digitization). Scans live on the
+ * file — there are no employee batches — and the Digitization section is the
+ * pending-review queue across files.
+ */
+export interface FileScan {
   id: string;
-  batchId: string;
+  /** Frontend file id (route param); '' when the enrich pass could not resolve the barcode. */
+  fileId: string;
   fileBarcode: string;
   /** File number for display. The API fills it so barcode-free screens need no lookup. */
   fileNumber?: string;
   filename: string;
   pageNo: number;
   version: number;
+  /** Physical sheet size; same options as the file (A0–A4, Other). */
+  documentSize: string;
   status: PageStatus;
   note: string;
   uploadedAt: string;
   uploadedBy: string;
-  bulk: boolean;
   hasDocument?: boolean;
   contentType?: string;
   sizeBytes?: number;
@@ -329,20 +317,6 @@ export interface DigitizationPage {
   pageCount?: number;
   /** 1-based page inside a multi-page PDF that this row represents. */
   pageIndex?: number;
-}
-
-export interface DigitizationBatch {
-  id: string;
-  code: string;
-  employeeCode: string;
-  employeeName: string;
-  department: string;
-  folder: DigitizationFolder;
-  status: BatchStatus;
-  pages: DigitizationPage[];
-  createdAt: string;
-  createdBy: string;
-  submittedAt: string | null;
 }
 
 /** `upload_map` — scanned room/area maps attached to a file. */

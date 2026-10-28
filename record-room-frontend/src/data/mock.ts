@@ -12,10 +12,8 @@ import type {
   AuditEntry,
   BarcodeJob,
   BulkImportJob,
-  DigitizationBatch,
-  DigitizationFolder,
-  DigitizationPage,
   Employee,
+  FileScan,
   GalleryItem,
   IssueRecord,
   LoginHistoryEntry,
@@ -620,7 +618,7 @@ const fileSeeds: FileSeed[] = [
     createdDaysAgo: 620,
     movedDaysAgo: 3,
     movedBy: 'operator',
-    locationOverride: 'Digitization desk · Batch 041',
+    locationOverride: 'Digitization desk · in review',
   },
   {
     barcode: 'RF-0000111198',
@@ -803,7 +801,7 @@ const fileSeeds: FileSeed[] = [
     createdDaysAgo: 1995,
     movedDaysAgo: 6,
     movedBy: 'operator',
-    locationOverride: 'Digitization desk · Batch 040',
+    locationOverride: 'Digitization desk · in review',
   },
   {
     barcode: 'RF-0000111999',
@@ -1067,7 +1065,7 @@ export const movements: MovementEvent[] = [
     to: 'Digitization desk',
     actor: 'operator',
     at: iso(3, 10, 45).slice(0, 16).replace('T', ' '),
-    detail: 'Released to batch 041 for scanning.',
+    detail: 'Released to the digitization desk for scanning.',
   },
   {
     id: 'mv-007',
@@ -1102,15 +1100,15 @@ export const auditLog: AuditEntry[] = [
   {
     id: 'au-002',
     action: 'Approve',
-    entity: 'DigitizationBatch',
-    entityId: 'batch-041',
+    entity: 'FileScanPage',
+    entityId: 'RF-0000199103',
     actor: 'supervisor',
     role: 'Supervisor',
     at: iso(0, 10, 2),
     ip: '203.0.113.88',
-    before: 'status=Submitted',
+    before: 'status=Pending review',
     after: 'status=Approved',
-    summary: 'Batch 041 approved with 4 pages',
+    summary: 'RF-0000199103: 4 page(s) approved',
   },
   {
     id: 'au-003',
@@ -1193,8 +1191,8 @@ export const auditLog: AuditEntry[] = [
   {
     id: 'au-009',
     action: 'Reject',
-    entity: 'DigitizationPage',
-    entityId: 'page-040-2',
+    entity: 'FileScanPage',
+    entityId: 'RF-0000111881',
     actor: 'supervisor',
     role: 'Supervisor',
     at: iso(2, 15, 12),
@@ -1246,114 +1244,49 @@ export const auditLog: AuditEntry[] = [
 
 // -------------------------------------------------------------- digitization
 
+/**
+ * File-centric scan pages (no batches): one file fully approved, one partially
+ * reviewed, one pending so the review queue has work to show.
+ */
 function page(
-  batchId: string,
   fileBarcodeValue: string,
   pageNo: number,
   version: number,
-  status: DigitizationPage['status'],
+  status: FileScan['status'],
   uploadedDaysAgo: number,
   note = '',
-  bulk = false,
-): DigitizationPage {
+): FileScan {
   return {
-    id: `page-${batchId}-${pageNo}-v${version}`,
-    batchId,
+    id: `scan-${fileBarcodeValue}-${pageNo}-v${version}`,
+    fileId: files.find((f) => f.fileBarcode === fileBarcodeValue)?.id ?? '',
     fileBarcode: fileBarcodeValue,
     filename: `${fileBarcodeValue}-FILE-${pageNo}${version > 1 ? `-V${version}` : ''}.pdf`,
     pageNo,
     version,
+    documentSize: files.find((f) => f.fileBarcode === fileBarcodeValue)?.documentSize ?? 'Other',
     status,
     note,
     uploadedAt: iso(uploadedDaysAgo, 10, 30 + (pageNo % 30))
       .slice(0, 16)
       .replace('T', ' '),
     uploadedBy: 'operator',
-    bulk,
   };
 }
 
-const batches: Array<{
-  id: string;
-  code: string;
-  employeeCode: string;
-  folder: DigitizationFolder;
-  status: DigitizationBatch['status'];
-  createdDaysAgo: number;
-  pages: DigitizationPage[];
-}> = [
-  {
-    id: 'batch-041',
-    code: 'BATCH-041',
-    employeeCode: 'EMP0003',
-    folder: 'apar',
-    status: 'Approved',
-    createdDaysAgo: 6,
-    pages: [
-      page('batch-041', 'RF-0000199103', 1, 1, 'Approved', 5),
-      page('batch-041', 'RF-0000199103', 2, 1, 'Approved', 5),
-      page(
-        'batch-041',
-        'RF-0000199103',
-        1,
-        2,
-        'Approved',
-        4,
-        'Rescanned after OCR quality failure',
-      ),
-      page('batch-041', 'RF-0000199103', 3, 1, 'Approved', 4),
-    ],
-  },
-  {
-    id: 'batch-040',
-    code: 'BATCH-040',
-    employeeCode: 'EMP0004',
-    folder: 'leave_report',
-    status: 'Partially approved',
-    createdDaysAgo: 3,
-    pages: [
-      page('batch-040', 'RF-0000111881', 1, 1, 'Approved', 3),
-      page(
-        'batch-040',
-        'RF-0000111881',
-        2,
-        1,
-        'Rejected',
-        3,
-        'Skew beyond 5 degree tolerance',
-        true,
-      ),
-      page('batch-040', 'RF-0000111881', 3, 1, 'Pending review', 3),
-      page('batch-041', 'RF-0000199103', 2, 1, 'Duplicate', 2, 'Duplicate of page 2'),
-    ],
-  },
-  {
-    id: 'batch-039',
-    code: 'BATCH-039',
-    employeeCode: 'EMP0001',
-    folder: 'service_book',
-    status: 'Submitted',
-    createdDaysAgo: 1,
-    pages: [
-      page('batch-039', 'RF-0000123144', 1, 1, 'Pending review', 1),
-      page('batch-039', 'RF-0000123144', 2, 1, 'Pending review', 1),
-    ],
-  },
+export const fileScans: FileScan[] = [
+  // RF-0000199103: digitized and fully approved (page 1 was re-scanned once).
+  page('RF-0000199103', 1, 1, 'Approved', 5),
+  page('RF-0000199103', 1, 2, 'Approved', 4, 'Rescanned after OCR quality failure'),
+  page('RF-0000199103', 2, 1, 'Approved', 5),
+  page('RF-0000199103', 3, 1, 'Approved', 4),
+  // RF-0000111881: partially reviewed.
+  page('RF-0000111881', 1, 1, 'Approved', 3),
+  page('RF-0000111881', 2, 1, 'Rejected', 3, 'Skew beyond 5 degree tolerance'),
+  page('RF-0000111881', 3, 1, 'Pending review', 3),
+  // RF-0000123144: freshly scanned, waiting for review.
+  page('RF-0000123144', 1, 1, 'Pending review', 1),
+  page('RF-0000123144', 2, 1, 'Pending review', 1),
 ];
-
-export const digitizationBatches: DigitizationBatch[] = batches.map((b) => ({
-  id: b.id,
-  code: b.code,
-  employeeCode: b.employeeCode,
-  employeeName: employees.find((e) => e.employeeCode === b.employeeCode)?.name ?? '',
-  department: employees.find((e) => e.employeeCode === b.employeeCode)?.department ?? '',
-  folder: b.folder,
-  status: b.status,
-  pages: b.pages,
-  createdAt: day(b.createdDaysAgo),
-  createdBy: 'operator',
-  submittedAt: b.status === 'Submitted' ? day(b.createdDaysAgo) : null,
-}));
 
 // ------------------------------------------------------------ map uploads
 
@@ -1492,8 +1425,8 @@ export const galleryItems: GalleryItem[] = [
   },
   {
     id: 'g3',
-    title: 'Digitization batches',
-    text: 'Operators can monitor OCR, quality checks and exceptions in one place.',
+    title: 'Scan review queue',
+    text: 'Operators can monitor page scans, quality checks and exceptions in one place.',
     height: 290,
   },
   {

@@ -12,7 +12,6 @@ import {
   auditLog,
   barcodeJobs,
   bulkImportJobs,
-  digitizationBatches,
   employees,
   files,
   issues,
@@ -21,6 +20,7 @@ import {
   movements,
   rooms,
   users,
+  fileScans,
 } from '../data/mock';
 import type {
   AppUser,
@@ -28,8 +28,8 @@ import type {
   AuditEntry,
   BarcodeJob,
   BulkImportJob,
-  DigitizationBatch,
   Employee,
+  FileScan,
   IssueRecord,
   LoginHistoryEntry,
   MapUpload,
@@ -59,7 +59,7 @@ export interface DbShape {
   issues: IssueRecord[];
   movements: MovementEvent[];
   audit: AuditEntry[];
-  batches: DigitizationBatch[];
+  scanPages: FileScan[];
   maps: MapUpload[];
   barcodeJobs: BarcodeJob[];
   bulkJobs: BulkImportJob[];
@@ -81,7 +81,7 @@ export function createSeed(): DbShape {
     issues: structuredClone(issues),
     movements: structuredClone(movements),
     audit: structuredClone(auditLog),
-    batches: structuredClone(digitizationBatches),
+    scanPages: structuredClone(fileScans),
     maps: structuredClone(mapUploads),
     barcodeJobs: structuredClone(barcodeJobs),
     bulkJobs: structuredClone(bulkImportJobs),
@@ -124,7 +124,9 @@ class Store {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return createSeed();
       const parsed: unknown = JSON.parse(raw);
-      return isDbShape(parsed) ? parsed : createSeed();
+      // Older snapshots may predate a key; the seed fills in whatever the
+      // stored shape is missing instead of crashing on undefined arrays.
+      return isDbShape(parsed) ? { ...createSeed(), ...parsed } : createSeed();
     } catch {
       return createSeed();
     }

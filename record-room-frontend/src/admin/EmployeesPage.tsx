@@ -30,8 +30,8 @@ type FormValue = Omit<Employee, 'id' | 'createdAt' | 'modifiedAt' | 'status'> & 
 /**
  * `drm_employee` registry (legacy `User.php: employee`).
  *
- * Employee codes drive the digitization folder paths, so a code change also
- * re-points the batch display names inside the same write.
+ * Employee codes are the walk-in borrower identity and appear on issue
+ * receipts; they no longer own digitization batches.
  */
 export function EmployeesPage() {
   const service = useService();
@@ -85,7 +85,7 @@ export function EmployeesPage() {
       <PageHeader
         kicker="Administration"
         title="Employees"
-        description="The employee master that digitization batches, issue receipts and walk-in borrower codes all reference."
+        description="The employee master that issue receipts and walk-in borrower codes all reference."
         actions={
           allowed('employees.edit') && (
             <Button icon={<Plus size={17} />} onClick={() => setCreating(true)}>

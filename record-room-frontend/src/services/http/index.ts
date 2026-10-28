@@ -13,7 +13,7 @@ import type {
   BarcodeApi,
   BulkApi,
   DashboardApi,
-  DigitizationApi,
+  ScanApi,
   EmployeesApi,
   FilesApi,
   InquiriesApi,
@@ -45,15 +45,14 @@ import {
   toArea,
   toAuditEntry,
   toBarcodeJob,
-  toBatch,
   toBulkJob,
   toEmployee,
   toFile,
+  toFileScan,
   toIssue,
   toLoginHistory,
   toMapUpload,
   toMovement,
-  toPage,
   toPayload,
   toReportDefinition,
   toRecordFileDocument,
@@ -65,7 +64,6 @@ import {
 import type {
   Area,
   BarcodeSubject,
-  DigitizationBatch,
   FileCreateInput,
   RecordFile,
   ReportDefinition,
@@ -658,78 +656,56 @@ export const httpEmployeesService: EmployeesApi = {
 
 // ----------------------------------------------------------- digitization
 
-export const httpDigitizationService: DigitizationApi = {
-  async batches(query = {}) {
-    return list(
-      await get<Dto[]>(
-        `/api/digitization/batches${qs({
-          employeeCode: query.employeeCode,
-          folder: query.folder,
-          status: query.status,
-          search: query.search,
-        })}`,
-      ),
-      toBatch,
-    ) as DigitizationBatch[];
+export const httpDigitizationService: ScanApi = {
+  async list(fileId) {
+    return (await get<Dto[]>(`/api/files/${fileId}/scans`)).map(toFileScan);
   },
 
-  async batch(id) {
-    try {
-      return toBatch(await get<Dto>(`/api/digitization/batches/${id}`));
-    } catch {
-      return null;
-    }
-  },
-
-  async createBatch(input) {
-    const result = await attempt<Dto>('POST', '/api/digitization/batches', input);
-    return result.ok ? ok(toBatch(result.value)) : result;
-  },
-
-  // Pure derivation, kept synchronous in the contract and here.
-  folderPath(batch) {
-    return `uploads/${batch.employeeCode}/${batch.folder}/`;
-  },
-
-  async uploadPage(batchId, input) {
-    const result = await attempt<Dto>('POST', `/api/digitization/batches/${batchId}/pages`, {
-      fileBarcode: input.fileBarcode,
-      pageNo: input.pageNo,
+  async add(fileId, input) {
+    const result = await attempt<Dto>('POST', `/api/files/${fileId}/scans`, {
       fileName: input.filename,
-      bulk: input.bulk,
+      pageNo: input.pageNo,
+      documentSize: input.documentSize,
     });
-    return result.ok ? ok(toPage(result.value)) : result;
+    return result.ok ? ok(toFileScan(result.value)) : result;
   },
 
-  async uploadPageDocument(pageId, file) {
+  async addDocument(scanId, file) {
     const body = new FormData();
     body.append('document', file, file.name);
-    const result = await attemptForm<Dto>(`/api/digitization/pages/${pageId}/document`, body);
-    return result.ok ? ok(toPage(result.value)) : result;
+    const result = await attemptForm<Dto>(`/api/scans/${scanId}/document`, body);
+    return result.ok ? ok(toFileScan(result.value)) : result;
   },
 
-  async pageBlob(pageId) {
-    return getBlob(`/api/digitization/pages/${pageId}/content`);
+  async scanBlob(scanId) {
+    return getBlob(`/api/scans/${scanId}/content`);
   },
 
-  async removePage(pageId) {
-    return wrapTrue(await attempt<Dto>('DELETE', `/api/digitization/pages/${pageId}`));
+  async remove(scanId) {
+    return wrapTrue(await attempt<Dto>('DELETE', `/api/scans/${scanId}`));
   },
 
-  async reviewPage(pageId, decision, note) {
-    const result = await attempt<Dto>('POST', `/api/digitization/pages/${pageId}/review`, {
+  async review(scanId, decision, note) {
+    const result = await attempt<Dto>('POST', `/api/scans/${scanId}/review`, {
       decision,
       note,
     });
-    return result.ok ? ok(toPage(result.value)) : result;
+    return result.ok ? ok(toFileScan(result.value)) : result;
   },
 
-  async reviewBatch(batchId, decision, note) {
-    const result = await attempt<Dto>('POST', `/api/digitization/batches/${batchId}/review`, {
+  async reviewAll(fileId, decision, note) {
+    // The API answers with the number of pages that moved, not a row.
+    const result = await attempt<number>('POST', `/api/files/${fileId}/scans/review-all`, {
       decision,
       note,
     });
-    return result.ok ? ok(toBatch(result.value)) : result;
+    return result.ok ? ok(result.value) : result;
+  },
+
+  async pending(query = {}) {
+    return (await get<Dto[]>(`/api/digitization/pending${qs({ search: query.search })}`)).map(
+      toFileScan,
+    );
   },
 
   async pendingReviewCount() {

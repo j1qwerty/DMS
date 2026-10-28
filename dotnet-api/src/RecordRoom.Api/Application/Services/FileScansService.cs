@@ -119,34 +119,65 @@ public sealed class FileScansService(
     public async Task<Result<FileScanPageDto>> AddDocumentAsync(
         long scanId, Microsoft.AspNetCore.Http.IFormFile? document, CancellationToken ct = default)
     {
-        var original = await db.ScanPages.FirstOrDefaultAsync(p => p.Id == scanId, ct);
-        if (original is null) return Result<FileScanPageDto>.Fail("Scan page not found.", "scanId");
+        var page = await db.ScanPages.FirstOrDefaultAsync(p => p.Id == scanId, ct);
+        if (page is null) return Result<FileScanPageDto>.Fail("Scan page not found.", "scanId");
 
         var storedResult = await documentStore.SaveAsync(document, ct);
         if (!storedResult.IsSuccess) return Result<FileScanPageDto>.Fail(storedResult.Errors);
         var stored = storedResult.Value;
-        var file = await db.Files.AsNoTracking().FirstAsync(f => f.Barcode == original.Barcode, ct);
+
+        // A metadata-only registration is filled in place: registering the page
+        // and attaching its scan is one page, not two versions. Attaching a
+        // document to a row that already has one is a rescan and becomes the
+        // next version.
+        if (page.StorageKey is null)
+        {
+            var beforeFile = page.FileName;
+            page.FileName = stored.OriginalFileName;
+            page.StorageKey = stored.StorageKey;
+            page.ContentType = stored.ContentType;
+            page.SizeBytes = stored.SizeBytes;
+            page.Sha256 = stored.Sha256;
+            page.PageCount = stored.PageCount;
+            await audit.LogAsync(db, AuditAction.Update, "FileScanPage", page.Id.ToString(),
+                beforeFile,
+                $"{stored.OriginalFileName}; bytes={stored.SizeBytes}; sha256={stored.Sha256}",
+                $"Attached scan for page {page.PageNo} of {page.Barcode}", ct);
+            try { await db.SaveChangesAsync(ct); }
+            catch (DbUpdateException ex)
+            {
+                logger.LogWarning(ex, "Could not attach document to scan {ScanId}.", scanId);
+                await TryDeleteAsync(stored.StorageKey);
+                return Result<FileScanPageDto>.Fail("This page was updated by another upload. Please retry.", "document");
+            }
+            catch { await TryDeleteAsync(stored.StorageKey); throw; }
+            await audit.AnnounceAsync(RealtimeChannels.Digitization, "page.added", page.Id.ToString(),
+                $"{stored.OriginalFileName} attached to {page.Barcode} page {page.PageNo}");
+            var fileForRow = await db.Files.AsNoTracking().FirstAsync(f => f.Barcode == page.Barcode, ct);
+            return Result<FileScanPageDto>.Ok(
+                (await fileRefs.EnrichAsync(new[] { ToPage(page, fileForRow.Id) }, ct))[0]);
+        }
 
         var version = (await db.ScanPages.AsNoTracking()
-            .Where(p => p.Barcode == original.Barcode && p.PageNo == original.PageNo)
+            .Where(p => p.Barcode == page.Barcode && p.PageNo == page.PageNo)
             .Select(p => (int?)p.Version).MaxAsync(ct) ?? 0) + 1;
         var hasActive = await db.ScanPages.AnyAsync(p =>
-            p.Barcode == original.Barcode && p.PageNo == original.PageNo && p.Status == PageStatus.Active, ct);
-        var page = new FileScanPage
+            p.Barcode == page.Barcode && p.PageNo == page.PageNo && p.Status == PageStatus.Active, ct);
+        var rescan = new FileScanPage
         {
-            Barcode = original.Barcode, FileName = stored.OriginalFileName,
-            PageNo = original.PageNo, Version = version, DocumentSize = original.DocumentSize,
+            Barcode = page.Barcode, FileName = stored.OriginalFileName,
+            PageNo = page.PageNo, Version = version, DocumentSize = page.DocumentSize,
             Status = version > 1 && hasActive ? PageStatus.Duplicate : PageStatus.PendingReview,
-            Note = $"Uploaded document version {version} for page {original.PageNo}.",
+            Note = $"Uploaded document version {version} for page {page.PageNo}.",
             UploadedAt = DateTime.UtcNow, UploadedBy = current.UserName,
             StorageKey = stored.StorageKey, ContentType = stored.ContentType, SizeBytes = stored.SizeBytes, Sha256 = stored.Sha256,
             PageCount = stored.PageCount
         };
-        db.ScanPages.Add(page);
+        db.ScanPages.Add(rescan);
         await audit.LogAsync(db, AuditAction.Create, "FileScanPage", "pending",
             $"page={page.PageNo}; version={version - 1}",
             $"{stored.OriginalFileName}; version={version}; bytes={stored.SizeBytes}; sha256={stored.Sha256}",
-            $"Uploaded {stored.OriginalFileName} as version {version} for {original.Barcode}", ct);
+            $"Uploaded {stored.OriginalFileName} as version {version} for {page.Barcode}", ct);
         try { await db.SaveChangesAsync(ct); }
         catch (DbUpdateException ex)
         {
@@ -155,9 +186,11 @@ public sealed class FileScansService(
             return Result<FileScanPageDto>.Fail("This page was updated by another upload. Please retry.", "document");
         }
         catch { await TryDeleteAsync(stored.StorageKey); throw; }
-        await audit.AnnounceAsync(RealtimeChannels.Digitization, "page.added", page.Id.ToString(),
+        await audit.AnnounceAsync(RealtimeChannels.Digitization, "page.added", rescan.Id.ToString(),
             $"{stored.OriginalFileName} added as version {version}");
-        return Result<FileScanPageDto>.Ok((await fileRefs.EnrichAsync(new[] { ToPage(page, file.Id) }, ct))[0]);
+        var fileId = await db.Files.AsNoTracking().Where(f => f.Barcode == page.Barcode)
+            .Select(f => (int?)f.Id).FirstOrDefaultAsync(ct) ?? 0;
+        return Result<FileScanPageDto>.Ok((await fileRefs.EnrichAsync(new[] { ToPage(rescan, fileId) }, ct))[0]);
     }
 
     public async Task<PrivateDocumentContent?> OpenDocumentAsync(long scanId, CancellationToken ct = default)

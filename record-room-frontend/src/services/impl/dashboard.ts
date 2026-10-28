@@ -9,7 +9,6 @@
 import type { DashboardApi } from '../contracts';
 import { store } from '../store';
 import type { DashboardStats, TimelineEvent } from '../../types';
-import { digitizationService } from './digitization';
 import { issuesService } from './issues';
 
 const TOTAL_RECORDS_HISTORICAL = 2_478_450;
@@ -24,7 +23,7 @@ export const dashboardService: DashboardApi = {
       return days <= 0;
     }).length;
 
-    const pages = state.batches.flatMap((batch) => batch.pages);
+    const pages = state.scanPages;
     const approvedPages = pages.filter((page) => page.status === 'Approved').length;
 
     // `Showing 1-6 of 2,478,450` honesty: the registry total is the legacy
@@ -43,7 +42,9 @@ export const dashboardService: DashboardApi = {
       overdueCount: overdue.length,
       roomCount: state.rooms.length,
       activeBorrowers: (await issuesService.borrowers()).length,
-      pendingApprovals: await digitizationService.pendingReviewCount(),
+      pendingApprovals: store
+        .getState()
+        .scanPages.filter((page) => page.status === 'Pending review').length,
     };
   },
 

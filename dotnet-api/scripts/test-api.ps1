@@ -569,9 +569,10 @@ if (-not $SkipDestructive) {
         -H "Authorization: Bearer $admin" `
         -F "document=@$scanPdf;type=application/pdf"
     $uploaded = $raw | ConvertFrom-Json
-    Assert-True ([bool]$uploaded.success) 'the scanned image is attached as a new version'
+    Assert-True ([bool]$uploaded.success) 'the scanned image is attached to the page row'
     $page3 = $uploaded.data
-    Assert-Equal 3 $page3.version 'the attached scan becomes version 3'
+    Assert-Equal $page1.Data.data.id $page3.id 'attaching the scan fills the registration row in place'
+    Assert-Equal 1 $page3.version 'the attached scan keeps version 1'
     Assert-True ($page3.pageCount -eq 1) 'the pdf page count is stored on the scan'
 
     $empAdd = Invoke-Api -Method POST -Path "/api/files/$newFileId/scans" -Token $employeeToken -Body @{
@@ -596,6 +597,12 @@ if (-not $SkipDestructive) {
     }
     Assert-Equal 200 $approved.Status 'a scan page can be approved'
 
+    # A fresh page for the bulk review: the two rows above are already resolved.
+    $page3 = Invoke-Api -Method POST -Path "/api/files/$newFileId/scans" -Token $admin -Body @{
+        fileName = ''; pageNo = 3; documentSize = ''
+    }
+    Assert-Equal 200 $page3.Status 'another page is registered for the bulk review'
+
     # Leave the smoke-test file clean: approve everything pending so repeated
     # runs do not accumulate queue entries.
     $pendingBefore = Invoke-Api -Path '/api/digitization/pending-review-count' -Token $admin
@@ -608,7 +615,7 @@ if (-not $SkipDestructive) {
         decision = 'Approved'; note = ''
     }
     Assert-Equal 200 $reviewAll.Status 'every pending page of a file can be approved at once'
-    Assert-True ($reviewAll.Data.data -ge 1) 'the bulk review reports how many pages moved'
+    Assert-Equal 1 $reviewAll.Data.data 'the bulk review reports how many pages moved'
     $reviewAllAgain = Invoke-Api -Method POST -Path "/api/files/$newFileId/scans/review-all" -Token $admin -Body @{
         decision = 'Approved'; note = ''
     }

@@ -164,8 +164,8 @@ describe('room add / edit / delete', () => {
 describe('hiding internal ids from server sentences', () => {
   it('removes the leading id and keeps the sentence readable', async () => {
     const { hideFileIds } = await freshFeatures();
-    expect(hideFileIds('RF-0000199103 — Released to batch 041.', false)).toBe(
-      'Released to batch 041.',
+    expect(hideFileIds('RF-0000199103 — Released to the digitization desk.', false)).toBe(
+      'Released to the digitization desk.',
     );
     expect(hideFileIds('Moved RF-0000199103 to shelf A', false)).toBe('Moved this file to shelf A');
   });

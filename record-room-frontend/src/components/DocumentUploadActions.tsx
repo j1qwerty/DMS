@@ -177,7 +177,9 @@ export function DocumentUploadActions({
             )}
           </>
         ) : (
-          <span className="muted text-[11px]">No document uploaded for this row yet</span>
+          <span className="muted text-[11px]">
+            No document stored for this row yet — attach the scan to preview or download it
+          </span>
         )}
       </div>
 
@@ -199,7 +201,8 @@ export function DocumentUploadActions({
             disabled={!selected || uploading}
             className="focus-ring inline-flex items-center gap-1 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
           >
-            <UploadSimple size={14} /> {uploading ? 'Uploading…' : 'Upload new version'}
+            <UploadSimple size={14} />{' '}
+            {uploading ? 'Uploading…' : hasDocument ? 'Upload new version' : 'Attach scan'}
           </button>
         </div>
       )}

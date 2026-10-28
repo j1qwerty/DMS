@@ -364,65 +364,67 @@ describe('locations guards', () => {
   });
 });
 
-describe('digitization', () => {
-  it('refuses a page for a barcode that is not registered', async () => {
-    const batch = (await service.digitization.batches())[0];
-    const result = await service.digitization.uploadPage(batch.id, {
-      fileBarcode: 'RF-DOES-NOT-EXIST',
+describe('digitization (scan pages)', () => {
+  it('refuses a page below 1 and an unknown document size', async () => {
+    const target = (await service.files.list({ pageSize: 5 })).items[0];
+    const badNo = await service.digitization.add(target.id, {
+      pageNo: 0,
+      filename: '',
+      documentSize: 'A4',
+    });
+    expect(badNo.ok).toBe(false);
+    const badSize = await service.digitization.add(target.id, {
       pageNo: 1,
       filename: '',
-      bulk: false,
+      documentSize: 'Letter',
     });
-    expect(result.ok).toBe(false);
+    expect(badSize.ok).toBe(false);
   });
 
   it('bumps the version when the same file and page is scanned again', async () => {
-    const employee = (await service.employees.list({ pageSize: 50 })).items[0];
-    const batch = await service.digitization.createBatch({
-      employeeCode: employee.employeeCode,
-      folder: 'apar',
-      note: '',
-    });
-    if (!batch.ok) throw new Error('batch failed');
     const target = (await service.files.list({ pageSize: 5 })).items[0];
-
-    const first = await service.digitization.uploadPage(batch.value.id, {
-      fileBarcode: target.fileBarcode,
+    const first = await service.digitization.add(target.id, {
       pageNo: 1,
       filename: '',
-      bulk: false,
+      documentSize: 'A4',
     });
-    const second = await service.digitization.uploadPage(batch.value.id, {
-      fileBarcode: target.fileBarcode,
+    const second = await service.digitization.add(target.id, {
       pageNo: 1,
       filename: '',
-      bulk: false,
+      documentSize: '',
     });
-    if (!first.ok || !second.ok) throw new Error('upload failed');
+    if (!first.ok || !second.ok) throw new Error('add failed');
     expect(first.value.version).toBe(1);
     expect(second.value.version).toBe(2);
     expect(second.value.note).toContain('Rescan');
+    // A blank size inherits the file's size (which may be 'Other').
+    expect(second.value.documentSize).toBe(target.documentSize || 'Other');
   });
 
-  it('refuses a rejection without a reason', async () => {
-    const batches = await service.digitization.batches();
-    const batch = batches.find((item) =>
-      item.pages.some((page) => page.status === 'Pending review'),
-    );
-    const page = batch?.pages.find((item) => item.status === 'Pending review');
-    if (!page) return;
-    expect((await service.digitization.reviewPage(page.id, 'Rejected', '  ')).ok).toBe(false);
-  });
-
-  it('refuses a second open batch for the same employee and folder', async () => {
-    const existing = (await service.digitization.batches())[0];
-    const result = await service.digitization.createBatch({
-      employeeCode: existing.employeeCode,
-      folder: existing.folder,
-      note: '',
+  it('reviews a page and refuses a rejection without a reason', async () => {
+    const target = (await service.files.list({ pageSize: 5 })).items[0];
+    const added = await service.digitization.add(target.id, {
+      pageNo: 7,
+      filename: '',
+      documentSize: 'A4',
     });
-    if (result.ok) return;
-    expect(result.error).toContain(existing.code);
+    if (!added.ok) throw new Error('add failed');
+    expect((await service.digitization.review(added.value.id, 'Rejected', '  ')).ok).toBe(false);
+    const approved = await service.digitization.review(added.value.id, 'Approved', '');
+    expect(approved.ok && approved.value.status === 'Approved').toBe(true);
+  });
+
+  it('lists the pending queue and review-all moves every pending page', async () => {
+    const target = (await service.files.list({ pageSize: 5 })).items[0];
+    await service.digitization.add(target.id, { pageNo: 8, filename: '', documentSize: 'A4' });
+    await service.digitization.add(target.id, { pageNo: 9, filename: '', documentSize: 'A4' });
+    const queue = await service.digitization.pending({ search: target.fileBarcode });
+    expect(queue.length).toBeGreaterThanOrEqual(2);
+    const moved = await service.digitization.reviewAll(target.id, 'Approved', '');
+    expect(moved.ok && moved.value >= 2).toBe(true);
+    const after = await service.digitization.pending({ search: target.fileBarcode });
+    expect(after.length).toBe(0);
+    expect((await service.digitization.reviewAll(target.id, 'Approved', '')).ok).toBe(false);
   });
 });
 

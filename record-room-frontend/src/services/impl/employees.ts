@@ -127,13 +127,6 @@ export const employeesService: EmployeesApi = {
       const index = draft.employees.findIndex((employee) => employee.id === id);
       if (index < 0) return;
       draft.employees[index] = updated;
-      // Keep digitization batches pointing at a live display name.
-      draft.batches.forEach((batch) => {
-        if (batch.employeeCode === current.employeeCode) {
-          batch.employeeName = updated.name;
-          batch.department = updated.department;
-        }
-      });
       log(draft, {
         action: 'Update',
         entity: 'Employee',
@@ -149,15 +142,6 @@ export const employeesService: EmployeesApi = {
   async remove(id) {
     const current = await employeesService.get(id);
     if (!current) return err('Employee not found.', 'id');
-    const batches = store
-      .getState()
-      .batches.filter((batch) => batch.employeeCode === current.employeeCode);
-    if (batches.length > 0) {
-      return err(
-        `${batches.length} digitization batch(es) reference this employee. Reassign or delete them first.`,
-        'id',
-      );
-    }
     store.update((draft) => {
       draft.employees = draft.employees.filter((employee) => employee.id !== id);
       log(draft, {

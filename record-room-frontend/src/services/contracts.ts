@@ -22,9 +22,6 @@ import type {
   BarcodeSubject,
   BulkImportJob,
   DashboardStats,
-  DigitizationBatch,
-  DigitizationFolder,
-  DigitizationPage,
   Employee,
   FileCreateInput,
   FileStatus,
@@ -46,6 +43,7 @@ import type {
   Shelf,
   StorageStatus,
   StorageUnit,
+  FileScan,
   TimelineEvent,
 } from '../types';
 import type {
@@ -310,45 +308,36 @@ export interface EmployeesApi {
 
 // ---------------------------------------------------------- digitization api
 
-export interface DigitizationQuery {
-  employeeCode?: string;
-  folder?: DigitizationFolder | 'All';
-  status?: DigitizationBatch['status'] | 'All';
-  search?: string;
-}
-
-export interface DigitizationApi {
-  batches(query?: DigitizationQuery): Promise<DigitizationBatch[]>;
-  batch(id: string): Promise<DigitizationBatch | null>;
-  createBatch(input: {
-    employeeCode: string;
-    folder: DigitizationFolder;
-    note: string;
-  }): Promise<Result<DigitizationBatch>>;
-  /**
-   * Legacy per-employee folder: `uploads/<empcode>/<folder>/`.
-   *
-   * Pure derivation from the batch, so it stays synchronous.
-   */
-  folderPath(batch: DigitizationBatch): string;
-  /** Rejects a repeated `fileBarcode` + `pageNo`; bumps `version` on rescan. */
-  uploadPage(
-    batchId: string,
-    input: { fileBarcode: string; pageNo: number; filename: string; bulk: boolean },
-  ): Promise<Result<DigitizationPage>>;
-  uploadPageDocument(pageId: string, file: File): Promise<Result<DigitizationPage>>;
-  pageBlob(pageId: string): Promise<Blob>;
-  removePage(pageId: string): Promise<Result<true>>;
-  reviewPage(
-    pageId: string,
+/**
+ * File-centric digitization (2026-10-28 decision): every file carries its own
+ * scan pages — upload a full PDF (the documents API) or add page-by-page scans
+ * here — and the Digitization section is the pending-review queue across
+ * files. There are no employee batches.
+ */
+export interface ScanApi {
+  /** Every scan page of one file, every status. */
+  list(fileId: string): Promise<FileScan[]>;
+  /** Rejects a repeated file + `pageNo`; bumps `version` on rescan. */
+  add(
+    fileId: string,
+    input: { pageNo: number; filename: string; documentSize: string },
+  ): Promise<Result<FileScan>>;
+  addDocument(scanId: string, file: File): Promise<Result<FileScan>>;
+  scanBlob(scanId: string): Promise<Blob>;
+  remove(scanId: string): Promise<Result<true>>;
+  review(
+    scanId: string,
     decision: 'Approved' | 'Rejected',
     note: string,
-  ): Promise<Result<DigitizationPage>>;
-  reviewBatch(
-    batchId: string,
+  ): Promise<Result<FileScan>>;
+  /** Reviews every pending page of one file at once. */
+  reviewAll(
+    fileId: string,
     decision: 'Approved' | 'Rejected',
     note: string,
-  ): Promise<Result<DigitizationBatch>>;
+  ): Promise<Result<number>>;
+  /** The pending-review queue across all files. */
+  pending(query?: { search?: string }): Promise<FileScan[]>;
   pendingReviewCount(): Promise<number>;
 }
 
@@ -472,7 +461,7 @@ export interface RecordRoomService {
   issues: IssueApi;
   movements: MovementApi;
   employees: EmployeesApi;
-  digitization: DigitizationApi;
+  digitization: ScanApi;
   uploads: UploadsApi;
   bulk: BulkApi;
   audit: AuditApi;
