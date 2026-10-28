@@ -51,9 +51,7 @@ export function RoomDetailPage() {
       <EmptyState
         title={loadingRoom ? 'Opening room…' : 'Room not found'}
         description={
-          loadingRoom
-            ? 'Loading the room layout.'
-            : 'That room id is not in the registry any more.'
+          loadingRoom ? 'Loading the room layout.' : 'That room id is not in the registry any more.'
         }
         action={
           loadingRoom ? undefined : (
@@ -68,9 +66,7 @@ export function RoomDetailPage() {
 
   const filesInRoom = filesPage.items;
   const section = room.sections.find((item) => item.id === sectionId) ?? room.sections[0];
-  const units = room.storageUnits.filter(
-    (item) => !section || item.sectionId === section.id,
-  );
+  const units = room.storageUnits.filter((item) => !section || item.sectionId === section.id);
   const selected = units.find((item) => item.id === unitId) ?? units[0];
 
   return (

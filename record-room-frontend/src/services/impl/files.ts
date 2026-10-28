@@ -165,30 +165,33 @@ export const filesService: FilesApi = {
       });
     }
 
-    // checkShelfBarcode: the shelf must exist and be usable.
-    const shelf = await locationsService.findShelf(input.shelfId);
-    if (!shelf) {
-      issues.push({ field: 'shelfId', message: 'Select a shelf.', severity: 'error' });
-    } else if (shelf.status !== 'Active') {
-      issues.push({
-        field: 'shelfId',
-        message: `${shelf.code} is ${shelf.status.toLowerCase()} and cannot accept new files.`,
-        severity: 'error',
-      });
-    } else if (shelf.occupied >= shelf.capacity) {
-      issues.push({
-        field: 'shelfId',
-        message: `${shelf.code} is full (${shelf.occupied}/${shelf.capacity}).`,
-        severity: 'warning',
-      });
-    }
+    // checkShelfBarcode: placement is optional — only an explicitly chosen
+    // shelf must exist and be usable.
+    if (input.shelfId) {
+      const shelf = await locationsService.findShelf(input.shelfId);
+      if (!shelf) {
+        issues.push({ field: 'shelfId', message: 'Select a shelf.', severity: 'error' });
+      } else if (shelf.status !== 'Active') {
+        issues.push({
+          field: 'shelfId',
+          message: `${shelf.code} is ${shelf.status.toLowerCase()} and cannot accept new files.`,
+          severity: 'error',
+        });
+      } else if (shelf.occupied >= shelf.capacity) {
+        issues.push({
+          field: 'shelfId',
+          message: `${shelf.code} is full (${shelf.occupied}/${shelf.capacity}).`,
+          severity: 'warning',
+        });
+      }
 
-    if (!Number.isFinite(input.position) || input.position < 1 || input.position > MAX_POSITION) {
-      issues.push({
-        field: 'position',
-        message: `Position must be between 1 and ${MAX_POSITION}.`,
-        severity: 'error',
-      });
+      if (!Number.isFinite(input.position) || input.position < 1 || input.position > MAX_POSITION) {
+        issues.push({
+          field: 'position',
+          message: `Position must be between 1 and ${MAX_POSITION}.`,
+          severity: 'error',
+        });
+      }
     }
 
     // getpincode: the area must be a known master area.
@@ -221,13 +224,16 @@ export const filesService: FilesApi = {
     }
 
     const state = store.getState();
+    // Placement is optional (user decision 2026-10-28): an empty shelf id
+    // registers the file as "Not placed"; it can be shelved later via Move.
+    const shelf = input.shelfId ? (await locationsService.findShelf(input.shelfId))! : null;
     const fileBarcode = input.fileBarcode.trim().toUpperCase();
-    const shelf = (await locationsService.findShelf(input.shelfId))!;
-    const unit = state.rooms
-      .flatMap((room) => room.storageUnits)
-      .find((item) => item.id === shelf.almirahId);
-    const room = state.rooms.find((item) => item.id === unit?.roomId);
-    const section = room?.sections.find((item) => item.id === unit?.sectionId);
+    const unit = shelf
+      ? state.rooms.flatMap((room) => room.storageUnits).find((item) => item.id === shelf.almirahId)
+      : undefined;
+    const room = unit ? state.rooms.find((item) => item.id === unit.roomId) : undefined;
+    const section =
+      unit && room ? room.sections.find((item) => item.id === unit.sectionId) : undefined;
     const area = state.areas.find(
       (item) => item.name.toLowerCase() === input.area.trim().toLowerCase(),
     );
@@ -248,16 +254,16 @@ export const filesService: FilesApi = {
       documentSize: input.documentSize ?? 'Other',
       eOfficeReference: input.eOfficeReference?.trim() || undefined,
       status: 'Available',
-      location: locationPath(room, section, unit, shelf),
+      location: shelf ? locationPath(room, section, unit, shelf) : 'Not placed',
       roomId: room?.id ?? '',
       sectionId: section?.id ?? '',
       section: section?.code ?? '',
       almirahId: unit?.id ?? '',
       almirah: unit?.code ?? '',
-      shelfId: shelf.id,
-      shelf: shelf.code,
-      shelfBarcode: shelf.barcode,
-      position: input.position,
+      shelfId: shelf?.id ?? '',
+      shelf: shelf?.code ?? '',
+      shelfBarcode: shelf?.barcode ?? '',
+      position: shelf ? input.position : 0,
       pincode: input.pincode.trim() || area?.pincode || '',
       area: input.area.trim(),
       propertyNo: input.propertyNo.trim(),
@@ -274,11 +280,13 @@ export const filesService: FilesApi = {
 
     store.update((draft) => {
       draft.files.push(file);
-      const targetUnit = draft.rooms
-        .flatMap((item) => item.storageUnits)
-        .find((item) => item.id === shelf.almirahId);
-      const targetShelf = targetUnit?.shelves.find((item) => item.id === shelf.id);
-      if (targetShelf) targetShelf.occupied += 1;
+      if (shelf && unit) {
+        const targetUnit = draft.rooms
+          .flatMap((item) => item.storageUnits)
+          .find((item) => item.id === unit.id);
+        const targetShelf = targetUnit?.shelves.find((item) => item.id === shelf.id);
+        if (targetShelf) targetShelf.occupied += 1;
+      }
 
       draft.movements.unshift({
         id: newId('mv'),
@@ -290,7 +298,9 @@ export const filesService: FilesApi = {
         to: file.location,
         actor: session.userName(),
         at: now,
-        detail: `Registered on shelf ${shelf.code} (barcode ${shelf.barcode}).`,
+        detail: shelf
+          ? `Registered on shelf ${shelf.code} (barcode ${shelf.barcode}).`
+          : 'Registered without physical placement.',
       });
 
       log(draft, {
@@ -298,7 +308,7 @@ export const filesService: FilesApi = {
         entity: 'RecordFile',
         entityId: file.id,
         before: '—',
-        after: `${file.fileBarcode} @ ${file.shelf}`,
+        after: `${file.fileBarcode} @ ${shelf ? shelf.code : 'not placed'}`,
         summary: `Created ${file.fileNumber} — ${file.subject}`,
       });
     });

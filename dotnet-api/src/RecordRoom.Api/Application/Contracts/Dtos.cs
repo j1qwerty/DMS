@@ -156,7 +156,7 @@ public sealed record FileCreateInput(
     string Department,
     int Year,
     string FileType,
-    int ShelfId,
+    int? ShelfId,
     int Position,
     string Pincode,
     string Area,

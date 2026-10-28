@@ -57,8 +57,10 @@ and the done-definitions; this file carries the "is it done yet".
 
 - [x] **Search highlight opaque** — see §3 above
 - [x] **No admin delete for a stored scan version** — full contract-seam change: `files.deleteDocument` in `contracts.ts`, HTTP adapter, in-memory adapter, API `DELETE /api/files/{fileId}/documents/{documentId}` (`[Authorize(Roles = "Admin")]`), trash button on each Scan-versions row (confirm dialog), audit + realtime announce; harness section "File scan versions (upload + admin delete)" asserts employee/operator/supervisor 403 and admin 200; verified live (delete + audit entry) and visually
-- [ ] **Physical placement must be optional on file create** — room/almirah/shelf is optional in the real world; a file can exist in the registry before it is shelved
-  - Decision (2026-10-28): registry row shows "Not placed"; the file page gets a "Place on shelf" action (same modal family as Move); file stays issuable/returnable by barcode scan
+- [x] **Physical placement must be optional on file create** — done 2026-10-28/29, verified live (create RF-0005952914 with no shelf → "Not placed"; issue + return roundtrip; then "Place this file on a shelf" from the file page → full location path, position, shelf barcode)
+  - API: `FileCreateInput.ShelfId` is `int?`; `ValidateCreateAsync` only validates an explicitly chosen shelf; `CreateAsync` is one path with nullable room/section/almirah/shelf, `LocationDisplay = "Not placed"`, occupancy bump + movement/audit/announce conditional
+  - Frontend: create form placement is optional ("Not placed yet" defaults, hints); http adapter sends `shelfId: null` when empty; in-memory adapter mirrors the same guards; file page shows a "Not placed" location card and the relocate card becomes "Place this file on a shelf"
+  - Harness: new "Optional placement" section — unplaced create, issuable-while-unplaced roundtrip, shelved-later via relocate (174/174)
 - [ ] **Digitization is not a separate file kind** — decision (2026-10-28): **file-centric only, batches removed**
   - Every file gets "Add scan": upload a full PDF, or add page-by-page scans (page no + A1/A4/…/map options) straight on the file, with per-page review
   - The employee/folder batch concept is deleted; the Digitization section becomes a pending-review queue across files, not a batch list

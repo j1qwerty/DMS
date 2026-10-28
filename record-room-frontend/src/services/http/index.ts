@@ -345,7 +345,8 @@ function fileBody(input: FileCreateInput): Record<string, unknown> {
       (input.documentSize === 'A0' ? 'Map' : input.fileType === 'Map' ? 'Map' : 'File'),
     documentSize: input.documentSize ?? 'Other',
     eOfficeReference: input.eOfficeReference?.trim() || null,
-    shelfId: toApiId(input.shelfId, 'shelf'),
+    // Placement is optional: an empty selection registers the file unplaced.
+    shelfId: input.shelfId ? toApiId(input.shelfId, 'shelf') : null,
     position: input.position,
     pincode: input.pincode,
     area: input.area,

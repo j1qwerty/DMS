@@ -506,16 +506,25 @@ export function FileDetailPage() {
               <MapPin className="text-accent" size={19} />
             </div>
             <div className="mt-4 rounded-xl bg-accent-soft p-4">
-              <p className="text-sm font-semibold">{file.location}</p>
-              <p className="muted mt-2 text-xs">
-                Approximate shelf position · {file.position}% along shelf
-              </p>
-              <div className="mt-3 h-3 overflow-hidden rounded-full bg-[var(--rr-surface)]">
-                <div
-                  className="h-full rounded-full bg-[var(--rr-accent)]"
-                  style={{ width: `${file.position}%` }}
-                />
-              </div>
+              <p className="text-sm font-semibold">{file.location || 'Not placed'}</p>
+              {file.shelfId ? (
+                <>
+                  <p className="muted mt-2 text-xs">
+                    Approximate shelf position · {file.position}% along shelf
+                  </p>
+                  <div className="mt-3 h-3 overflow-hidden rounded-full bg-[var(--rr-surface)]">
+                    <div
+                      className="h-full rounded-full bg-[var(--rr-accent)]"
+                      style={{ width: `${file.position}%` }}
+                    />
+                  </div>
+                </>
+              ) : (
+                <p className="muted mt-2 text-xs">
+                  Not on a shelf yet — pick a shelf below to place it. The file can still be issued
+                  by scanning its barcode.
+                </p>
+              )}
               {barcode && (
                 <p className="muted mt-3 font-mono text-[11px]">
                   shelf barcode {file.shelfBarcode || '—'}
@@ -523,14 +532,18 @@ export function FileDetailPage() {
               )}
             </div>
             <div className="mt-4 flex gap-2">
-              <LinkButton
-                to={`/rooms/${file.roomId}`}
-                variant="ghost"
-                className="flex-1"
-                icon={<MapPin size={16} />}
-              >
-                Open room
-              </LinkButton>
+              {file.roomId ? (
+                <LinkButton
+                  to={`/rooms/${file.roomId}`}
+                  variant="ghost"
+                  className="flex-1"
+                  icon={<MapPin size={16} />}
+                >
+                  Open room
+                </LinkButton>
+              ) : (
+                <p className="muted flex-1 text-xs">No room assigned yet.</p>
+              )}
               {barcode && (
                 <LinkButton
                   to="/scan"
@@ -584,10 +597,13 @@ export function FileDetailPage() {
 
           {allowed('files.edit') && (
             <Card>
-              <p className="text-sm font-semibold">Relocate this file</p>
+              <p className="text-sm font-semibold">
+                {file.shelfId ? 'Relocate this file' : 'Place this file on a shelf'}
+              </p>
               <p className="muted mt-1 text-xs leading-6">
-                Identity never changes. Only the shelf and position move, and the change is written
-                to the movement log and the audit trail together.
+                {file.shelfId
+                  ? 'Identity never changes. Only the shelf and position move, and the change is written to the movement log and the audit trail together.'
+                  : 'This file is not on a shelf yet. Pick a shelf below to place it — identity never changes, and the placement is written to the movement log and the audit trail.'}
               </p>
               <div className="mt-4 space-y-4">
                 <Field label="New shelf" htmlFor="relocate-shelf" required>
@@ -623,7 +639,7 @@ export function FileDetailPage() {
                   />
                 </Field>
                 <Button className="w-full" onClick={relocate} disabled={!shelfId}>
-                  Relocate file
+                  {file.shelfId ? 'Relocate file' : 'Place file'}
                 </Button>
               </div>
             </Card>

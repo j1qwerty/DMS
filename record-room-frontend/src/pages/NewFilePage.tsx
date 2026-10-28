@@ -341,8 +341,8 @@ export function NewFilePage() {
         title="Create physical file"
         description={
           barcode
-            ? 'Identity and placement are validated the way the legacy registry validated them: unique barcode, active shelf, known area.'
-            : 'Identity and placement are validated: unique file number, active shelf, known area.'
+            ? 'Identity is validated the way the legacy registry validated it: unique barcode, known area. Placement is optional — shelve it now or later.'
+            : 'Identity is validated: unique file number, known area. Placement is optional — shelve it now or later.'
         }
       />
 
@@ -542,9 +542,13 @@ export function NewFilePage() {
 
               <Card>
                 <p className="text-sm font-semibold">Placement</p>
+                <p className="muted mt-1 text-xs">
+                  Optional — a file can be registered now and shelved later from its own page
+                  (“Place on shelf”). Leave the shelf empty if the physical file is not here yet.
+                </p>
                 <div className="mt-4">
                   <FormGrid>
-                    <Field label="Room" htmlFor="file-room" required>
+                    <Field label="Room" htmlFor="file-room">
                       <SelectInput
                         id="file-room"
                         value={selectedRoomId}
@@ -555,7 +559,7 @@ export function NewFilePage() {
                           set('shelfId', '');
                         }}
                       >
-                        <option value="">Select a room</option>
+                        <option value="">Not placed yet</option>
                         {roomOptions.map((item) => (
                           <option key={item.id} value={item.id}>
                             {item.label}
@@ -563,7 +567,7 @@ export function NewFilePage() {
                         ))}
                       </SelectInput>
                     </Field>
-                    <Field label="Section" htmlFor="file-section" required>
+                    <Field label="Section" htmlFor="file-section">
                       <SelectInput
                         id="file-section"
                         value={selectedSectionId}
@@ -582,7 +586,7 @@ export function NewFilePage() {
                         ))}
                       </SelectInput>
                     </Field>
-                    <Field label="Almirah / rack" htmlFor="file-almirah" required>
+                    <Field label="Almirah / rack" htmlFor="file-almirah">
                       <SelectInput
                         id="file-almirah"
                         value={selectedAlmirahId}
@@ -603,10 +607,12 @@ export function NewFilePage() {
                     <Field
                       label="Shelf"
                       htmlFor="file-shelf"
-                      required
                       error={errorsFor('shelfId')}
                       hint={
-                        warningFor('shelfId') ?? `${shelfOptions.length} active shelves available`
+                        warningFor('shelfId') ??
+                        (selectedRoomId
+                          ? `${shelfOptions.length} active shelves available`
+                          : 'Empty keeps the file unplaced')
                       }
                       className="sm:col-span-2"
                     >
@@ -616,7 +622,7 @@ export function NewFilePage() {
                         onChange={(event) => set('shelfId', event.target.value)}
                         invalid={Boolean(errorsFor('shelfId'))}
                       >
-                        <option value="">Select a shelf</option>
+                        <option value="">Not placed yet</option>
                         {shelfOptions.map((shelf) => (
                           <option key={shelf.id} value={shelf.id}>
                             {shelf.label} · {shelf.free} free{barcode ? ` · ${shelf.barcode}` : ''}
@@ -628,6 +634,7 @@ export function NewFilePage() {
                       label="Position on shelf (1–100)"
                       htmlFor="file-position"
                       error={errorsFor('position')}
+                      hint="Only used when the file is shelved."
                     >
                       <TextInput
                         id="file-position"

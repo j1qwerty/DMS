@@ -230,23 +230,28 @@ public sealed class FilesService(
         if (input.Year is < 1800 or > 2200)
             errors.Add(new FieldError("Enter a four-digit year.", "year"));
 
-        var shelf = await db.Shelves.FirstOrDefaultAsync(s => s.Id == input.ShelfId, ct);
-        if (shelf is null)
+        // Placement is optional: a file can be registered before it is shelved.
+        // Only an explicitly chosen shelf is validated.
+        if (input.ShelfId is int shelfId)
         {
-            errors.Add(new FieldError("Select a shelf.", "shelfId"));
-        }
-        else if (shelf.Status != StorageStatus.Active)
-        {
-            errors.Add(new FieldError(
-                $"{shelf.Code} is {Display.Storage(shelf.Status).ToLower()} and cannot accept new files.", "shelfId"));
-        }
-        else if (shelf.Occupied >= shelf.Capacity)
-        {
-            errors.Add(new FieldError($"{shelf.Code} is full ({shelf.Occupied}/{shelf.Capacity}).", "shelfId"));
-        }
+            var shelf = await db.Shelves.FirstOrDefaultAsync(s => s.Id == shelfId, ct);
+            if (shelf is null)
+            {
+                errors.Add(new FieldError("Select a shelf.", "shelfId"));
+            }
+            else if (shelf.Status != StorageStatus.Active)
+            {
+                errors.Add(new FieldError(
+                    $"{shelf.Code} is {Display.Storage(shelf.Status).ToLower()} and cannot accept new files.", "shelfId"));
+            }
+            else if (shelf.Occupied >= shelf.Capacity)
+            {
+                errors.Add(new FieldError($"{shelf.Code} is full ({shelf.Occupied}/{shelf.Capacity}).", "shelfId"));
+            }
 
-        if (input.Position is < 1 or > MaxPosition)
-            errors.Add(new FieldError($"Position must be between 1 and {MaxPosition}.", "position"));
+            if (input.Position is < 1 or > MaxPosition)
+                errors.Add(new FieldError($"Position must be between 1 and {MaxPosition}.", "position"));
+        }
 
         var areaName = input.Area?.Trim() ?? string.Empty;
         if (areaName.Length > 0)
@@ -282,14 +287,24 @@ public sealed class FilesService(
 
         var barcode = input.FileBarcode?.Trim().ToUpperInvariant() ?? string.Empty;
         if (barcode.Length == 0) barcode = await NextBarcodeAsync(ct);
-        var shelf = await db.Shelves.Include(s => s.StorageUnit!).ThenInclude(u => u.Section!)
-            .FirstAsync(s => s.Id == input.ShelfId, ct);
-        var unit = shelf.StorageUnit!;
-        var room = await db.Rooms.FirstAsync(r => r.Id == unit.RoomId, ct);
+        var now = DateTime.UtcNow;
+
+        // Placement is optional (user decision 2026-10-28): a file can be
+        // registered now and shelved later from its own page. An unplaced file
+        // skips the shelf lookup and the occupancy bump.
+        Shelf? shelf = null;
+        StorageUnit? unit = null;
+        Room? room = null;
+        if (input.ShelfId is int shelfId)
+        {
+            shelf = await db.Shelves.Include(s => s.StorageUnit!).ThenInclude(u => u.Section!)
+                .FirstAsync(s => s.Id == shelfId, ct);
+            unit = shelf.StorageUnit!;
+            room = await db.Rooms.FirstAsync(r => r.Id == unit.RoomId, ct);
+        }
         var area = string.IsNullOrWhiteSpace(input.Area)
             ? null
             : await db.Areas.FirstOrDefaultAsync(a => a.Name == input.Area.Trim(), ct);
-        var now = DateTime.UtcNow;
 
         var file = new RecordFile
         {
@@ -305,12 +320,12 @@ public sealed class FilesService(
             DocumentSize = input.DocumentSize is "A0" or "A1" or "A2" or "A3" or "A4" ? input.DocumentSize : "Other",
             EOfficeReference = string.IsNullOrWhiteSpace(input.EOfficeReference) ? null : input.EOfficeReference.Trim(),
             Status = RecordStatus.Available,
-            RoomId = room.Id,
-            SectionId = unit.SectionId,
-            AlmirahId = unit.Id,
-            ShelfId = shelf.Id,
-            ShelfBarcode = shelf.Barcode,
-            ApproxPosition = input.Position,
+            RoomId = room?.Id,
+            SectionId = unit?.SectionId,
+            AlmirahId = unit?.Id,
+            ShelfId = shelf?.Id,
+            ShelfBarcode = shelf?.Barcode ?? string.Empty,
+            ApproxPosition = shelf is null ? 0 : input.Position,
             Pincode = string.IsNullOrWhiteSpace(input.Pincode) ? area?.Pincode ?? string.Empty : input.Pincode.Trim(),
             Area = input.Area?.Trim() ?? string.Empty,
             PropertyNo = input.PropertyNo?.Trim() ?? string.Empty,
@@ -318,7 +333,7 @@ public sealed class FilesService(
             Dealer = input.Dealer?.Trim() ?? string.Empty,
             CodalLife = input.CodalLife?.Trim() ?? string.Empty,
             Description = input.Description?.Trim() ?? string.Empty,
-            LocationDisplay = $"{room.Code} / {unit.Section?.Code} / {unit.Code} / {shelf.Code}",
+            LocationDisplay = shelf is null ? "Not placed" : $"{room!.Code} / {unit!.Section?.Code} / {unit.Code} / {shelf.Code}",
             CreatedAt = now,
             CreatedBy = current.UserName,
             UpdatedAt = now,
@@ -332,19 +347,23 @@ public sealed class FilesService(
         db.Files.Add(file);
         await db.SaveChangesAsync(ct);
 
-        shelf.Occupied += 1;
+        if (shelf is not null) shelf.Occupied += 1;
         await audit.RecordMovementAsync(db, MovementKind.FileCreated, file, "-", file.LocationDisplay,
-            $"Registered on shelf {shelf.Code} (barcode {shelf.Barcode}).");
+            shelf is null
+                ? "Registered without physical placement."
+                : $"Registered on shelf {shelf.Code} (barcode {shelf.Barcode}).");
         await audit.LogAsync(db, AuditAction.Create, "RecordFile", file.Id.ToString(),
-            "-", $"{file.Barcode} @ {shelf.Code}",
+            "-", $"{file.Barcode} @ {(shelf is null ? "not placed" : shelf.Code)}",
             $"Created {file.FileNumber} - {file.Subject}");
         await db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
 
         await audit.AnnounceAsync(RealtimeChannels.Files, "file.created", file.Id.ToString(),
-            $"{file.Barcode} registered on {shelf.Code}");
+            shelf is null
+                ? $"{file.Barcode} registered (not placed yet)"
+                : $"{file.Barcode} registered on {shelf.Code}");
 
-        return Result<FileDto>.Ok(ToDto(file, unit.Section, unit, room));
+        return Result<FileDto>.Ok(ToDto(file, unit?.Section, unit, room));
     }
 
     public async Task<Result<FileDto>> RelocateAsync(int id, RelocateInput input, CancellationToken ct)

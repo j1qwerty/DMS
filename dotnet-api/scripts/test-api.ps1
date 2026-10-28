@@ -390,10 +390,54 @@ $relocated = Invoke-Api -Method POST -Path "/api/files/$newFileId/relocate" -Tok
 Assert-Equal 200 $relocated.Status 'a file can be relocated'
 Assert-Equal 30 $relocated.Data.data.position 'the new position is stored'
 
+# Optional placement (user decision 2026-10-28): a file can be registered
+# without a shelf, shows "Not placed", is issuable by barcode, and can be
+# shelved later via the same relocate endpoint.
+$unplacedBarcode = "RF-TEST-$([guid]::NewGuid().ToString('N').Substring(0,8))"
+$unplacedCreate = Invoke-Api -Method POST -Path '/api/files' -Token $admin -Body @{
+    fileBarcode   = $unplacedBarcode
+    subject       = 'Registered before placement'
+    department    = 'Revenue'
+    year          = 2026
+    fileType      = 'File'
+    shelfId       = $null
+    position      = 1
+    pincode       = ''
+    area          = ''
+    propertyNo    = ''
+    propertyArea  = ''
+    dealer        = ''
+    codalLife     = '25 years'
+    description   = ''
+}
+Assert-Equal 200 $unplacedCreate.Status 'a file without a shelf is created (placement optional)'
+Assert-Equal 'Not placed' $unplacedCreate.Data.data.location 'an unplaced file reports Not placed'
+Assert-True ($null -eq $unplacedCreate.Data.data.roomId) 'an unplaced file has no room'
+$unplacedId = $unplacedCreate.Data.data.id
+
+$issueUnplaced = Invoke-Api -Method POST -Path '/api/issues' -Token $admin -Body @{
+    borrowerType = 'Employee'; borrowerEmployeeCode = 'EMP0002'; borrowerName = 'Sita Devi'
+    department = 'Establishment'; purpose = 'Smoke test unplaced issue'
+    fileIds = @($unplacedId)
+    dueAt = (Get-Date).AddDays(7).ToString('yyyy-MM-ddTHH:mm:ss'); remark = ''
+}
+Assert-Equal 200 $issueUnplaced.Status 'an unplaced file is issuable by barcode'
+$backUnplaced = Invoke-Api -Method POST -Path "/api/issues/$($issueUnplaced.Data.data.id)/return" -Token $admin -Body @{
+    fileIds = @($unplacedId); condition = 'Good'
+}
+Assert-Equal 200 $backUnplaced.Status 'the unplaced-file receipt is returned'
+
+$placedLater = Invoke-Api -Method POST -Path "/api/files/$unplacedId/relocate" -Token $admin -Body @{
+    shelfId = $activeShelf.id; position = 5; reason = 'Shelved after registration'
+}
+Assert-Equal 200 $placedLater.Status 'an unplaced file can be shelved later'
+Assert-Equal 5 $placedLater.Data.data.position 'the placement position is stored'
+Assert-True ($placedLater.Data.data.location -ne 'Not placed') 'the placed file has a real location'
+
 # ============================================================ issue / return
 Write-Step 'Multi-file issue and partial return'
 $available = Invoke-Api -Path '/api/files?status=Available&pageSize=10' -Token $admin
-$targets = @($available.Data.data.items | Where-Object { $_.fileBarcode -ne $newBarcode }) | Select-Object -First 2
+$targets = @($available.Data.data.items | Where-Object { $_.fileBarcode -ne $newBarcode -and $_.fileBarcode -ne $unplacedBarcode }) | Select-Object -First 2
 Assert-True ($targets.Count -eq 2) 'two available files are available to issue'
 
 $nextReceipt = Invoke-Api -Path '/api/issues/next-receipt-number' -Token $admin
