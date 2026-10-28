@@ -132,6 +132,18 @@
     background: var(--rr-accent-soft);
   }
 
+  /*
+   * In-document search highlight (PdfDocumentViewer). Translucent yellow so the
+   * page text underneath stays legible — the mark covers the rendered glyphs,
+   * and its own glyphs stay invisible because the pdf.js text layer is
+   * transparent by design.
+   */
+  .pdf-search-mark {
+    background: rgb(250 204 21 / 0.45);
+    color: transparent;
+    border-radius: 2px;
+  }
+
   .border-base {
     border-color: var(--rr-border);
   }

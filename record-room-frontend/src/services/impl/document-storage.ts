@@ -115,6 +115,22 @@ export function localRecordDocumentBlob(fileId: string, documentId: string): Blo
   return localDocumentBlob('record', documentId);
 }
 
+/** Removes one stored scan version and its bytes; mirrors the API's delete. */
+export function deleteLocalRecordDocument(
+  fileId: string,
+  documentId: string,
+): { filename: string; version: number } | null {
+  const rows = recordDocuments.get(fileId) ?? [];
+  const row = rows.find((item) => item.id === documentId);
+  if (!row) return null;
+  recordDocuments.set(
+    fileId,
+    rows.filter((item) => item.id !== documentId),
+  );
+  blobs.delete(blobKey('record', documentId));
+  return { filename: row.filename, version: row.version };
+}
+
 export function clearLocalDocumentStorage(): void {
   blobs.clear();
   recordDocuments.clear();

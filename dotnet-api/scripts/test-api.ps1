@@ -684,6 +684,42 @@ $opMe = Invoke-Api -Path '/api/auth/me' -Token $operatorToken
 Assert-True ($opMe.Data.data.permissions -contains 'issue.issue') 'the operator is granted issue.issue'
 Assert-True (-not ($opMe.Data.data.permissions -contains 'users.edit')) 'the operator is not granted users.edit'
 
+# ============================================================ file scan versions
+Write-Step 'File scan versions (upload + admin delete)'
+$scanList = Invoke-Api -Path "/api/files/$newFileId/documents" -Token $admin
+Assert-Equal 200 $scanList.Status 'GET /api/files/{id}/documents responds'
+
+if (-not $SkipDestructive) {
+    # Invoke-WebRequest on Windows PowerShell 5.1 cannot post a multipart form,
+    # so the upload goes through curl.exe. A minimal one-page PDF is enough:
+    # this section exercises the version row lifecycle, not pdf parsing.
+    $supervisorToken = Get-Token 'supervisor' $AdminPassword
+    Assert-True ($null -ne $supervisorToken) 'the supervisor account can sign in'
+    $scanPdf = Join-Path $env:TEMP 'rr-smoke-scan.pdf'
+    [IO.File]::WriteAllBytes($scanPdf, [Text.Encoding]::ASCII.GetBytes(
+        "%PDF-1.4`n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj`n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj`n" +
+        "3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj`ntrailer<</Size 4/Root 1 0 R>>`n%%EOF"))
+    $raw = curl.exe -s -X POST "$BaseUrl/api/files/$newFileId/documents" `
+        -H "Authorization: Bearer $admin" `
+        -F "document=@$scanPdf;type=application/pdf"
+    $uploaded = $raw | ConvertFrom-Json
+    Assert-True ([bool]$uploaded.success) 'a scan version is uploaded'
+    $scanId = $uploaded.data.id
+    Assert-True ($scanId -gt 0) 'the upload returns the stored version id'
+
+    $empDelete = Invoke-Api -Method DELETE -Path "/api/files/$newFileId/documents/$scanId" -Token $employeeToken
+    Assert-Equal 403 $empDelete.Status 'an employee cannot delete a scan version'
+    $opDelete = Invoke-Api -Method DELETE -Path "/api/files/$newFileId/documents/$scanId" -Token $operatorToken
+    Assert-Equal 403 $opDelete.Status 'an operator cannot delete a scan version'
+    $supDelete = Invoke-Api -Method DELETE -Path "/api/files/$newFileId/documents/$scanId" -Token $supervisorToken
+    Assert-Equal 403 $supDelete.Status 'a supervisor cannot delete a scan version'
+
+    $adminDelete = Invoke-Api -Method DELETE -Path "/api/files/$newFileId/documents/$scanId" -Token $admin
+    Assert-Equal 200 $adminDelete.Status 'an admin can delete a scan version'
+    $gone = Invoke-Api -Method DELETE -Path "/api/files/$newFileId/documents/$scanId" -Token $admin
+    Assert-Equal 400 $gone.Status 'deleting an already removed scan version is refused'
+}
+
 # ============================================================ inquiry + media
 Write-Step 'Inquiry and media links'
 $inq = Invoke-Api -Method POST -Path '/api/inquiries' -Token $employeeToken -Body @{

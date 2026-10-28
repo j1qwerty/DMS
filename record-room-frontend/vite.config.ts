@@ -4,7 +4,6 @@ import { defineConfig, normalizePath } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { viteStaticCopy } from 'vite-plugin-static-copy';
-
 // In-app PDF reader (work plan §2.2): react-pdf needs PDF.js support assets
 // served from the build. Copied verbatim from the react-pdf README's Vite
 // recipe — keep in sync with it.

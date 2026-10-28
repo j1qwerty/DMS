@@ -452,6 +452,10 @@ export const httpFilesService: FilesApi = {
     return result.ok ? ok(toRecordFileDocument(result.value)) : result;
   },
 
+  async deleteDocument(fileId, documentId) {
+    return wrapTrue(await attempt<Dto>('DELETE', `/api/files/${fileId}/documents/${documentId}`));
+  },
+
   async documentBlob(fileId, documentId) {
     return getBlob(`/api/files/${fileId}/documents/${documentId}/content`);
   },

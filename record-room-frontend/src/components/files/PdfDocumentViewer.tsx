@@ -40,14 +40,14 @@ const PDF_OPTIONS = {
 const MIN_SCALE = 0.5;
 const MAX_SCALE = 4;
 
-/** Escape HTML, then wrap query hits in a visible mark. */
+/** Escape HTML, then wrap query hits in a translucent highlight mark. */
 function highlight(str: string, query: string): string {
   const escaped = str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   if (!query) return escaped;
   const pattern = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return escaped.replace(
     new RegExp(pattern, 'gi'),
-    (hit) => `<mark class="bg-accent-soft text-inherit rounded-sm">${hit}</mark>`,
+    (hit) => `<mark class="pdf-search-mark">${hit}</mark>`,
   );
 }
 

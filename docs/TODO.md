@@ -24,7 +24,8 @@ and the done-definitions; this file carries the "is it done yet".
 
 ## 1. In flight right now (§1.2)
 
-- [ ] One clean full `pnpm test` since the baseline — run after ≥110 s of API idle (10-logins/60s budget) — **in progress: API is live and healthy on localhost:5199; running the live round now**
+- [x] One clean full `pnpm test` since the baseline — **141/141 against the live API** (19 contract assertions) on 2026-10-28; `test-api.ps1` 157/157 after the idempotency fix
+- [x] Tests no longer inherit the developer's `.env.local` — standalone `vitest.config.ts` pins `VITE_API_MODE=local` (a `http` mode in `.env.local` had flipped 53 node-env tests onto the API, where the http reset path needs `window`)
 - [ ] Write `scripts/barcode-gun.ahk` AutoHotkey simulator; then verify `IssuePage` handles rapid consecutive scans (no `onKeyDown` exists anywhere — every scan path depends on Enter reaching a form submit) **(deferred by choice)** → §2.1 #2 + v1 DoD
 - [ ] `docs/skills/` reorganisation — user-owned; already captured in baseline, do not consolidate into someone else's commit
 
@@ -49,7 +50,16 @@ and the done-definitions; this file carries the "is it done yet".
 - [x] 3.4 Viewer: page nav, jump-to-page, zoom in/out/fit-width, rotate, in-document text search (jumps to matching page + highlights on-page), download kept in the parents
 - [x] 3.5 **Both** iframe sites replaced: `DocumentUploadActions.tsx` and `components/files/DocumentViewer.tsx` (used by `FileViewerPage`); reader is a lazy ~650 kB chunk loaded only when a PDF is opened (`307b529`)
 - [x] 3.6 Deep link: `pageIndex` flows into the reader as the initial page (the object-URL `#page=` fragment is only still used by "Open in new tab")
-  - [ ] Done when: reader replaces every iframe, in all three themes — **browser verification pending**
+  - [x] Done when: **verified live 2026-10-28** — renders the uploaded 3-page PDF, page nav / jump (with out-of-range clamping) / zoom / rotate / search ("Estimate" → jumps to page 2, highlights both matches, "Found on page 2" status) all work
+  - [x] User feedback: highlight was opaque accent blue and hid the text under it → restyled `.pdf-search-mark` to translucent yellow (rgb(250 204 21 / 45%), glyphs stay transparent so the canvas text shows through)
+
+## 3a. User-reported on the live demo (2026-10-28)
+
+- [x] **Search highlight opaque** — see §3 above
+- [x] **No admin delete for a stored scan version** — full contract-seam change: `files.deleteDocument` in `contracts.ts`, HTTP adapter, in-memory adapter, API `DELETE /api/files/{fileId}/documents/{documentId}` (`[Authorize(Roles = "Admin")]`), trash button on each Scan-versions row (confirm dialog), audit + realtime announce; harness section "File scan versions (upload + admin delete)" asserts employee/operator/supervisor 403 and admin 200; verified live (delete + audit entry) and visually
+- [ ] **Physical placement must be optional on file create** — room/almirah/shelf is optional in the real world; a file can exist in the registry before it is shelved
+- [ ] **Digitization is not a separate file kind** — any file can be digitized by uploading a PDF or by scanning pages on a printer/scanner and adding those pages; pages keep the same options as the file (A1/A4 etc., map). No separate "digitization file"
+- [ ] **`/rooms/1` shows "Room not found"** — rooms route/id mismatch when opening a room from the location pages
 
 ## 4. v1 — UI enhancements (§2.3)
 

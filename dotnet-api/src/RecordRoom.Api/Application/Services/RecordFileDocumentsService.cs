@@ -14,6 +14,7 @@ public interface IRecordFileDocumentsService
     Task<RecordFileDocumentDto[]?> ListAsync(int fileId, CancellationToken ct = default);
     Task<Result<RecordFileDocumentDto>> UploadAsync(int fileId, IFormFile? document, CancellationToken ct = default);
     Task<PrivateDocumentContent?> OpenAsync(int fileId, long documentId, CancellationToken ct = default);
+    Task<Result<bool>> DeleteAsync(int fileId, long documentId, CancellationToken ct = default);
 }
 
 /// <summary>File-level attachments, versioned independently from page-by-page digitization.</summary>
@@ -74,6 +75,32 @@ public sealed class RecordFileDocumentsService(
         if (row?.RecordFile is null) return null;
         var stream = await documentStore.OpenReadAsync(row.StorageKey, ct);
         return stream is null ? null : new PrivateDocumentContent(row.OriginalFileName, row.ContentType, row.SizeBytes, row.Sha256, stream);
+    }
+
+    /// <summary>Removes one stored scan version. Admin-only (enforced by the controller).</summary>
+    public async Task<Result<bool>> DeleteAsync(int fileId, long documentId, CancellationToken ct = default)
+    {
+        var row = await db.FileDocuments.Include(d => d.RecordFile)
+            .FirstOrDefaultAsync(d => d.Id == documentId && d.RecordFileId == fileId, ct);
+        if (row?.RecordFile is null) return Result<bool>.Fail("Scan version not found.", "documentId");
+
+        var barcode = row.RecordFile.Barcode;
+        var key = row.StorageKey;
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        db.FileDocuments.Remove(row);
+        await db.SaveChangesAsync(ct);
+        await audit.LogAsync(db, AuditAction.Delete, "RecordFileDocument", row.Id.ToString(),
+            $"{row.OriginalFileName} v{row.Version}; bytes={row.SizeBytes}; sha256={row.Sha256}", "deleted",
+            $"Deleted scan {row.OriginalFileName} v{row.Version} from {barcode}", ct);
+        await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
+
+        // The row is gone; a failed blob removal only leaks bytes, so it is
+        // logged rather than rolled back.
+        await TryDeleteAsync(key);
+        await audit.AnnounceAsync(RealtimeChannels.Files, "file.document.deleted", fileId.ToString(),
+            $"{row.OriginalFileName} v{row.Version} removed from {barcode}");
+        return Result<bool>.Ok(true);
     }
 
     private async Task TryDeleteAsync(string key)

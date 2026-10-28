@@ -40,4 +40,10 @@ public sealed class RecordFileDocumentsController(IRecordFileDocumentsService do
         Response.Headers["Content-Disposition"] = disposition.ToString();
         return File(item.Stream, item.ContentType, enableRangeProcessing: true);
     }
+
+    /// <summary>Removing a stored scan version is a destructive admin action.</summary>
+    [Authorize(Roles = "Admin")]
+    [HttpDelete("{documentId:long}")]
+    public async Task<IResult> Delete(int fileId, long documentId, CancellationToken ct) =>
+        ApiResults.FromResult(await documents.DeleteAsync(fileId, documentId, ct));
 }

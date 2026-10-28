@@ -14,6 +14,7 @@ import { locationsService } from './locations';
 import { session } from './session';
 import {
   addLocalRecordDocument,
+  deleteLocalRecordDocument,
   listLocalRecordDocuments,
   localRecordDocumentBlob,
 } from './document-storage';
@@ -446,6 +447,24 @@ export const filesService: FilesApi = {
 
   async documentBlob(fileId, documentId) {
     return localRecordDocumentBlob(fileId, documentId);
+  },
+
+  async deleteDocument(fileId, documentId) {
+    const file = await filesService.get(fileId);
+    if (!file) return err('File not found.', 'fileId');
+    const removed = deleteLocalRecordDocument(fileId, documentId);
+    if (!removed) return err('Scan version not found.', 'documentId');
+    store.update((draft) =>
+      log(draft, {
+        action: 'Delete',
+        entity: 'RecordFileDocument',
+        entityId: documentId,
+        before: `${removed.filename} · v${removed.version}`,
+        after: '—',
+        summary: `Scan version removed from ${file.fileBarcode}`,
+      }),
+    );
+    return ok(true);
   },
 
   async remove(fileId) {

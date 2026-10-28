@@ -7,6 +7,7 @@ import {
   FileText,
   MapPinPlus,
   MapTrifold,
+  Trash,
   UploadSimple,
 } from '@phosphor-icons/react';
 import { Badge } from '../components/ui/Badge';
@@ -45,13 +46,15 @@ export function FileViewerPage() {
   const tab: 'scan' | 'map' = pathname.endsWith('/map') ? 'map' : 'scan';
   const [params, setParams] = useSearchParams();
   const service = useService();
-  const { allowed } = useSession();
-  const { flash, success, clear } = useFlash();
+  const { allowed, user } = useSession();
+  const { flash, success, danger, clear } = useFlash();
   const features = useFeatures();
   const [dialog, setDialog] = useState<Dialog>(null);
 
   const canEdit = allowed('files.edit');
   const canUploadMap = canEdit || allowed('digitization.upload');
+  // Removing a stored scan version is destructive; the API re-checks the role.
+  const canDeleteScan = user?.role === 'Admin';
 
   const {
     data: file,
@@ -106,6 +109,20 @@ export function FileViewerPage() {
     reloadFile();
     reloadDocs();
     reloadMaps();
+  };
+
+  const removeDoc = async (doc: RecordFileDocument) => {
+    if (!window.confirm(`Delete ${doc.filename} (version ${doc.version}) permanently?`)) return;
+    const result = await service.files.deleteDocument(fileId, doc.id);
+    if (result.ok) {
+      success(`Deleted ${doc.filename} v${doc.version}.`);
+      // If the removed version was open, drop back to the newest remaining one.
+      if (params.get('v') === doc.id) setParams({}, { replace: true });
+      reloadFile();
+      reloadDocs();
+    } else {
+      danger(result.error);
+    }
   };
 
   const tabLink = (to: string, label: string, count: number, Icon: typeof FileText) => (
@@ -269,13 +286,13 @@ export function FileViewerPage() {
               ) : (
                 <ul className="divide-y divide-[var(--rr-border)]">
                   {docs.map((doc) => (
-                    <li key={doc.id}>
+                    <li key={doc.id} className="flex items-center gap-1">
                       <button
                         type="button"
                         onClick={() => pick(doc.id)}
                         aria-current={doc.id === selectedDoc?.id}
                         className={cn(
-                          'focus-ring flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-[var(--rr-bg)]',
+                          'focus-ring flex min-w-0 flex-1 items-start gap-3 px-4 py-3 text-left hover:bg-[var(--rr-bg)]',
                           doc.id === selectedDoc?.id && 'bg-accent-soft',
                         )}
                       >
@@ -289,6 +306,17 @@ export function FileViewerPage() {
                           </span>
                         </span>
                       </button>
+                      {canDeleteScan && (
+                        <button
+                          type="button"
+                          onClick={() => void removeDoc(doc)}
+                          aria-label={`Delete version ${doc.version} (${doc.filename})`}
+                          title="Delete this version"
+                          className="focus-ring m-1 grid size-8 shrink-0 place-items-center rounded-lg text-[var(--rr-danger)] hover:bg-[color-mix(in_srgb,var(--rr-danger)_12%,transparent)]"
+                        >
+                          <Trash size={16} />
+                        </button>
+                      )}
                     </li>
                   ))}
                 </ul>
