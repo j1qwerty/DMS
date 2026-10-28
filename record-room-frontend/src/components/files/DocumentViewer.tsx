@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState, lazy, Suspense, type ReactNode } from 'react';
 import {
   ArrowSquareOut,
   DownloadSimple,
@@ -8,6 +8,12 @@ import {
 } from '@phosphor-icons/react';
 import { pdfPageFragment } from '../../lib/document';
 import { Button } from '../ui/Button';
+
+// The PDF.js stack (~650 kB) is only worth paying for when a PDF preview is
+// actually opened, so the reader loads on demand.
+const PdfDocumentViewer = lazy(() =>
+  import('./PdfDocumentViewer').then((module) => ({ default: module.PdfDocumentViewer })),
+);
 
 interface ViewerState {
   key: string;
@@ -171,7 +177,18 @@ export function DocumentViewer({
     );
   } else if (isPdf) {
     body = (
-      <iframe title={`Preview of ${filename}`} src={src} className={`${height} w-full bg-white`} />
+      <Suspense
+        fallback={
+          <div className={`muted grid ${height} place-items-center text-sm`}>Loading reader…</div>
+        }
+      >
+        <PdfDocumentViewer
+          src={state.url!}
+          filename={filename}
+          initialPage={pageIndex}
+          heightClassName={height}
+        />
+      </Suspense>
     );
   } else if (isImage) {
     body = (

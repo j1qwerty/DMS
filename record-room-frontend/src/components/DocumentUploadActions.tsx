@@ -1,13 +1,18 @@
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, lazy, Suspense, useState } from 'react';
 import { ArrowDown, Eye, UploadSimple, X } from '@phosphor-icons/react';
 import {
   describePageCount,
   documentAcceptAttribute,
   formatDocumentSize,
-  pdfPageFragment,
   validateDocumentFile,
 } from '../lib/document';
 import type { Result } from '../services/contracts';
+
+// The PDF.js stack (~650 kB) is only worth paying for when a PDF preview is
+// actually opened, so the reader loads on demand.
+const PdfDocumentViewer = lazy(() =>
+  import('./files/PdfDocumentViewer').then((module) => ({ default: module.PdfDocumentViewer })),
+);
 
 interface Props {
   filename: string;
@@ -94,11 +99,11 @@ export function DocumentUploadActions({
       const type = blob.type || contentType || inferType(filename);
       const typed = blob.type ? blob : new Blob([blob], { type });
       const url = URL.createObjectURL(typed);
-      // A row inside a multi-page PDF opens on its own page, not page 1.
-      const target = `${url}${type === 'application/pdf' ? pdfPageFragment(pageIndex) : ''}`;
+      // A row inside a multi-page PDF opens on its own page; the reader keeps
+      // the deep-link behaviour the #page= fragment used to provide.
       setPreviewUrl((previous) => {
         if (previous) URL.revokeObjectURL(previous);
-        return target;
+        return url;
       });
       setPreviewType(type);
     } catch (error) {
@@ -229,11 +234,15 @@ export function DocumentUploadActions({
             </button>
           </div>
           {isPdf ? (
-            <iframe
-              title={'Preview ' + filename}
-              src={previewUrl}
-              className="h-[60vh] min-h-[360px] w-full bg-white"
-            />
+            <Suspense
+              fallback={
+                <div className="muted grid h-[60vh] min-h-[360px] place-items-center text-sm">
+                  Loading reader…
+                </div>
+              }
+            >
+              <PdfDocumentViewer src={previewUrl} filename={filename} initialPage={pageIndex} />
+            </Suspense>
           ) : isImage ? (
             <div className="max-h-[60vh] overflow-auto bg-surface-muted p-3 text-center">
               <img

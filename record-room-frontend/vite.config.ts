@@ -1,10 +1,32 @@
-import { defineConfig } from 'vite';
+import path from 'node:path';
+import { createRequire } from 'node:module';
+import { defineConfig, normalizePath } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
+import { viteStaticCopy } from 'vite-plugin-static-copy';
+
+// In-app PDF reader (work plan §2.2): react-pdf needs PDF.js support assets
+// served from the build. Copied verbatim from the react-pdf README's Vite
+// recipe — keep in sync with it.
+const require = createRequire(import.meta.url);
+const pdfjsDistPath = path.dirname(require.resolve('pdfjs-dist/package.json'));
 
 export default defineConfig({
   base: '/',
-  plugins: [react(), tailwindcss()],
+  plugins: [
+    react(),
+    tailwindcss(),
+    viteStaticCopy({
+      targets: [
+        { src: normalizePath(path.join(pdfjsDistPath, 'cmaps', '**')), dest: 'cmaps' },
+        {
+          src: normalizePath(path.join(pdfjsDistPath, 'standard_fonts', '**')),
+          dest: 'standard_fonts',
+        },
+        { src: normalizePath(path.join(pdfjsDistPath, 'wasm', '**')), dest: 'wasm' },
+      ],
+    }),
+  ],
   server: {
     port: 5173,
     strictPort: true,
