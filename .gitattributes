@@ -1,0 +1,28 @@
+# Normalise line endings: everything text in the repo is LF on checkout and
+# in the index. Prettier config uses endOfLine: 'lf', so this makes a fresh
+# checkout pass `pnpm format:check` on any platform.
+* text=auto eol=lf
+
+# Windows-only shell scripts — batch files keep CRLF so cmd.exe never chokes
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Unix shell scripts must stay LF even under a Windows checkout
+*.sh text eol=lf
+
+# Binary assets — never renormalise
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.docx binary
+*.doc binary
+*.pptx binary
+*.zip binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.eot binary
