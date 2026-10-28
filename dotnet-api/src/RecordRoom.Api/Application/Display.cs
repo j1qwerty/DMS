@@ -30,23 +30,6 @@ public static class Display
         _ => status.ToString(),
     };
 
-    public static string Batch(BatchStatus status) => status switch
-    {
-        BatchStatus.InProgress => "In progress",
-        BatchStatus.PartiallyApproved => "Partially approved",
-        _ => status.ToString(),
-    };
-
-    /// <summary>Legacy folder slugs: service_book, leave_report, sr, apar.</summary>
-    public static string Folder(DigitizationFolder folder) => folder switch
-    {
-        DigitizationFolder.ServiceBook => "service_book",
-        DigitizationFolder.LeaveReport => "leave_report",
-        DigitizationFolder.Sr => "sr",
-        DigitizationFolder.Apar => "apar",
-        _ => folder.ToString(),
-    };
-
     public static string Movement(MovementKind kind) => kind switch
     {
         MovementKind.LocationChange => "Location change",
@@ -79,23 +62,6 @@ public static class Display
         null or "" or "All" => null,
         "Pending review" => PageStatus.PendingReview,
         _ => Enum.TryParse<PageStatus>(value, true, out var parsed) ? parsed : null,
-    };
-
-    public static BatchStatus? ParseBatch(string? value) => value switch
-    {
-        null or "" or "All" => null,
-        "In progress" => BatchStatus.InProgress,
-        "Partially approved" => BatchStatus.PartiallyApproved,
-        _ => Enum.TryParse<BatchStatus>(value, true, out var parsed) ? parsed : null,
-    };
-
-    public static DigitizationFolder? ParseFolder(string? value) => value switch
-    {
-        "service_book" or "ServiceBook" => DigitizationFolder.ServiceBook,
-        "leave_report" or "LeaveReport" => DigitizationFolder.LeaveReport,
-        "sr" or "Sr" => DigitizationFolder.Sr,
-        "apar" or "Apar" => DigitizationFolder.Apar,
-        _ => null,
     };
 
     public static MovementKind? ParseMovement(string? value) => value switch

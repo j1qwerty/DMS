@@ -43,7 +43,6 @@ public class Employee
     public DateTime ModifiedAt { get; set; } = DateTime.UtcNow;
 
     public List<AppUser> Users { get; set; } = [];
-    public List<DigitizationBatch> Batches { get; set; } = [];
 }
 
 public class LoginHistoryEntry

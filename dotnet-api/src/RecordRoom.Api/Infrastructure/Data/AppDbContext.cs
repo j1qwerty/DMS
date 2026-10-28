@@ -22,8 +22,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<MovementEvent> Movements => Set<MovementEvent>();
     public DbSet<AuditEntry> Audit => Set<AuditEntry>();
 
-    public DbSet<DigitizationBatch> Batches => Set<DigitizationBatch>();
-    public DbSet<DigitizationPage> Pages => Set<DigitizationPage>();
+    public DbSet<FileScanPage> ScanPages => Set<FileScanPage>();
     public DbSet<MapUpload> Maps => Set<MapUpload>();
     public DbSet<RecordFileDocument> FileDocuments => Set<RecordFileDocument>();
     public DbSet<BulkImportJob> BulkJobs => Set<BulkImportJob>();
@@ -173,26 +172,18 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         });
 
         // ---------------------------------------------------------- digitization
-        b.Entity<DigitizationBatch>(e =>
+        // One scan table per file: pages are keyed by barcode + page no +
+        // version and reviewed individually; there are no employee batches.
+        b.Entity<FileScanPage>(e =>
         {
-            e.ToTable("DigitizationBatches");
-            e.HasIndex(x => x.Code).IsUnique();
-            // One open batch per employee and folder.
-            e.HasIndex(x => new { x.EmployeeCode, x.Folder, x.Status });
-            e.HasOne(x => x.Employee).WithMany(x => x.Batches).HasForeignKey(x => x.EmployeeCode)
-                .HasPrincipalKey(x => x.EmployeeCode).OnDelete(DeleteBehavior.Restrict);
-            e.HasMany(x => x.Pages).WithOne(x => x.Batch!).HasForeignKey(x => x.BatchId)
-                .OnDelete(DeleteBehavior.Cascade);
-        });
-
-        b.Entity<DigitizationPage>(e =>
-        {
-            e.ToTable("DigitizationPages");
+            e.ToTable("FileScanPages");
             e.Property(x => x.StorageKey).HasMaxLength(80);
             e.Property(x => x.ContentType).HasMaxLength(100);
             e.Property(x => x.Sha256).HasMaxLength(64);
+            e.Property(x => x.DocumentSize).HasMaxLength(8);
             e.HasIndex(x => new { x.Barcode, x.PageNo, x.Version }).IsUnique();
-            e.HasOne(x => x.RecordFile).WithMany(x => x.Pages).HasForeignKey(x => x.Barcode)
+            e.HasIndex(x => x.Status);
+            e.HasOne(x => x.RecordFile).WithMany(x => x.ScanPages).HasForeignKey(x => x.Barcode)
                 .HasPrincipalKey(x => x.Barcode).OnDelete(DeleteBehavior.Restrict);
         });
 

@@ -85,22 +85,6 @@ public enum PageStatus
     Active = 4,
 }
 
-public enum BatchStatus
-{
-    InProgress = 0,
-    Submitted = 1,
-    Approved = 2,
-    PartiallyApproved = 3,
-}
-
-public enum DigitizationFolder
-{
-    ServiceBook = 0,
-    LeaveReport = 1,
-    Sr = 2,
-    Apar = 3,
-}
-
 public enum EmployeeStatus
 {
     Active = 0,

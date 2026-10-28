@@ -276,18 +276,23 @@ public sealed record EmployeeInput(
 
 // Digitization ----------------------------------------------------------------
 
-public sealed record DigitizationPageDto(
+/// <summary>
+/// One scanned page of a file (page-by-page digitization). There are no
+/// employee batches — scans live on the file, review is per page, and the
+/// Digitization section is the pending-review queue across files.
+/// </summary>
+public sealed record FileScanPageDto(
     long Id,
-    long BatchId,
+    int FileId,
     string FileBarcode,
     string FileName,
     int PageNo,
     int Version,
+    string DocumentSize,
     string Status,
     string Note,
     DateTime UploadedAt,
     string UploadedBy,
-    bool Bulk,
     bool HasDocument = false,
     string? ContentType = null,
     long? SizeBytes = null,
@@ -296,22 +301,7 @@ public sealed record DigitizationPageDto(
     int? PageIndex = null,
     string? FileNumber = null);
 
-public sealed record DigitizationBatchDto(
-    long Id,
-    string Code,
-    string EmployeeCode,
-    string EmployeeName,
-    string Department,
-    string Folder,
-    string Status,
-    DigitizationPageDto[] Pages,
-    DateTime CreatedAt,
-    string CreatedBy,
-    DateTime? SubmittedAt,
-    string FolderPath);
-
-public sealed record BatchCreateInput(string EmployeeCode, string Folder, string Note = "");
-public sealed record PageUploadInput(string FileBarcode, int PageNo, string FileName, bool Bulk = false);
+public sealed record ScanAddInput(string FileName, int PageNo, string? DocumentSize = null, string? Note = null);
 public sealed record PageReviewInput(string Decision, string Note = "");
 
 // Uploads ---------------------------------------------------------------------

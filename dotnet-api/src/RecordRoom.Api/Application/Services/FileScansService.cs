@@ -1,0 +1,283 @@
+using Microsoft.EntityFrameworkCore;
+using RecordRoom.Api.Application.Contracts;
+using RecordRoom.Api.Domain;
+using RecordRoom.Api.Infrastructure.Auth;
+using RecordRoom.Api.Infrastructure.Data;
+
+namespace RecordRoom.Api.Application.Services;
+
+/// <summary>
+/// File-centric digitization (user decision 2026-10-28): every file carries its
+/// own scan pages — upload a full PDF or add page-by-page scans — and the
+/// Digitization section is the pending-review queue across files. The legacy
+/// employee/folder batches no longer exist.
+/// </summary>
+public interface IFileScansService
+{
+    /// <summary>All scan pages of one file, every status, newest version last per page.</summary>
+    Task<FileScanPageDto[]> ListByFileAsync(int fileId, CancellationToken ct = default);
+
+    /// <summary>Registers a scanned page (metadata first; the scan image follows).</summary>
+    Task<Result<FileScanPageDto>> AddAsync(int fileId, ScanAddInput input, CancellationToken ct = default);
+
+    /// <summary>Attaches the scanned image/PDF as the next version of a page row.</summary>
+    Task<Result<FileScanPageDto>> AddDocumentAsync(long scanId, Microsoft.AspNetCore.Http.IFormFile? document, CancellationToken ct = default);
+
+    Task<PrivateDocumentContent?> OpenDocumentAsync(long scanId, CancellationToken ct = default);
+
+    Task<Result<bool>> RemoveAsync(long scanId, CancellationToken ct = default);
+
+    Task<Result<FileScanPageDto>> ReviewAsync(long scanId, PageReviewInput input, CancellationToken ct = default);
+
+    /// <summary>Reviews every pending page of one file at once; returns how many moved.</summary>
+    Task<Result<int>> ReviewAllAsync(int fileId, PageReviewInput input, CancellationToken ct = default);
+
+    /// <summary>The pending-review queue across all files.</summary>
+    Task<FileScanPageDto[]> PendingAsync(string? search, CancellationToken ct = default);
+
+    Task<int> PendingReviewCountAsync(CancellationToken ct = default);
+}
+
+public sealed class FileScansService(
+    AppDbContext db,
+    IAuditWriter audit,
+    ICurrentUserAccessor current,
+    IPrivateDocumentStore documentStore,
+    IFileRefs fileRefs,
+    ILogger<FileScansService> logger) : IFileScansService
+{
+    private static readonly string[] DocumentSizes = ["A0", "A1", "A2", "A3", "A4", "Other"];
+
+    private static FileScanPageDto ToPage(FileScanPage p, int fileId) => new(
+        p.Id, fileId, p.Barcode, p.FileName, p.PageNo, p.Version, p.DocumentSize,
+        Display.Page(p.Status), p.Note, p.UploadedAt, p.UploadedBy,
+        !string.IsNullOrWhiteSpace(p.StorageKey), p.ContentType, p.SizeBytes, p.Sha256,
+        p.PageCount, p.PageIndex);
+
+    public async Task<FileScanPageDto[]> ListByFileAsync(int fileId, CancellationToken ct = default)
+    {
+        var file = await db.Files.AsNoTracking().FirstOrDefaultAsync(f => f.Id == fileId, ct);
+        if (file is null) return [];
+
+        var rows = await db.ScanPages.AsNoTracking()
+            .Where(p => p.Barcode == file.Barcode)
+            .OrderBy(p => p.PageNo).ThenBy(p => p.Version)
+            .ToListAsync(ct);
+        return await fileRefs.EnrichAsync(rows.Select(p => ToPage(p, fileId)).ToArray(), ct);
+    }
+
+    public async Task<Result<FileScanPageDto>> AddAsync(int fileId, ScanAddInput input, CancellationToken ct)
+    {
+        var file = await db.Files.FirstOrDefaultAsync(f => f.Id == fileId, ct);
+        if (file is null) return Result<FileScanPageDto>.Fail("File not found.", "fileId");
+        if (input.PageNo < 1) return Result<FileScanPageDto>.Fail("Page number starts at 1.", "pageNo");
+
+        var size = input.DocumentSize is { Length: > 0 } given
+            ? given.Trim().ToUpperInvariant()
+            : file.DocumentSize;
+        if (!DocumentSizes.Contains(size))
+            return Result<FileScanPageDto>.Fail("Choose one of A0, A1, A2, A3, A4 or Other.", "documentSize");
+
+        // Legacy duplicate-page rule, kept per file: the same file and page
+        // re-scanned becomes the next version rather than overwriting an
+        // approved page.
+        var nextVersion = await db.ScanPages
+            .Where(p => p.Barcode == file.Barcode && p.PageNo == input.PageNo)
+            .Select(p => (int?)p.Version)
+            .MaxAsync(ct) ?? 0;
+        nextVersion += 1;
+
+        var hasActive = await db.ScanPages.AnyAsync(
+            p => p.Barcode == file.Barcode && p.PageNo == input.PageNo && p.Status == PageStatus.Active, ct);
+
+        var page = new FileScanPage
+        {
+            Barcode = file.Barcode,
+            FileName = string.IsNullOrWhiteSpace(input.FileName)
+                ? $"{file.Barcode}-FILE-{input.PageNo}{(nextVersion > 1 ? $"-V{nextVersion}" : string.Empty)}.pdf"
+                : input.FileName.Trim(),
+            PageNo = input.PageNo,
+            Version = nextVersion,
+            DocumentSize = size,
+            Status = nextVersion > 1 && hasActive ? PageStatus.Duplicate : PageStatus.PendingReview,
+            Note = nextVersion > 1 ? $"Rescan of an existing page (previous version {nextVersion - 1})." : string.Empty,
+            UploadedAt = DateTime.UtcNow,
+            UploadedBy = current.UserName,
+        };
+
+        db.ScanPages.Add(page);
+        await audit.LogAsync(db, AuditAction.Create, "FileScanPage", "pending",
+            "-", $"{page.FileName} v{page.Version}",
+            $"Page {page.PageNo} of {file.Barcode} added");
+        await db.SaveChangesAsync(ct);
+        await audit.AnnounceAsync(RealtimeChannels.Digitization, "page.added", page.Id.ToString(),
+            $"{page.FileName} added to {file.Barcode}");
+
+        return Result<FileScanPageDto>.Ok((await fileRefs.EnrichAsync(new[] { ToPage(page, fileId) }, ct))[0]);
+    }
+
+    public async Task<Result<FileScanPageDto>> AddDocumentAsync(
+        long scanId, Microsoft.AspNetCore.Http.IFormFile? document, CancellationToken ct = default)
+    {
+        var original = await db.ScanPages.FirstOrDefaultAsync(p => p.Id == scanId, ct);
+        if (original is null) return Result<FileScanPageDto>.Fail("Scan page not found.", "scanId");
+
+        var storedResult = await documentStore.SaveAsync(document, ct);
+        if (!storedResult.IsSuccess) return Result<FileScanPageDto>.Fail(storedResult.Errors);
+        var stored = storedResult.Value;
+        var file = await db.Files.AsNoTracking().FirstAsync(f => f.Barcode == original.Barcode, ct);
+
+        var version = (await db.ScanPages.AsNoTracking()
+            .Where(p => p.Barcode == original.Barcode && p.PageNo == original.PageNo)
+            .Select(p => (int?)p.Version).MaxAsync(ct) ?? 0) + 1;
+        var hasActive = await db.ScanPages.AnyAsync(p =>
+            p.Barcode == original.Barcode && p.PageNo == original.PageNo && p.Status == PageStatus.Active, ct);
+        var page = new FileScanPage
+        {
+            Barcode = original.Barcode, FileName = stored.OriginalFileName,
+            PageNo = original.PageNo, Version = version, DocumentSize = original.DocumentSize,
+            Status = version > 1 && hasActive ? PageStatus.Duplicate : PageStatus.PendingReview,
+            Note = $"Uploaded document version {version} for page {original.PageNo}.",
+            UploadedAt = DateTime.UtcNow, UploadedBy = current.UserName,
+            StorageKey = stored.StorageKey, ContentType = stored.ContentType, SizeBytes = stored.SizeBytes, Sha256 = stored.Sha256,
+            PageCount = stored.PageCount
+        };
+        db.ScanPages.Add(page);
+        await audit.LogAsync(db, AuditAction.Create, "FileScanPage", "pending",
+            $"page={page.PageNo}; version={version - 1}",
+            $"{stored.OriginalFileName}; version={version}; bytes={stored.SizeBytes}; sha256={stored.Sha256}",
+            $"Uploaded {stored.OriginalFileName} as version {version} for {original.Barcode}", ct);
+        try { await db.SaveChangesAsync(ct); }
+        catch (DbUpdateException ex)
+        {
+            logger.LogWarning(ex, "Could not register document version {Version} for scan {ScanId}.", version, scanId);
+            await TryDeleteAsync(stored.StorageKey);
+            return Result<FileScanPageDto>.Fail("This page was updated by another upload. Please retry.", "document");
+        }
+        catch { await TryDeleteAsync(stored.StorageKey); throw; }
+        await audit.AnnounceAsync(RealtimeChannels.Digitization, "page.added", page.Id.ToString(),
+            $"{stored.OriginalFileName} added as version {version}");
+        return Result<FileScanPageDto>.Ok((await fileRefs.EnrichAsync(new[] { ToPage(page, file.Id) }, ct))[0]);
+    }
+
+    public async Task<PrivateDocumentContent?> OpenDocumentAsync(long scanId, CancellationToken ct = default)
+    {
+        var page = await db.ScanPages.AsNoTracking().FirstOrDefaultAsync(p => p.Id == scanId, ct);
+        if (page?.StorageKey is null || page.ContentType is null || page.Sha256 is null) return null;
+        var stream = await documentStore.OpenReadAsync(page.StorageKey, ct);
+        return stream is null ? null : new PrivateDocumentContent(page.FileName, page.ContentType, page.SizeBytes ?? 0, page.Sha256, stream);
+    }
+
+    private async Task TryDeleteAsync(string storageKey)
+    {
+        try { await documentStore.DeleteAsync(storageKey, CancellationToken.None); }
+        catch (Exception ex) { logger.LogError(ex, "Could not clean up document key {StorageKey}.", storageKey); }
+    }
+
+    public async Task<Result<bool>> RemoveAsync(long scanId, CancellationToken ct)
+    {
+        var page = await db.ScanPages.FirstOrDefaultAsync(p => p.Id == scanId, ct);
+        if (page is null) return Result<bool>.Fail("Scan page not found.", "scanId");
+        if (page.Status == PageStatus.Approved && !current.IsInRole(Role.Admin))
+            return Result<bool>.Fail("Approved scans can only be removed by an admin.", "scanId");
+
+        var storageKey = page.StorageKey;
+        db.ScanPages.Remove(page);
+        await audit.LogAsync(db, AuditAction.Delete, "FileScanPage", scanId.ToString(),
+            $"{page.FileName} v{page.Version}", "deleted",
+            $"Page {page.PageNo} scan removed from {page.Barcode}");
+        await db.SaveChangesAsync(ct);
+        if (!string.IsNullOrWhiteSpace(storageKey)) await TryDeleteAsync(storageKey);
+        await audit.AnnounceAsync(RealtimeChannels.Digitization, "page.removed", scanId.ToString(),
+            $"{page.FileName} removed from {page.Barcode}");
+        return Result<bool>.Ok(true);
+    }
+
+    public async Task<Result<FileScanPageDto>> ReviewAsync(long scanId, PageReviewInput input, CancellationToken ct)
+    {
+        var page = await db.ScanPages.FirstOrDefaultAsync(p => p.Id == scanId, ct);
+        if (page is null) return Result<FileScanPageDto>.Fail("Scan page not found.", "scanId");
+
+        var approve = string.Equals(input.Decision, "Approved", StringComparison.OrdinalIgnoreCase);
+        if (!approve && string.IsNullOrWhiteSpace(input.Note))
+            return Result<FileScanPageDto>.Fail("A rejection reason is required.", "note");
+
+        var before = Display.Page(page.Status);
+        page.Status = approve ? PageStatus.Approved : PageStatus.Rejected;
+        if (!string.IsNullOrWhiteSpace(input.Note)) page.Note = input.Note.Trim();
+
+        var fileId = await db.Files.Where(f => f.Barcode == page.Barcode).Select(f => (int?)f.Id).FirstOrDefaultAsync(ct) ?? 0;
+        await audit.LogAsync(db, approve ? AuditAction.Approve : AuditAction.Reject,
+            "FileScanPage", scanId.ToString(), $"status={before}", $"status={Display.Page(page.Status)}",
+            $"{page.FileName} {Display.Page(page.Status).ToLower()}");
+        await db.SaveChangesAsync(ct);
+        await audit.AnnounceAsync(RealtimeChannels.Digitization,
+            approve ? "page.approved" : "page.rejected", scanId.ToString(),
+            $"{page.FileName} {Display.Page(page.Status).ToLower()}");
+
+        return Result<FileScanPageDto>.Ok((await fileRefs.EnrichAsync(new[] { ToPage(page, fileId) }, ct))[0]);
+    }
+
+    public async Task<Result<int>> ReviewAllAsync(int fileId, PageReviewInput input, CancellationToken ct)
+    {
+        var file = await db.Files.FirstOrDefaultAsync(f => f.Id == fileId, ct);
+        if (file is null) return Result<int>.Fail("File not found.", "fileId");
+
+        var approve = string.Equals(input.Decision, "Approved", StringComparison.OrdinalIgnoreCase);
+        if (!approve && string.IsNullOrWhiteSpace(input.Note))
+            return Result<int>.Fail("A rejection reason is required.", "note");
+
+        var pending = await db.ScanPages
+            .Where(p => p.Barcode == file.Barcode && p.Status == PageStatus.PendingReview)
+            .ToListAsync(ct);
+        if (pending.Count == 0)
+            return Result<int>.Fail("No pages are awaiting review.", "fileId");
+
+        foreach (var page in pending)
+        {
+            page.Status = approve ? PageStatus.Approved : PageStatus.Rejected;
+            if (!string.IsNullOrWhiteSpace(input.Note)) page.Note = input.Note.Trim();
+        }
+
+        await audit.LogAsync(db, approve ? AuditAction.Approve : AuditAction.Reject,
+            "FileScanPage", file.Id.ToString(),
+            $"pending={pending.Count}",
+            $"{(approve ? "approved" : "rejected")}={pending.Count}",
+            $"{file.Barcode}: {pending.Count} page(s) {(approve ? "approved" : "rejected")}");
+        await db.SaveChangesAsync(ct);
+        await audit.AnnounceAsync(RealtimeChannels.Digitization,
+            approve ? "page.approved" : "page.rejected", file.Id.ToString(),
+            $"{file.Barcode}: {pending.Count} page(s) {(approve ? "approved" : "rejected")}");
+
+        return Result<int>.Ok(pending.Count);
+    }
+
+    public async Task<FileScanPageDto[]> PendingAsync(string? search, CancellationToken ct = default)
+    {
+        var query = db.ScanPages.AsNoTracking()
+            .Where(p => p.Status == PageStatus.PendingReview)
+            .OrderByDescending(p => p.UploadedAt).AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            // D1: no LOWER(column) in the predicate — identity columns match as
+            // a prefix, the free-text subject stays substring.
+            var needle = search.Trim();
+            var byNumber = db.Files.Where(f => f.FileNumber.StartsWith(needle)).Select(f => f.Barcode);
+            query = query.Where(p =>
+                p.Barcode.StartsWith(needle)
+                || p.FileName.Contains(needle)
+                || byNumber.Contains(p.Barcode));
+        }
+
+        var rows = await query.Take(200).ToListAsync(ct);
+        var fileIds = await db.Files.AsNoTracking()
+            .Where(f => rows.Select(r => r.Barcode).Contains(f.Barcode))
+            .ToDictionaryAsync(f => f.Barcode, f => f.Id, StringComparer.OrdinalIgnoreCase, ct);
+        return await fileRefs.EnrichAsync(
+            rows.Select(p => ToPage(p, fileIds.GetValueOrDefault(p.Barcode, 0))).ToArray(), ct);
+    }
+
+    public async Task<int> PendingReviewCountAsync(CancellationToken ct = default) =>
+        await db.ScanPages.CountAsync(p => p.Status == PageStatus.PendingReview, ct);
+}

@@ -23,8 +23,7 @@ public interface IFileRefs
     Task<MapUploadDto[]> EnrichAsync(MapUploadDto[] rows, CancellationToken ct = default);
     Task<IssueDto[]> EnrichAsync(IssueDto[] rows, CancellationToken ct = default);
     Task<MovementDto[]> EnrichAsync(MovementDto[] rows, CancellationToken ct = default);
-    Task<DigitizationBatchDto[]> EnrichAsync(DigitizationBatchDto[] rows, CancellationToken ct = default);
-    Task<DigitizationPageDto[]> EnrichAsync(DigitizationPageDto[] rows, CancellationToken ct = default);
+    Task<FileScanPageDto[]> EnrichAsync(FileScanPageDto[] rows, CancellationToken ct = default);
 
     /// <summary>File numbers for the given file ids.</summary>
     Task<Dictionary<int, string>> NumbersByIdAsync(IEnumerable<int> ids, CancellationToken ct = default);
@@ -119,19 +118,12 @@ public sealed partial class FileRefs(AppDbContext db, IFeatureFlags flags) : IFi
         }).ToArray();
     }
 
-    public async Task<DigitizationPageDto[]> EnrichAsync(DigitizationPageDto[] rows, CancellationToken ct = default)
+    public async Task<FileScanPageDto[]> EnrichAsync(FileScanPageDto[] rows, CancellationToken ct = default)
     {
         var files = await ByBarcodesAsync(rows.Select(r => r.FileBarcode), ct);
-        return rows.Select(r => files.TryGetValue(r.FileBarcode, out var f) ? r with { FileNumber = f.Number } : r).ToArray();
-    }
-
-    public async Task<DigitizationBatchDto[]> EnrichAsync(DigitizationBatchDto[] rows, CancellationToken ct = default)
-    {
-        var files = await ByBarcodesAsync(rows.SelectMany(b => b.Pages).Select(p => p.FileBarcode), ct);
-        return rows.Select(b => b with
-        {
-            Pages = b.Pages.Select(p => files.TryGetValue(p.FileBarcode, out var f) ? p with { FileNumber = f.Number } : p).ToArray(),
-        }).ToArray();
+        return rows.Select(r => files.TryGetValue(r.FileBarcode, out var f)
+            ? r with { FileNumber = f.Number, FileId = f.Id }
+            : r).ToArray();
     }
 
     [GeneratedRegex(@"\bRF-\d{6,}\s*[—–-]\s*")]

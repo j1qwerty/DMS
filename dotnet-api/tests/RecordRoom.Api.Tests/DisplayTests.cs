@@ -36,22 +36,6 @@ public class DisplayTests
         Assert.Equal(expected, Display.Page(status));
 
     [Theory]
-    [InlineData(BatchStatus.InProgress, "In progress")]
-    [InlineData(BatchStatus.Submitted, "Submitted")]
-    [InlineData(BatchStatus.Approved, "Approved")]
-    [InlineData(BatchStatus.PartiallyApproved, "Partially approved")]
-    public void Batch_status_uses_the_contract_spelling(BatchStatus status, string expected) =>
-        Assert.Equal(expected, Display.Batch(status));
-
-    [Theory]
-    [InlineData(DigitizationFolder.ServiceBook, "service_book")]
-    [InlineData(DigitizationFolder.LeaveReport, "leave_report")]
-    [InlineData(DigitizationFolder.Sr, "sr")]
-    [InlineData(DigitizationFolder.Apar, "apar")]
-    public void Folder_uses_the_legacy_slug(DigitizationFolder folder, string expected) =>
-        Assert.Equal(expected, Display.Folder(folder));
-
-    [Theory]
     [InlineData(MovementKind.LocationChange, "Location change")]
     [InlineData(MovementKind.FileCreated, "File created")]
     [InlineData(MovementKind.Issue, "Issue")]
@@ -88,22 +72,6 @@ public class DisplayTests
         Assert.Equal(status, Display.ParsePage(Display.Page(status)));
 
     [Theory]
-    [InlineData(BatchStatus.InProgress)]
-    [InlineData(BatchStatus.Submitted)]
-    [InlineData(BatchStatus.Approved)]
-    [InlineData(BatchStatus.PartiallyApproved)]
-    public void Batch_status_round_trips(BatchStatus status) =>
-        Assert.Equal(status, Display.ParseBatch(Display.Batch(status)));
-
-    [Theory]
-    [InlineData(DigitizationFolder.ServiceBook)]
-    [InlineData(DigitizationFolder.LeaveReport)]
-    [InlineData(DigitizationFolder.Sr)]
-    [InlineData(DigitizationFolder.Apar)]
-    public void Folder_round_trips(DigitizationFolder folder) =>
-        Assert.Equal(folder, Display.ParseFolder(Display.Folder(folder)));
-
-    [Theory]
     [InlineData(MovementKind.Issue)]
     [InlineData(MovementKind.Return)]
     [InlineData(MovementKind.LocationChange)]
@@ -122,7 +90,6 @@ public class DisplayTests
         Assert.Null(Display.ParseRecord(value));
         Assert.Null(Display.ParseIssue(value));
         Assert.Null(Display.ParsePage(value));
-        Assert.Null(Display.ParseBatch(value));
     }
 
     [Fact]
@@ -131,8 +98,6 @@ public class DisplayTests
         Assert.Null(Display.ParseRecord("Teleported"));
         Assert.Null(Display.ParseIssue("Teleported"));
         Assert.Null(Display.ParsePage("Teleported"));
-        Assert.Null(Display.ParseBatch("Teleported"));
-        Assert.Null(Display.ParseFolder("Teleported"));
     }
 
     [Fact]

@@ -160,7 +160,7 @@ builder.Services.AddScoped<IFilesService, FilesService>();
 builder.Services.AddScoped<IRecordFileDocumentsService, RecordFileDocumentsService>();
 builder.Services.AddSingleton<IPrivateDocumentStore, PrivateDocumentStore>();
 builder.Services.AddScoped<IIssuesService, IssuesService>();
-builder.Services.AddScoped<IDigitizationService, DigitizationService>();
+builder.Services.AddScoped<IFileScansService, FileScansService>();
 builder.Services.AddScoped<IEmployeesService, EmployeesService>();
 builder.Services.AddScoped<IUsersService, UsersService>();
 builder.Services.AddScoped<IContentService, ContentService>();

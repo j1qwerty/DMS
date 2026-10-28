@@ -278,129 +278,6 @@ namespace RecordRoom.Api.Migrations
                     b.ToTable("BulkImportRows", (string)null);
                 });
 
-            modelBuilder.Entity("RecordRoom.Api.Domain.DigitizationBatch", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
-
-                    b.Property<string>("Code")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedBy")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("Department")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("EmployeeCode")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(32)");
-
-                    b.Property<string>("EmployeeName")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<int>("Folder")
-                        .HasColumnType("int");
-
-                    b.Property<int>("Status")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime?>("SubmittedAt")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Code")
-                        .IsUnique();
-
-                    b.HasIndex("EmployeeCode", "Folder", "Status");
-
-                    b.ToTable("DigitizationBatches", (string)null);
-                });
-
-            modelBuilder.Entity("RecordRoom.Api.Domain.DigitizationPage", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
-
-                    b.Property<string>("Barcode")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<long>("BatchId")
-                        .HasColumnType("bigint");
-
-                    b.Property<bool>("Bulk")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("ContentType")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<string>("FileName")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("Note")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<int?>("PageCount")
-                        .HasColumnType("int");
-
-                    b.Property<int?>("PageIndex")
-                        .HasColumnType("int");
-
-                    b.Property<int>("PageNo")
-                        .HasColumnType("int");
-
-                    b.Property<string>("Sha256")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<long?>("SizeBytes")
-                        .HasColumnType("bigint");
-
-                    b.Property<int>("Status")
-                        .HasColumnType("int");
-
-                    b.Property<string>("StorageKey")
-                        .HasMaxLength(80)
-                        .HasColumnType("nvarchar(80)");
-
-                    b.Property<DateTime>("UploadedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UploadedBy")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<int>("Version")
-                        .HasColumnType("int");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("BatchId");
-
-                    b.HasIndex("Barcode", "PageNo", "Version")
-                        .IsUnique();
-
-                    b.ToTable("DigitizationPages", (string)null);
-                });
-
             modelBuilder.Entity("RecordRoom.Api.Domain.Employee", b =>
                 {
                     b.Property<int>("Id")
@@ -483,6 +360,78 @@ namespace RecordRoom.Api.Migrations
                         .IsUnique();
 
                     b.ToTable("Employees", (string)null);
+                });
+
+            modelBuilder.Entity("RecordRoom.Api.Domain.FileScanPage", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("Barcode")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("ContentType")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("DocumentSize")
+                        .IsRequired()
+                        .HasMaxLength(8)
+                        .HasColumnType("nvarchar(8)");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Note")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int?>("PageCount")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("PageIndex")
+                        .HasColumnType("int");
+
+                    b.Property<int>("PageNo")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Sha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<long?>("SizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<string>("StorageKey")
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)");
+
+                    b.Property<DateTime>("UploadedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UploadedBy")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("Barcode", "PageNo", "Version")
+                        .IsUnique();
+
+                    b.ToTable("FileScanPages", (string)null);
                 });
 
             modelBuilder.Entity("RecordRoom.Api.Domain.Inquiry", b =>
@@ -1261,34 +1210,14 @@ namespace RecordRoom.Api.Migrations
                     b.Navigation("Job");
                 });
 
-            modelBuilder.Entity("RecordRoom.Api.Domain.DigitizationBatch", b =>
-                {
-                    b.HasOne("RecordRoom.Api.Domain.Employee", "Employee")
-                        .WithMany("Batches")
-                        .HasForeignKey("EmployeeCode")
-                        .HasPrincipalKey("EmployeeCode")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Employee");
-                });
-
-            modelBuilder.Entity("RecordRoom.Api.Domain.DigitizationPage", b =>
+            modelBuilder.Entity("RecordRoom.Api.Domain.FileScanPage", b =>
                 {
                     b.HasOne("RecordRoom.Api.Domain.RecordFile", "RecordFile")
-                        .WithMany("Pages")
+                        .WithMany("ScanPages")
                         .HasForeignKey("Barcode")
                         .HasPrincipalKey("Barcode")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
-
-                    b.HasOne("RecordRoom.Api.Domain.DigitizationBatch", "Batch")
-                        .WithMany("Pages")
-                        .HasForeignKey("BatchId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Batch");
 
                     b.Navigation("RecordFile");
                 });
@@ -1402,15 +1331,8 @@ namespace RecordRoom.Api.Migrations
                     b.Navigation("Rows");
                 });
 
-            modelBuilder.Entity("RecordRoom.Api.Domain.DigitizationBatch", b =>
-                {
-                    b.Navigation("Pages");
-                });
-
             modelBuilder.Entity("RecordRoom.Api.Domain.Employee", b =>
                 {
-                    b.Navigation("Batches");
-
                     b.Navigation("Users");
                 });
 
@@ -1427,7 +1349,7 @@ namespace RecordRoom.Api.Migrations
 
                     b.Navigation("Maps");
 
-                    b.Navigation("Pages");
+                    b.Navigation("ScanPages");
                 });
 
             modelBuilder.Entity("RecordRoom.Api.Domain.Room", b =>

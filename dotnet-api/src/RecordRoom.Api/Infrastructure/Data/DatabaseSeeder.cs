@@ -261,64 +261,42 @@ public static class DatabaseSeeder
                 unbound.Count, string.Join("; ", unbound));
         }
 
-        // -------------------------------------------------- digitization + receipts
+        // -------------------------------------------------- file scans + receipts
         var files = await db.Files.ToListAsync(ct);
 
-        var batchSeed = new (string Code, string Emp, DigitizationFolder Folder, BatchStatus Status)[]
+        // Scan pages seeded per file (no batches — file-centric digitization):
+        // one fully approved file, one partially reviewed, one fully pending so
+        // the review queue has work to show.
+        var scanSeed = new[]
         {
-            ("BATCH-041", "EMP0003", DigitizationFolder.Apar, BatchStatus.Approved),
-            ("BATCH-040", "EMP0004", DigitizationFolder.LeaveReport, BatchStatus.PartiallyApproved),
-            ("BATCH-039", "EMP0001", DigitizationFolder.ServiceBook, BatchStatus.Submitted),
+            new[] { PageStatus.Approved, PageStatus.Approved },
+            new[] { PageStatus.Approved, PageStatus.Rejected },
+            new[] { PageStatus.PendingReview, PageStatus.PendingReview },
         };
 
-        // One distinct target per batch: (barcode, pageNo, version) is unique
-        // across the table, so two batches scanning one page would collide.
         var targets = files.Where(f => f.Status == RecordStatus.UnderDigitization).ToList();
-        while (targets.Count < batchSeed.Length)
+        while (targets.Count < scanSeed.Length)
         {
             var extra = files.FirstOrDefault(f => !targets.Contains(f));
             if (extra is null) break;
             targets.Add(extra);
         }
 
-        for (var b = 0; b < batchSeed.Length; b++)
+        for (var t = 0; t < targets.Count && t < scanSeed.Length; t++)
         {
-            var (code, empCode, folder, status) = batchSeed[b];
-            var emp = await db.Employees.FirstAsync(e => e.EmployeeCode == empCode, ct);
-            var batch = new DigitizationBatch
+            var target = targets[t];
+            for (var p = 0; p < scanSeed[t].Length; p++)
             {
-                Code = code,
-                EmployeeCode = emp.EmployeeCode,
-                EmployeeName = emp.Name,
-                Department = emp.Department,
-                Folder = folder,
-                Status = status,
-                CreatedAt = DateTime.UtcNow.AddDays(-4),
-                CreatedBy = "seed",
-                SubmittedAt = status == BatchStatus.InProgress ? null : DateTime.UtcNow.AddDays(-2),
-            };
-            db.Batches.Add(batch);
-            await db.SaveChangesAsync(ct);
-
-            var target = targets[b % targets.Count];
-            var pageStatus = status switch
-            {
-                BatchStatus.Approved => new[] { PageStatus.Approved, PageStatus.Approved },
-                BatchStatus.PartiallyApproved => new[] { PageStatus.Approved, PageStatus.Rejected },
-                _ => new[] { PageStatus.PendingReview, PageStatus.PendingReview },
-            };
-
-            for (var p = 0; p < pageStatus.Length; p++)
-            {
-                db.Pages.Add(new DigitizationPage
+                var status = scanSeed[t][p];
+                db.ScanPages.Add(new FileScanPage
                 {
-                    BatchId = batch.Id,
                     Barcode = target.Barcode,
                     FileName = $"{target.Barcode}-FILE-{p + 1}.pdf",
                     PageNo = p + 1,
                     Version = 1,
-                    Status = pageStatus[p],
-                    Note = pageStatus[p] == PageStatus.Rejected
+                    DocumentSize = target.DocumentSize,
+                    Status = status,
+                    Note = status == PageStatus.Rejected
                         ? "Skew beyond 5 degree tolerance"
                         : string.Empty,
                     UploadedAt = DateTime.UtcNow.AddDays(-3),
@@ -428,10 +406,10 @@ public static class DatabaseSeeder
         await RefreshLocationDisplayAsync(db, ct);
 
         logger.LogInformation(
-            "Seeded {Rooms} rooms, {Files} files, {Batches} batches, {Issues} receipts.",
+            "Seeded {Rooms} rooms, {Files} files, {Scans} scan pages, {Issues} receipts.",
             await db.Rooms.CountAsync(ct),
             await db.Files.CountAsync(ct),
-            await db.Batches.CountAsync(ct),
+            await db.ScanPages.CountAsync(ct),
             await db.Issues.CountAsync(ct));
     }
 

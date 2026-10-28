@@ -1,39 +1,24 @@
 namespace RecordRoom.Api.Domain;
 
-public class DigitizationBatch
-{
-    public long Id { get; set; }
-    public required string Code { get; set; }
-    public required string EmployeeCode { get; set; }
-    public string EmployeeName { get; set; } = string.Empty;
-    public string Department { get; set; } = string.Empty;
-    public DigitizationFolder Folder { get; set; }
-    public BatchStatus Status { get; set; } = BatchStatus.InProgress;
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-    public string CreatedBy { get; set; } = string.Empty;
-    public DateTime? SubmittedAt { get; set; }
-
-    public Employee? Employee { get; set; }
-    public List<DigitizationPage> Pages { get; set; } = [];
-}
-
 /// <summary>
-/// A scanned page. Keyed by barcode + page number; a re-scan stores the next
-/// <see cref="Version"/> rather than overwriting a possibly-approved page.
+/// A scanned page of a physical file. Keyed by file barcode + page number; a
+/// re-scan stores the next <see cref="Version"/> rather than overwriting a
+/// possibly-approved page. Review is per page; the Digitization section is the
+/// pending-review queue across files (there are no employee batches).
 /// </summary>
-public class DigitizationPage
+public class FileScanPage
 {
     public long Id { get; set; }
-    public long BatchId { get; set; }
     public required string Barcode { get; set; }
     public required string FileName { get; set; }
     public int PageNo { get; set; }
     public int Version { get; set; } = 1;
+    /// <summary>Physical sheet size (A0–A4, Other); same options as the file.</summary>
+    public string DocumentSize { get; set; } = "Other";
     public PageStatus Status { get; set; } = PageStatus.PendingReview;
     public string Note { get; set; } = string.Empty;
     public DateTime UploadedAt { get; set; } = DateTime.UtcNow;
     public string UploadedBy { get; set; } = string.Empty;
-    public bool Bulk { get; set; }
     public string? StorageKey { get; set; }
     public string? ContentType { get; set; }
     public long? SizeBytes { get; set; }
@@ -43,7 +28,6 @@ public class DigitizationPage
     /// <summary>1-based page within a multi-page PDF that this row represents.</summary>
     public int? PageIndex { get; set; }
 
-    public DigitizationBatch? Batch { get; set; }
     public RecordFile? RecordFile { get; set; }
 }
 

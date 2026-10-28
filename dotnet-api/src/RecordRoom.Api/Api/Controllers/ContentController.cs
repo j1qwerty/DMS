@@ -12,51 +12,60 @@ namespace RecordRoom.Api.Api.Controllers;
 [Authorize]
 [Produces("application/json")]
 [Tags("Digitization")]
-public class DigitizationController(IDigitizationService digitization) : ControllerBase
+public class DigitizationController(IFileScansService scans) : ControllerBase
 {
-    [HttpGet("batches")]
-    public async Task<IResult> Batches(
-        [FromQuery] string? employeeCode,
-        [FromQuery] string? folder,
-        [FromQuery] string? status,
-        [FromQuery] string? search,
-        CancellationToken ct) =>
-        Results.Ok(ApiResponse<DigitizationBatchDto[]>.Ok(
-            await digitization.BatchesAsync(employeeCode, folder, status, search, ct)));
-
+    /// <summary>How many scan pages are waiting for review (dashboard badge).</summary>
     [HttpGet("pending-review-count")]
     public async Task<IResult> Pending(CancellationToken ct) =>
-        Results.Ok(ApiResponse<int>.Ok(await digitization.PendingReviewCountAsync(ct)));
+        Results.Ok(ApiResponse<int>.Ok(await scans.PendingReviewCountAsync(ct)));
 
-    [HttpGet("batches/{id:long}")]
-    public async Task<IResult> Batch(long id, CancellationToken ct)
-    {
-        var batch = await digitization.BatchAsync(id, ct);
-        return batch is null ? Results.NotFound() : Results.Ok(ApiResponse<DigitizationBatchDto>.Ok(batch));
-    }
+    /// <summary>The pending-review queue across files — the Digitization section itself.</summary>
+    [HttpGet("pending")]
+    public async Task<IResult> Queue([FromQuery] string? search, CancellationToken ct) =>
+        Results.Ok(ApiResponse<FileScanPageDto[]>.Ok(await scans.PendingAsync(search, ct)));
+}
+
+[ApiController]
+[Route("api/files/{fileId:int}/scans")]
+[Authorize]
+[Produces("application/json")]
+[Tags("Files")]
+public class FileScansController(IFileScansService scans) : ControllerBase
+{
+    [HttpGet]
+    public async Task<IResult> List(int fileId, CancellationToken ct) =>
+        Results.Ok(ApiResponse<FileScanPageDto[]>.Ok(await scans.ListByFileAsync(fileId, ct)));
 
     [Authorize(Roles = "Admin,Supervisor,Operator")]
-    [HttpPost("batches")]
-    public async Task<IResult> Create(BatchCreateInput input, CancellationToken ct) =>
-        ApiResults.FromResult(await digitization.CreateBatchAsync(input, ct));
+    [HttpPost]
+    public async Task<IResult> Add(int fileId, ScanAddInput input, CancellationToken ct) =>
+        ApiResults.FromResult(await scans.AddAsync(fileId, input, ct));
 
-    [Authorize(Roles = "Admin,Supervisor,Operator")]
-    [HttpPost("batches/{id:long}/pages")]
-    public async Task<IResult> UploadPage(long id, PageUploadInput input, CancellationToken ct) =>
-        ApiResults.FromResult(await digitization.UploadPageAsync(id, input, ct));
+    [Authorize(Roles = "Admin,Supervisor")]
+    [HttpPost("review-all")]
+    public async Task<IResult> ReviewAll(int fileId, PageReviewInput input, CancellationToken ct) =>
+        ApiResults.FromResult(await scans.ReviewAllAsync(fileId, input, ct));
+}
 
+[ApiController]
+[Route("api/scans")]
+[Authorize]
+[Produces("application/json")]
+[Tags("Digitization")]
+public class ScansController(IFileScansService scans) : ControllerBase
+{
     [Authorize(Roles = "Admin,Supervisor,Operator")]
-    [HttpPost("pages/{pageId:long}/document")]
+    [HttpPost("{scanId:long}/document")]
     [Consumes("multipart/form-data")]
     [RequestSizeLimit(50331648)]
     [RequestFormLimits(MultipartBodyLengthLimit = 50331648)]
-    public async Task<IResult> UploadPageDocument(long pageId, [FromForm] IFormFile? document, CancellationToken ct) =>
-        ApiResults.FromResult(await digitization.UploadPageDocumentAsync(pageId, document, ct));
+    public async Task<IResult> UploadDocument(long scanId, [FromForm] IFormFile? document, CancellationToken ct) =>
+        ApiResults.FromResult(await scans.AddDocumentAsync(scanId, document, ct));
 
-    [HttpGet("pages/{pageId:long}/content")]
-    public async Task<IActionResult> PageContent(long pageId, [FromQuery] bool download = false, CancellationToken ct = default)
+    [HttpGet("{scanId:long}/content")]
+    public async Task<IActionResult> Content(long scanId, [FromQuery] bool download = false, CancellationToken ct = default)
     {
-        var item = await digitization.OpenPageDocumentAsync(pageId, ct);
+        var item = await scans.OpenDocumentAsync(scanId, ct);
         if (item is null) return NotFound();
         Response.Headers["Cache-Control"] = "private, no-store";
         Response.Headers["X-Content-Type-Options"] = "nosniff";
@@ -65,19 +74,14 @@ public class DigitizationController(IDigitizationService digitization) : Control
     }
 
     [Authorize(Roles = "Admin,Supervisor")]
-    [HttpDelete("pages/{pageId:long}")]
-    public async Task<IResult> RemovePage(long pageId, CancellationToken ct) =>
-        ApiResults.FromResult(await digitization.RemovePageAsync(pageId, ct));
+    [HttpDelete("{scanId:long}")]
+    public async Task<IResult> Remove(long scanId, CancellationToken ct) =>
+        ApiResults.FromResult(await scans.RemoveAsync(scanId, ct));
 
     [Authorize(Roles = "Admin,Supervisor")]
-    [HttpPost("pages/{pageId:long}/review")]
-    public async Task<IResult> ReviewPage(long pageId, PageReviewInput input, CancellationToken ct) =>
-        ApiResults.FromResult(await digitization.ReviewPageAsync(pageId, input, ct));
-
-    [Authorize(Roles = "Admin,Supervisor")]
-    [HttpPost("batches/{id:long}/review")]
-    public async Task<IResult> ReviewBatch(long id, PageReviewInput input, CancellationToken ct) =>
-        ApiResults.FromResult(await digitization.ReviewBatchAsync(id, input, ct));
+    [HttpPost("{scanId:long}/review")]
+    public async Task<IResult> Review(long scanId, PageReviewInput input, CancellationToken ct) =>
+        ApiResults.FromResult(await scans.ReviewAsync(scanId, input, ct));
 }
 
 internal static class DocumentHttpHeaders

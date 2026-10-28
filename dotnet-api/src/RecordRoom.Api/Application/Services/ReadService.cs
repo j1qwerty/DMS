@@ -144,10 +144,10 @@ public sealed class ReadService(AppDbContext db, ICacheService cache, IFileRefs 
             var borrowers = await db.Issues.AsNoTracking()
                 .Where(i => i.Status != IssueStatus.Returned)
                 .Select(i => i.BorrowerEmployeeCode).Distinct().CountAsync(ct);
-            var pending = await db.Pages.CountAsync(p => p.Status == PageStatus.PendingReview, ct);
+            var pending = await db.ScanPages.CountAsync(p => p.Status == PageStatus.PendingReview, ct);
             var rooms = await db.Rooms.CountAsync(ct);
-            var pageCount = await db.Pages.CountAsync(ct);
-            var approved = await db.Pages.CountAsync(p => p.Status == PageStatus.Approved, ct);
+            var pageCount = await db.ScanPages.CountAsync(ct);
+            var approved = await db.ScanPages.CountAsync(p => p.Status == PageStatus.Approved, ct);
 
             // Mirrors the frontend's honesty rule: the registry total is the
             // legacy collection size, never the loaded page count.

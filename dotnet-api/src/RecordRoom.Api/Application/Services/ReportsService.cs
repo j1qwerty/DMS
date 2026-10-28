@@ -40,8 +40,8 @@ public sealed class ReportsService(AppDbContext db, IFeatureFlags flags) : IRepo
             ["Barcode", "Number", "Subject", "Department", "Year", "Status", "Shelf", "Shelf barcode", "Last movement"],
             "File.php file listing"),
         new("digitization-progress", "Digitization progress",
-            "Batch-level page counts with approval state per batch.",
-            ["Batch", "Employee", "Code", "Department", "Folder", "Pages", "Approved", "Rejected", "Pending", "Status"],
+            "Per-file scan page counts with approval state per file.",
+            ["FileNumber", "Barcode", "Department", "Year", "Pages", "Approved", "Rejected", "Pending", "FileStatus"],
             "User.php uploadservice report"),
         new("login-history", "Login history",
             "Web and mobile sign-in attempts with IP, client and outcome.",
@@ -125,16 +125,17 @@ public sealed class ReportsService(AppDbContext db, IFeatureFlags flags) : IRepo
                 f.Shelf?.Code ?? string.Empty, f.ShelfBarcode, Stamp(f.LastMovementAt),
             }).ToArray(),
 
-        "digitization-progress" => db.Batches.AsNoTracking().Include(b => b.Pages)
-            .OrderByDescending(b => b.CreatedAt).ToList()
-            .Select(b => new object[]
+        "digitization-progress" => db.Files.AsNoTracking()
+            .Where(f => f.ScanPages.Any())
+            .OrderBy(f => f.Barcode).ToList()
+            .Select(f => new object[]
             {
-                b.Code, b.EmployeeName, b.EmployeeCode, b.Department, b.Folder.ToString(),
-                b.Pages.Count,
-                b.Pages.Count(p => p.Status == PageStatus.Approved),
-                b.Pages.Count(p => p.Status == PageStatus.Rejected),
-                b.Pages.Count(p => p.Status == PageStatus.PendingReview),
-                b.Status.ToString(),
+                f.FileNumber, f.Barcode, f.Department, f.Year,
+                f.ScanPages.Count,
+                f.ScanPages.Count(p => p.Status == PageStatus.Approved),
+                f.ScanPages.Count(p => p.Status == PageStatus.Rejected),
+                f.ScanPages.Count(p => p.Status == PageStatus.PendingReview),
+                Display.Record(f.Status),
             }).ToArray(),
 
         "login-history" => db.LoginHistory.AsNoTracking()

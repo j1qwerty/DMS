@@ -155,14 +155,6 @@ public sealed class EmployeesService(AppDbContext db, IAuditWriter audit) : IEmp
         employee.Status = status;
         employee.ModifiedAt = DateTime.UtcNow;
 
-        // Keep batch display names in step with the employee record.
-        var batches = await db.Batches.Where(b => b.EmployeeCode == employee.EmployeeCode).ToListAsync(ct);
-        foreach (var batch in batches)
-        {
-            batch.EmployeeName = employee.Name;
-            batch.Department = employee.Department;
-        }
-
         await audit.LogAsync(db, AuditAction.Update, "Employee", id.ToString(),
             before, $"{employee.EmployeeCode} - {employee.Status}",
             $"Employee {employee.EmployeeCode} updated");
@@ -177,13 +169,6 @@ public sealed class EmployeesService(AppDbContext db, IAuditWriter audit) : IEmp
     {
         var employee = await db.Employees.FirstOrDefaultAsync(e => e.Id == id, ct);
         if (employee is null) return Result<bool>.Fail("Employee not found.", "id");
-
-        var batches = await db.Batches.CountAsync(b => b.EmployeeCode == employee.EmployeeCode, ct);
-        if (batches > 0)
-        {
-            return Result<bool>.Fail(
-                $"{batches} digitization batch(es) reference this employee. Reassign or delete them first.", "id");
-        }
 
         db.Employees.Remove(employee);
         await audit.LogAsync(db, AuditAction.Delete, "Employee", id.ToString(),

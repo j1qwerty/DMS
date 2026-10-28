@@ -47,7 +47,7 @@ public class RecordFile
 
     public Shelf? Shelf { get; set; }
     public List<IssueLine> IssueLines { get; set; } = [];
-    public List<DigitizationPage> Pages { get; set; } = [];
+    public List<FileScanPage> ScanPages { get; set; } = [];
     public List<MapUpload> Maps { get; set; } = [];
     public List<RecordFileDocument> Documents { get; set; } = [];
 }
