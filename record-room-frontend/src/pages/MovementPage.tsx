@@ -13,6 +13,7 @@ import { Card } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
 import { SelectInput, TextInput } from '../components/ui/Field';
 import { EmptyState } from '../components/ui/EmptyState';
+import { RowSkeleton } from '../components/ui/Skeletons';
 import { Flash } from '../components/ui/Flash';
 import { useService, useQuery } from '../hooks/useService';
 import { formatNumber } from '../lib/utils';
@@ -139,15 +140,13 @@ export function MovementPage() {
           </SelectInput>
         </div>
 
-        {rows.length === 0 ? (
+        {loading && rows.length === 0 ? (
+          <RowSkeleton rows={7} />
+        ) : rows.length === 0 ? (
           <div className="p-6">
             <EmptyState
-              title={loading ? 'Loading movement events' : 'No movement events match'}
-              description={
-                loading
-                  ? 'Asking the registry for the events that match these filters.'
-                  : 'Clear the filters, or issue a file from the issue desk to see a new event appear here.'
-              }
+              title="No movement events match"
+              description="Clear the filters, or issue a file from the issue desk to see a new event appear here."
             />
           </div>
         ) : (

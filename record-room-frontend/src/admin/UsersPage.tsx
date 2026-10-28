@@ -8,6 +8,7 @@ import { Modal } from '../components/ui/Modal';
 import { Field, SelectInput, TextInput } from '../components/ui/Field';
 import { Flash, StatusBadge } from '../components/ui/Flash';
 import { EmptyState } from '../components/ui/EmptyState';
+import { TableSkeleton } from '../components/ui/Skeletons';
 import { useQuery, useService, useSession } from '../hooks/useService';
 import { ROLE_DESCRIPTIONS } from '../services/permissions';
 import { PERMISSIONS } from '../services/permissions';
@@ -89,14 +90,13 @@ export function UsersPage() {
       {flash && <Flash tone={flash.tone} text={flash.text} onDismiss={() => setFlash(null)} />}
 
       <Card padding={false} className="overflow-hidden">
-        {users.length === 0 ? (
+        {loading && users.length === 0 ? (
           <div className="p-6">
-            <EmptyState
-              title={loading ? 'Loading logins' : 'No logins'}
-              description={
-                loading ? 'Asking for the login table.' : 'Add a login to give someone access.'
-              }
-            />
+            <TableSkeleton rows={5} columns={[1.6, 1, 2, 1, 1.4, 1]} />
+          </div>
+        ) : users.length === 0 ? (
+          <div className="p-6">
+            <EmptyState title="No logins" description="Add a login to give someone access." />
           </div>
         ) : (
           <div className="overflow-x-auto">

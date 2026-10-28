@@ -18,6 +18,7 @@ import { Field, SelectInput } from '../components/ui/Field';
 import { Pagination } from '../components/ui/Pagination';
 import { Flash, StatusBadge } from '../components/ui/Flash';
 import { EmptyState } from '../components/ui/EmptyState';
+import { TableSkeleton } from '../components/ui/Skeletons';
 import { FileRowActions } from '../components/files/FileRowActions';
 import { useFileActions } from '../components/files/useFileActions';
 import { useFlash, useQuery, useService, useSession } from '../hooks/useService';
@@ -465,21 +466,21 @@ export function FilesPage() {
           )}
         </div>
 
-        {result.items.length === 0 ? (
+        {loading && result.items.length === 0 ? (
+          <div className="p-4 sm:p-6">
+            <TableSkeleton rows={10} columns={[1.7, 1.5, 3, 1.3, 0.8, 1.2]} />
+          </div>
+        ) : result.items.length === 0 ? (
           <div className="p-4 sm:p-6">
             <EmptyState
-              title={loading ? 'Loading files' : 'No files match'}
-              description={
-                loading
-                  ? 'Asking the registry for matching rows.'
-                  : 'Try fewer words, or clear a filter. The registry holds far more rows than one page shows.'
-              }
+              title="No files match"
+              description="Try fewer words, or clear a filter. The registry holds far more rows than one page shows."
               action={
-                loading || !anythingSet ? undefined : (
+                anythingSet ? (
                   <Button variant="ghost" onClick={clearAll}>
                     Clear all filters
                   </Button>
-                )
+                ) : undefined
               }
             />
           </div>

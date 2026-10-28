@@ -1,4 +1,4 @@
-﻿import { useState } from 'react';
+import { useState } from 'react';
 import {
   IdentificationCard,
   MagnifyingGlass,
@@ -13,6 +13,7 @@ import { Modal } from '../components/ui/Modal';
 import { Field, FormGrid, SelectInput, TextInput } from '../components/ui/Field';
 import { Flash, StatusBadge } from '../components/ui/Flash';
 import { EmptyState } from '../components/ui/EmptyState';
+import { TableSkeleton } from '../components/ui/Skeletons';
 import { Pagination } from '../components/ui/Pagination';
 import { useQuery, useService, useSession } from '../hooks/useService';
 import type { Page } from '../services/contracts';
@@ -137,24 +138,22 @@ export function EmployeesPage() {
           </SelectInput>
         </div>
 
-        {result.items.length === 0 ? (
+        {loading && result.items.length === 0 ? (
+          <div className="p-6">
+            <TableSkeleton rows={9} columns={[1.2, 2.5, 1.8, 1.6, 1, 1.4, 0.9]} />
+          </div>
+        ) : result.items.length === 0 ? (
           <div className="p-6">
             <EmptyState
-              title={loading ? 'Loading employees' : 'No employees match'}
-              description={
-                loading
-                  ? 'Asking the employee registry for the matching rows.'
-                  : 'Clear the filters or add a new employee record.'
-              }
+              title="No employees match"
+              description="Clear the filters or add a new employee record."
               action={
-                loading ? undefined : (
-                  <Button
-                    variant="ghost"
-                    onClick={() => patch({ search: '', department: 'All', status: 'All' })}
-                  >
-                    Clear filters
-                  </Button>
-                )
+                <Button
+                  variant="ghost"
+                  onClick={() => patch({ search: '', department: 'All', status: 'All' })}
+                >
+                  Clear filters
+                </Button>
               }
             />
           </div>

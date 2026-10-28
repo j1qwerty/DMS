@@ -6,6 +6,7 @@ import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { SelectInput } from '../components/ui/Field';
 import { EmptyState } from '../components/ui/EmptyState';
+import { RowSkeleton } from '../components/ui/Skeletons';
 import { StatusBadge } from '../components/ui/Flash';
 import { PageHeader } from '../components/ui/PageHeader';
 import { DecorativeField } from '../components/DecorativeField';
@@ -147,15 +148,15 @@ export function SearchPage() {
         <p className="muted text-xs">Server-side pagination in production</p>
       </div>
 
-      {result.items.length === 0 ? (
+      {loading && result.items.length === 0 ? (
+        <RowSkeleton rows={7} />
+      ) : result.items.length === 0 ? (
         <EmptyState
-          title={loading ? 'Searching the registry' : 'Nothing matched that search'}
+          title="Nothing matched that search"
           description={
-            loading
-              ? 'Asking the registry for rows that match the current search.'
-              : barcode
-                ? 'Try a barcode prefix, a file number, a department, or clear the filters.'
-                : 'Try a file number, a department, or clear the filters.'
+            barcode
+              ? 'Try a barcode prefix, a file number, a department, or clear the filters.'
+              : 'Try a file number, a department, or clear the filters.'
           }
           action={
             loading ? undefined : (

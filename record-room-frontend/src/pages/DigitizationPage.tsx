@@ -8,6 +8,7 @@ import { Modal } from '../components/ui/Modal';
 import { Field, TextArea, TextInput } from '../components/ui/Field';
 import { Flash } from '../components/ui/Flash';
 import { EmptyState } from '../components/ui/EmptyState';
+import { RowSkeleton } from '../components/ui/Skeletons';
 import { useQuery, useService, useSession } from '../hooks/useService';
 import type { FileScan } from '../types';
 
@@ -82,15 +83,13 @@ export function DigitizationPage() {
           />
         </div>
 
-        {queue.length === 0 ? (
+        {loading && queue.length === 0 ? (
+          <RowSkeleton rows={6} />
+        ) : queue.length === 0 ? (
           <div className="p-6">
             <EmptyState
-              title={loading ? 'Loading the queue' : 'Nothing awaits review'}
-              description={
-                loading
-                  ? 'Asking the digitization register for pending pages.'
-                  : 'Add page scans from a file page; they appear here for review.'
-              }
+              title="Nothing awaits review"
+              description="Add page scans from a file page; they appear here for review."
               action={
                 <Link to="/files" className="focus-ring text-xs font-semibold text-accent">
                   Open the registry

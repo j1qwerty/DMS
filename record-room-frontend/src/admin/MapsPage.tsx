@@ -16,6 +16,7 @@ import { Modal } from '../components/ui/Modal';
 import { Badge } from '../components/ui/Badge';
 import { Flash, StatusBadge } from '../components/ui/Flash';
 import { EmptyState } from '../components/ui/EmptyState';
+import { TableSkeleton } from '../components/ui/Skeletons';
 import { DropZone } from '../components/files/DropZone';
 import { UploadMapModal } from '../components/files/FileActionModals';
 import { useFlash, useQuery, useService, useSession } from '../hooks/useService';
@@ -161,19 +162,17 @@ export function MapsPage() {
           </div>
         </div>
 
-        {rows.length === 0 ? (
+        {loading && rows.length === 0 ? (
+          <div className="p-4 sm:p-6">
+            <TableSkeleton rows={9} columns={[1.5, 2.5, 1.5, 1.2, 1.2, 1]} />
+          </div>
+        ) : rows.length === 0 ? (
           <div className="p-4 sm:p-6">
             <EmptyState
-              title={
-                loading ? 'Loading maps' : search ? 'No maps match that search' : 'No maps yet'
-              }
-              description={
-                loading
-                  ? 'Fetching stored map pages.'
-                  : 'Upload a scanned map to attach it to a file in the registry.'
-              }
+              title={search ? 'No maps match that search' : 'No maps yet'}
+              description="Upload a scanned map to attach it to a file in the registry."
               action={
-                !loading && canUpload ? (
+                canUpload ? (
                   <Button onClick={() => setPicking(true)} icon={<MapPinPlus size={17} />}>
                     Upload map
                   </Button>
