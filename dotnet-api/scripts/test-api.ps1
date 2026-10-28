@@ -503,7 +503,7 @@ Assert-Equal 400 $badBarcode.Status 'a page for an unknown barcode is refused'
 $employee = Invoke-Api -Path '/api/employees?pageSize=50' -Token $admin
 Assert-True ($employee.Status -eq 200) 'the employee master is readable'
 $aparOwners = @($batches.Data.data |
-    Where-Object { $_.folder -eq 'apar' } |
+    Where-Object { $_.folder -eq 'apar' -and $_.status -ne 'Approved' } |
     Select-Object -ExpandProperty employeeCode -Unique)
 $freeEmp = @($employee.Data.data.items |
     Where-Object { $aparOwners -notcontains $_.employeeCode })[0]
@@ -534,6 +534,15 @@ if (-not $SkipDestructive) {
             decision = 'Approved'; note = ''
         }
         Assert-Equal 200 $approved.Status 'a page can be approved'
+
+        # Approve the batch itself. The open-batch guard only ignores Approved
+        # batches, so leaving the smoke-test batch open would poison the next
+        # run: every employee would already have an apar batch and the write
+        # test would find no free employee.
+        $batchDone = Invoke-Api -Method POST -Path "/api/digitization/batches/$testBatchId/review" -Token $admin -Body @{
+            decision = 'Approved'; note = ''
+        }
+        Assert-Equal 200 $batchDone.Status 'the smoke-test batch is approved so the employee frees up'
     }
     else {
         Write-Fail "could not open a test batch: $($newBatch.Body)"

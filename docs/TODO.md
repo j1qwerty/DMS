@@ -16,14 +16,15 @@ and the done-definitions; this file carries the "is it done yet".
 ## 0. Repo / housekeeping
 
 - [x] `git init -b main` + baseline commit of the full working tree — `301d74d`
-- [ ] Add `.gitattributes` (`* text=auto eol=lf`) + `git add --renormalize .` **(P — await approval; baseline commit already emitted ~130 LF→CRLF warnings, proof of the defect)** → §2.1 #5
+- [x] Add `.gitattributes` (`* text=auto eol=lf`) + `git add --renormalize .` — approved 2026-10-28, done `3b0de66`
 - [x] Decide on lost git history — no original clone available; baseline `301d74d` is canonical
 - [x] Prune plan references to files that no longer exist (legacy PHP app, Word proposal, old hashes) — §1 note added
 - [ ] Question still open for the README/AGENTS/deploy scripts: they still plan for `jhs_digitization-og-php-app/`, which is not on disk (reference-only docs, no code depends on it). Prune or keep as provenance **(P)**
+- [x] Restore the lost "no Redis must not 500" fix — the plan's `30da20a` did not survive into this tree; `GetService` degradation restored in `e1dd88d`, health endpoint verified green with `redis:false`
 
 ## 1. In flight right now (§1.2)
 
-- [ ] One clean full `pnpm test` since the baseline — run after ≥110 s of API idle (10-logins/60s budget)
+- [ ] One clean full `pnpm test` since the baseline — run after ≥110 s of API idle (10-logins/60s budget) — **in progress: API is live and healthy on localhost:5199; running the live round now**
 - [ ] Write `scripts/barcode-gun.ahk` AutoHotkey simulator; then verify `IssuePage` handles rapid consecutive scans (no `onKeyDown` exists anywhere — every scan path depends on Enter reaching a form submit) **(deferred by choice)** → §2.1 #2 + v1 DoD
 - [ ] `docs/skills/` reorganisation — user-owned; already captured in baseline, do not consolidate into someone else's commit
 
@@ -31,38 +32,35 @@ and the done-definitions; this file carries the "is it done yet".
 
 ## 2. v1 — defects (§2.1)
 
-- [ ] **D1 — Sargable search.** Kill `ToLower().Contains()` in all **three** places: `FilesService.cs:93-104` (registry), `DigitizationService.cs:86-93` (batch needle), `IssuesService.cs:62-73` (borrower); add index over the effective columns
-  - [ ] Done when: SQL Server's plan for registry search no longer scans
-- [ ] **D2 — Scan auto-submit.** Detect a fast keystroke burst → submit + refocus (also unblocks the gun simulator and E1)
-  - [ ] Done when: gun-style rapid input issues a file on the issue desk, mouse untouched
-- [ ] **D3 — `/` shortcut.** Topbar advertises it (line 97-99); no handler exists. Implement (focus record search) or delete the hint
-  - [ ] Done when: pressing `/` moves focus to search
-- [ ] **D4 — Test-suite rate-limit fragility.** `test-api.ps1` has no 429/retry/abort handling; make the first sign-in failure abort the suite instead of 401-cascading
-  - [ ] Done when: a throttled login fails one assertion, not nineteen
-- [ ] **D5 — `.gitattributes`** (see §0 above) **(P)**
-  - [ ] Done when: `pnpm format:check` passes on a fresh checkout
-- [ ] **D6 — In-app PDF reader** → §3 below
+- [x] **D1 — Sargable search.** Kill `ToLower().Contains()` in all **three** places: `FilesService.cs:93-104` (registry), `DigitizationService.cs:86-93` (batch needle), `IssuesService.cs:62-73` (borrower); add index over the effective columns — **done `34a777a`**: identity columns (barcode, file number, e-office ref, batch/receipt codes) match as prefixes (seekable), free text stays substring until FTS (v2 6.2); `IX_Files_FileNumber` + `IX_Files_EOfficeReference` added, migration `20261028000000_AddFileSearchIndexes` applied on the local dev DB
+  - [x] Note: mid-string search on identity columns no longer matches — deliberate trade, restored by full-text index in v2
+- [x] **D2 — Scan auto-submit.** Fast keystroke burst → submit + refocus; `src/hooks/useScanAutoSubmit.ts` wired into the issue-desk scan input (`90c7b05`); human typing/paste deliberately not auto-submitted
+  - [ ] Verified with the actual gun simulator — pending the simulator below
+- [x] **D3 — `/` shortcut.** Already implemented at `Topbar.tsx:28-40` (window keydown, not the React prop — earlier grep missed it); plan claim was stale. No code needed
+- [x] **D4 — Test-suite rate-limit fragility.** `Get-Token` in `test-api.ps1` aborts the suite with a rate-limit explanation on a failed sign-in; trap prints a readable verdict (`9839fa5`)
+- [x] **D5 — `.gitattributes`** approved and done: `* text=auto eol=lf`, `.bat` keeps CRLF, binaries excluded; committed `3b0de66`
+- [x] **D6 — In-app PDF reader** → §3 below
 
 ## 3. v1 — PDF reader (§2.2)
 
-- [ ] 3.1 Add `react-pdf` 11.0.0 + `pdfjs-dist` 6.4.299 (verify versions against npm at implementation time)
-- [ ] 3.2 `.npmrc`: add `public-hoist-pattern[]=pdfjs-dist` alongside `auto-install-peers` / `prefer-frozen-lockfile`
-- [ ] 3.3 Wire worker + `cMaps` + `standard_fonts` per react-pdf's Vite guidance, in the module that renders `<Document>`
-- [ ] 3.4 Build the viewer: page nav, jump-to-page, zoom in/out/fit-width, rotate, in-document text search, download
-- [ ] 3.5 Replace **both** iframe sites: `DocumentUploadActions.tsx:232` and `components/files/DocumentViewer.tsx:174` (used by `FileViewerPage`)
-- [ ] 3.6 Keep the `#page=` deep link working from registry rows
-  - [ ] Done when: reader replaces every iframe, in all three themes
+- [x] 3.1 `react-pdf` 11.0.0 + `pdfjs-dist` 6.4.299 (both verified against npm; pnpm override forces one shared copy so the worker and main thread agree on the version)
+- [x] 3.2 `.npmrc`: `public-hoist-pattern[]=pdfjs-dist` added
+- [x] 3.3 Worker + `cMaps` + `standard_fonts` + `wasm` wired per the react-pdf Vite recipe (`vite-plugin-static-copy` added; worker set in the module that renders `<Document>`) — build copies 201 assets
+- [x] 3.4 Viewer: page nav, jump-to-page, zoom in/out/fit-width, rotate, in-document text search (jumps to matching page + highlights on-page), download kept in the parents
+- [x] 3.5 **Both** iframe sites replaced: `DocumentUploadActions.tsx` and `components/files/DocumentViewer.tsx` (used by `FileViewerPage`); reader is a lazy ~650 kB chunk loaded only when a PDF is opened (`307b529`)
+- [x] 3.6 Deep link: `pageIndex` flows into the reader as the initial page (the object-URL `#page=` fragment is only still used by "Open in new tab")
+  - [ ] Done when: reader replaces every iframe, in all three themes — **browser verification pending**
 
 ## 4. v1 — UI enhancements (§2.3)
 
-- [ ] **E1** Scan auto-advance on Enter (same work as D2)
-- [ ] **E2** Focus trap + scroll lock in `Modal` (aria-modal alone does not trap — `Modal.tsx:50`); focus return in `CommandPalette`
+- [x] **E1** Scan auto-advance on Enter (shipped with D2)
+- [x] **E2** Focus trap + scroll lock in `Modal`, focus return on close (`e5d9d09`). Correction: **no CommandPalette exists in this tree** — the "focus return in CommandPalette" half is void until E8 builds one
 - [ ] **E3** Skeleton loaders shaped like each table, replacing the spinner
 - [ ] **E4** Bulk selection + bulk actions on the registry table (relocate, assign shelf, export)
 - [ ] **E5** Registry table sticky header + column show/hide
 - [ ] **E6** One consistent flash/toast location
 - [ ] **E7** Responsive audit below 768px: registry, issue desk, location designer
-- [ ] **E8** Command palette: recent files, recent searches, per-result match context
+- [ ] **E8** Command palette: recent files, recent searches, per-result match context — **re-scope: build it, it does not exist**
 
 ## 5. v1 — definition of done
 
