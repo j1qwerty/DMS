@@ -47,13 +47,9 @@ const ScanPage = lazy(() => import('./pages/ScanPage').then((m) => ({ default: m
 const DigitizationPage = lazy(() =>
   import('./pages/DigitizationPage').then((m) => ({ default: m.DigitizationPage })),
 );
-const DigitizationBatchPage = lazy(() =>
-  import('./pages/DigitizationBatchPage').then((m) => ({ default: m.DigitizationBatchPage })),
-);
 const ReportsPage = lazy(() =>
   import('./pages/ReportsPage').then((m) => ({ default: m.ReportsPage })),
 );
-const MediaPage = lazy(() => import('./pages/MediaPage').then((m) => ({ default: m.MediaPage })));
 const SettingsPage = lazy(() =>
   import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage })),
 );
@@ -155,7 +151,6 @@ export function App() {
               }
             />
             <Route path="/digitization" element={<DigitizationPage />} />
-            <Route path="/digitization/:batchId" element={<DigitizationBatchPage />} />
             <Route path="/reports" element={<ReportsPage />} />
             <Route path="/support" element={<SupportPage />} />
             <Route path="/settings" element={<SettingsPage />} />
@@ -167,7 +162,6 @@ export function App() {
               <Route path="locations" element={guarded(LocationsPage, 'locations.view')} />
               <Route path="bulk-import" element={guarded(BulkImportPage, 'files.bulkImport')} />
               <Route path="maps" element={guarded(MapsPage, 'files.view')} />
-              <Route path="media" element={guarded(MediaPage, 'files.view')} />
               <Route path="audit" element={guarded(AuditPage, 'audit.view')} />
             </Route>
 

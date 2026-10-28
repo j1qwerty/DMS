@@ -8,7 +8,6 @@ const adminNav: Array<{ to: string; label: string; permission: Permission }> = [
   { to: '/admin/employees', label: 'Employees', permission: 'employees.view' },
   { to: '/admin/locations', label: 'Room layout', permission: 'locations.view' },
   { to: '/admin/bulk-import', label: 'Bulk import', permission: 'files.bulkImport' },
-  { to: '/admin/media', label: 'Media links', permission: 'files.view' },
   { to: '/admin/audit', label: 'Audit & logins', permission: 'audit.view' },
 ];
 
