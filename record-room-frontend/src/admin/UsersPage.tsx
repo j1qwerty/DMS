@@ -1,4 +1,4 @@
-﻿import { useState } from 'react';
+import { useState } from 'react';
 import { Plus, ShieldCheck, Trash, UserCircle } from '@phosphor-icons/react';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Card } from '../components/ui/Card';
@@ -188,7 +188,7 @@ export function UsersPage() {
                   {roles.map((role) => (
                     <td key={role} className="px-3 py-2 text-center">
                       {can(role as Role, permission) ? (
-                        <span className="text-[var(--rr-success)]">â—</span>
+                        <span className="text-[var(--rr-success)]">●</span>
                       ) : (
                         <span className="muted">—</span>
                       )}
