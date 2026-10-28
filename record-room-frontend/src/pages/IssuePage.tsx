@@ -1,5 +1,5 @@
 import { useFeatures } from '../lib/features';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   Barcode,
   CheckCircle,
@@ -18,6 +18,7 @@ import { Field, FormGrid, SelectInput, TextInput } from '../components/ui/Field'
 import { Flash } from '../components/ui/Flash';
 import { EmptyState } from '../components/ui/EmptyState';
 import { useQuery, useService, useSession } from '../hooks/useService';
+import { useScanAutoSubmit } from '../hooks/useScanAutoSubmit';
 import type { Employee, RecordFile } from '../types';
 import type { BorrowerRow, Page } from '../services/contracts';
 
@@ -53,6 +54,7 @@ export function IssuePage() {
   const [receipt, setReceipt] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const [committing, setCommitting] = useState(false);
+  const scanInputRef = useRef<HTMLInputElement>(null);
 
   // Employees and the borrower roll-up both live in the API now, so they are
   // asked for rather than derived from a local snapshot.
@@ -114,6 +116,14 @@ export function IssuePage() {
       setScanning(false);
     }
   };
+
+  // D2: a barcode gun may not send Enter; a fast keystroke burst in the scan
+  // input commits itself and keeps the input focused. Enter still submits.
+  const onScanKeyDown = useScanAutoSubmit(
+    scan,
+    (candidate) => void addScan(candidate),
+    scanInputRef,
+  );
 
   const commit = async () => {
     setCommitting(true);
@@ -217,8 +227,10 @@ export function IssuePage() {
                     size={18}
                   />
                   <input
+                    ref={scanInputRef}
                     value={scan}
                     onChange={(event) => setScan(event.target.value)}
+                    onKeyDown={onScanKeyDown}
                     autoFocus
                     className="focus-ring h-12 w-full rounded-xl border border-base bg-[var(--rr-bg)] pl-11 pr-4 font-mono text-sm outline-none"
                     placeholder="Scan RF-0000124587 and press Enter"
