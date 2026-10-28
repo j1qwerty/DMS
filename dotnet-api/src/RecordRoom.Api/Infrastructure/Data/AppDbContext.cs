@@ -123,6 +123,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.ToTable("Files");
             // The legacy UNIQUE KEY on file_barcode.
             e.HasIndex(x => x.Barcode).IsUnique();
+            // D1: the search box seeks into these on prefix matches.
+            e.HasIndex(x => x.FileNumber);
+            e.HasIndex(x => x.EOfficeReference);
             e.HasIndex(x => new { x.Department, x.Status });
             e.HasIndex(x => x.ShelfId);
             e.Property(x => x.Barcode).HasMaxLength(64);

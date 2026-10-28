@@ -59,18 +59,21 @@ public sealed class IssuesService(AppDbContext db, IAuditWriter audit, ICurrentU
         if (open == true) query = query.Where(i => i.Status != IssueStatus.Returned);
         if (!string.IsNullOrWhiteSpace(borrower))
         {
-            var needle = borrower.Trim().ToLower();
+            // D1: no LOWER(column) in the predicate — see FilesService for the
+            // reasoning. Receipt/employee-code/barcode tokens match as a
+            // prefix (seekable); free-text fields stay substring.
+            var needle = borrower.Trim();
             query = query.Where(i =>
-                i.BorrowerName.ToLower().Contains(needle)
-                || i.BorrowerEmployeeCode.ToLower().Contains(needle)
-                || i.Department.ToLower().Contains(needle)
-                || i.Purpose.ToLower().Contains(needle)
-                || i.ReceiptNumber.ToLower().Contains(needle)
+                i.BorrowerName.Contains(needle)
+                || i.BorrowerEmployeeCode.StartsWith(needle)
+                || i.Department.Contains(needle)
+                || i.Purpose.Contains(needle)
+                || i.ReceiptNumber.StartsWith(needle)
                 || i.Lines.Any(line =>
-                    line.Barcode.ToLower().Contains(needle)
-                    || (line.RecordFile != null && line.RecordFile.Subject.ToLower().Contains(needle))
+                    line.Barcode.StartsWith(needle)
+                    || (line.RecordFile != null && line.RecordFile.Subject.Contains(needle))
                     || (line.RecordFile != null && line.RecordFile.EOfficeReference != null
-                        && line.RecordFile.EOfficeReference.ToLower().Contains(needle))));
+                        && line.RecordFile.EOfficeReference.StartsWith(needle))));
         }
 
         var total = await query.CountAsync(ct);

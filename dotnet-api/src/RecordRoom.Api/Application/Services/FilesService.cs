@@ -92,16 +92,23 @@ public sealed class FilesService(
 
         if (!string.IsNullOrWhiteSpace(q.Search))
         {
-            var needle = q.Search.Trim().ToLower();
+            // D1 (work plan §2.1): case-insensitivity comes from the database
+            // collation, not from LOWER(column) — wrapping the column side in a
+            // function disables every IX_Files_* seek. Identity tokens
+            // (barcode, file number, e-office reference) match as a prefix so
+            // the indexes can serve a seek; free-text columns (subject,
+            // department, location, area, holder) keep substring semantics
+            // until the full-text index takes them over (§3.1).
+            var needle = q.Search.Trim();
             query = query.Where(f =>
-                f.Barcode.ToLower().Contains(needle)
-                || f.FileNumber.ToLower().Contains(needle)
-                || f.Subject.ToLower().Contains(needle)
-                || f.Department.ToLower().Contains(needle)
-                || f.LocationDisplay.ToLower().Contains(needle)
-                || f.Area.ToLower().Contains(needle)
-                || (f.EOfficeReference != null && f.EOfficeReference.ToLower().Contains(needle))
-                || (f.Holder != null && f.Holder.ToLower().Contains(needle)));
+                f.Barcode.StartsWith(needle)
+                || f.FileNumber.StartsWith(needle)
+                || f.Subject.Contains(needle)
+                || f.Department.Contains(needle)
+                || f.LocationDisplay.Contains(needle)
+                || f.Area.Contains(needle)
+                || (f.EOfficeReference != null && f.EOfficeReference.StartsWith(needle))
+                || (f.Holder != null && f.Holder.Contains(needle)));
         }
 
         if (!string.IsNullOrWhiteSpace(q.Department) && q.Department != "All")

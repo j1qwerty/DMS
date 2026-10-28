@@ -982,6 +982,10 @@ namespace RecordRoom.Api.Migrations
                     b.HasIndex("Barcode")
                         .IsUnique();
 
+                    b.HasIndex("EOfficeReference");
+
+                    b.HasIndex("FileNumber");
+
                     b.HasIndex("ShelfId");
 
                     b.HasIndex("Department", "Status");

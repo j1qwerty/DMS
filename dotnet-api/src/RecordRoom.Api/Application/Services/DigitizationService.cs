@@ -83,13 +83,17 @@ public sealed class DigitizationService(
         }
         if (!string.IsNullOrWhiteSpace(search))
         {
-            var needle = search.Trim().ToLower();
-            var byNumber = db.Files.Where(f => f.FileNumber.ToLower().Contains(needle)).Select(f => f.Barcode);
+            // D1: no LOWER(column) in the predicate — see FilesService for the
+            // reasoning. Batch code, employee code and page barcodes match as
+            // a prefix (all three are covered by indexes); the free-text name
+            // stays substring.
+            var needle = search.Trim();
+            var byNumber = db.Files.Where(f => f.FileNumber.StartsWith(needle)).Select(f => f.Barcode);
             query = query.Where(b =>
-                b.Code.ToLower().Contains(needle)
-                || b.EmployeeCode.ToLower().Contains(needle)
-                || b.EmployeeName.ToLower().Contains(needle)
-                || b.Pages.Any(p => p.Barcode.ToLower().Contains(needle))
+                b.Code.StartsWith(needle)
+                || b.EmployeeCode.StartsWith(needle)
+                || b.EmployeeName.Contains(needle)
+                || b.Pages.Any(p => p.Barcode.StartsWith(needle))
                 || b.Pages.Any(p => byNumber.Contains(p.Barcode)));
         }
 
