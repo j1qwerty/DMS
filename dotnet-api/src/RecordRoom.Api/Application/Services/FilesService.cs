@@ -465,6 +465,21 @@ public sealed class FilesService(
         if (file.Status == RecordStatus.Issued)
             return Result<bool>.Fail("This file is issued. Return it before deleting the registry row.", "id");
 
+        // Guards with reasons instead of raw FK 500s: every restrict-FK child
+        // that must stay traceable blocks the delete with a readable message.
+        var issueLines = await db.IssueLines.CountAsync(l => l.RecordFileId == id, ct);
+        if (issueLines > 0)
+            return Result<bool>.Fail(
+                $"{issueLines} issue receipt line(s) reference this file; issue history must stay traceable.", "id");
+
+        var scans = await db.ScanPages.CountAsync(p => p.Barcode == file.Barcode, ct);
+        if (scans > 0)
+            return Result<bool>.Fail($"{scans} scan page(s) still belong to this file. Remove them first.", "id");
+
+        var maps = await db.Maps.CountAsync(m => m.Barcode == file.Barcode, ct);
+        if (maps > 0)
+            return Result<bool>.Fail($"{maps} map/copy row(s) still belong to this file. Remove them first.", "id");
+
         var documentKeys = await db.FileDocuments.AsNoTracking()
             .Where(document => document.RecordFileId == id)
             .Select(document => document.StorageKey)

@@ -484,6 +484,27 @@ export const filesService: FilesApi = {
       return err('This file is issued. Return it before deleting the registry row.', 'fileId');
     }
 
+    // Same guards as the API: issue history, scan pages and maps keep the row.
+    const state = store.getState();
+    const issueLines = state.issues.reduce(
+      (sum, issue) => sum + (issue.lines?.filter((line) => line.fileId === fileId).length ?? 0),
+      0,
+    );
+    if (issueLines > 0) {
+      return err(
+        `${issueLines} issue receipt line(s) reference this file; issue history must stay traceable.`,
+        'fileId',
+      );
+    }
+    const scans = state.scanPages.filter((row) => row.fileBarcode === file.fileBarcode).length;
+    if (scans > 0) {
+      return err(`${scans} scan page(s) still belong to this file. Remove them first.`, 'fileId');
+    }
+    const maps = store.getState().maps.filter((row) => row.fileBarcode === file.fileBarcode).length;
+    if (maps > 0) {
+      return err(`${maps} map/copy row(s) still belong to this file. Remove them first.`, 'fileId');
+    }
+
     store.update((draft) => {
       draft.files = draft.files.filter((item) => item.id !== fileId);
       const unit = draft.rooms
