@@ -58,8 +58,12 @@ and the done-definitions; this file carries the "is it done yet".
 - [x] **Search highlight opaque** — see §3 above
 - [x] **No admin delete for a stored scan version** — full contract-seam change: `files.deleteDocument` in `contracts.ts`, HTTP adapter, in-memory adapter, API `DELETE /api/files/{fileId}/documents/{documentId}` (`[Authorize(Roles = "Admin")]`), trash button on each Scan-versions row (confirm dialog), audit + realtime announce; harness section "File scan versions (upload + admin delete)" asserts employee/operator/supervisor 403 and admin 200; verified live (delete + audit entry) and visually
 - [ ] **Physical placement must be optional on file create** — room/almirah/shelf is optional in the real world; a file can exist in the registry before it is shelved
-- [ ] **Digitization is not a separate file kind** — any file can be digitized by uploading a PDF or by scanning pages on a printer/scanner and adding those pages; pages keep the same options as the file (A1/A4 etc., map). No separate "digitization file"
-- [ ] **`/rooms/1` shows "Room not found"** — rooms route/id mismatch when opening a room from the location pages
+  - Decision (2026-10-28): registry row shows "Not placed"; the file page gets a "Place on shelf" action (same modal family as Move); file stays issuable/returnable by barcode scan
+- [ ] **Digitization is not a separate file kind** — decision (2026-10-28): **file-centric only, batches removed**
+  - Every file gets "Add scan": upload a full PDF, or add page-by-page scans (page no + A1/A4/…/map options) straight on the file, with per-page review
+  - The employee/folder batch concept is deleted; the Digitization section becomes a pending-review queue across files, not a batch list
+  - Same schema options as the file: documentSize (A1/A4/…) and recordKind (File/Map) on scans
+- [x] **`/rooms/1` shows "Room not found"** — fixed: `RoomDetailPage` read the local `useDb()` snapshot, which is empty under the HTTP adapter; it now loads `service.locations.room(id)` + `service.files.list({ roomId })` via `useQuery`. Verified live at `/rooms/1`
 
 ## 4. v1 — UI enhancements (§2.3)
 

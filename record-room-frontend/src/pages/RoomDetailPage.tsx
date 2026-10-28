@@ -17,39 +17,61 @@ import { StatusBadge } from '../components/ui/Flash';
 import { EmptyState } from '../components/ui/EmptyState';
 import { LinkButton } from '../components/ui/Button';
 import { PageHeader } from '../components/ui/PageHeader';
-import { useDb } from '../hooks/useService';
+import { useQuery, useService } from '../hooks/useService';
 import { cn } from '../lib/utils';
+import type { Page } from '../services/contracts';
+import type { RecordFile } from '../types';
+
+const EMPTY_PAGE: Page<RecordFile> = { items: [], total: 0, page: 1, pageSize: 200 };
 
 export function RoomDetailPage() {
   const { barcode } = useFeatures();
-  const { roomId } = useParams();
+  const { roomId = '' } = useParams();
   const navigate = useNavigate();
-  const db = useDb();
-
-  const room = db.rooms.find((item) => item.id === roomId);
+  const service = useService();
   const [sectionId, setSectionId] = useState('');
   const [unitId, setUnitId] = useState('');
 
-  const section = room?.sections.find((item) => item.id === sectionId) ?? room?.sections[0];
-  const units =
-    room?.storageUnits.filter((item) => !section || item.sectionId === section.id) ?? [];
-  const selected = units.find((item) => item.id === unitId) ?? units[0];
+  // Room and files come from the service layer — the local `useDb()` snapshot
+  // is empty under the HTTP adapter, which made every room page read
+  // "Room not found" in API mode.
+  const { data: room, loading: loadingRoom } = useQuery(
+    () => service.locations.room(roomId),
+    [roomId],
+    null,
+  );
+  const { data: filesPage } = useQuery(
+    () => service.files.list({ roomId, pageSize: 200 }),
+    [roomId],
+    EMPTY_PAGE,
+  );
 
   if (!room) {
     return (
       <EmptyState
-        title="Room not found"
-        description="That room id is not in the local dataset."
+        title={loadingRoom ? 'Opening room…' : 'Room not found'}
+        description={
+          loadingRoom
+            ? 'Loading the room layout.'
+            : 'That room id is not in the registry any more.'
+        }
         action={
-          <LinkButton to="/rooms" variant="ghost">
-            All rooms
-          </LinkButton>
+          loadingRoom ? undefined : (
+            <LinkButton to="/rooms" variant="ghost">
+              All rooms
+            </LinkButton>
+          )
         }
       />
     );
   }
 
-  const filesInRoom = db.files.filter((file) => file.roomId === room.id);
+  const filesInRoom = filesPage.items;
+  const section = room.sections.find((item) => item.id === sectionId) ?? room.sections[0];
+  const units = room.storageUnits.filter(
+    (item) => !section || item.sectionId === section.id,
+  );
+  const selected = units.find((item) => item.id === unitId) ?? units[0];
 
   return (
     <div className="space-y-7">
@@ -202,7 +224,7 @@ export function RoomDetailPage() {
               <ShelfView unit={selected} />
               <div className="mt-4 space-y-2 border-t border-base pt-4">
                 {selected.shelves.map((shelf) => {
-                  const count = db.files.filter((file) => file.shelfId === shelf.id).length;
+                  const count = filesInRoom.filter((file) => file.shelfId === shelf.id).length;
                   return (
                     <div key={shelf.id} className="flex items-center justify-between gap-3 text-xs">
                       {barcode && <span className="font-mono">{shelf.barcode}</span>}
