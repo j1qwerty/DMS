@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import {
+  ArrowRight,
   DownloadSimple,
   Funnel,
   MagnifyingGlass,
@@ -20,6 +21,7 @@ import { Flash, StatusBadge } from '../components/ui/Flash';
 import { EmptyState } from '../components/ui/EmptyState';
 import { TableSkeleton } from '../components/ui/Skeletons';
 import { FileRowActions } from '../components/files/FileRowActions';
+import { BulkMoveModal } from '../components/files/BulkMoveModal';
 import { useFileActions } from '../components/files/useFileActions';
 import { useFlash, useQuery, useService, useSession } from '../hooks/useService';
 import { useFeatures } from '../lib/features';
@@ -84,6 +86,18 @@ export function FilesPage() {
     };
   });
   const [showFilters, setShowFilters] = useState(false);
+  // Bulk selection (E4). Selection is page-local: it only matches ids the
+  // current result actually shows, so paging or filtering implicitly prunes it.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkMoving, setBulkMoving] = useState(false);
+
+  const toggleOne = (id: string, checked: boolean) =>
+    setSelected((current) => {
+      const next = new Set(current);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
 
   const {
     data: result,
@@ -98,6 +112,17 @@ export function FilesPage() {
   );
   const { data: departments } = useQuery(() => service.files.departments(), [], [] as string[]);
   const { data: rooms } = useQuery(() => service.locations.listRooms(), [], [] as Room[]);
+
+  const selectedRows = result.items.filter((file) => selected.has(file.id));
+  const allOnPageSelected = result.items.length > 0 && selectedRows.length === result.items.length;
+
+  const togglePage = () => {
+    if (allOnPageSelected) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(result.items.map((file) => file.id)));
+    }
+  };
 
   const { open, dialogs } = useFileActions((message) => {
     success(message);
@@ -125,8 +150,11 @@ export function FilesPage() {
 
   const collectionTotal = result.collectionTotal ?? REGISTRY_TOTAL;
 
-  const patch = (next: Partial<FileQuery>) =>
+  const patch = (next: Partial<FileQuery>) => {
+    // A new query means new rows; page-local selection would go stale.
+    setSelected(new Set());
     setQuery((current) => ({ ...current, ...next, page: next.page ?? 1 }));
+  };
 
   const activeFilters = [
     query.department !== 'All',
@@ -142,9 +170,12 @@ export function FilesPage() {
     query.status !== 'All' ||
     query.recordKind !== 'All';
 
-  const clearAll = () => setQuery((current) => ({ ...DEFAULT_QUERY, pageSize: current.pageSize }));
+  const clearAll = () => {
+    setSelected(new Set());
+    setQuery((current) => ({ ...DEFAULT_QUERY, pageSize: current.pageSize }));
+  };
 
-  const exportCsv = () => {
+  const exportCsv = (files: RecordFile[], fileNameSuffix: string) => {
     const columns = [
       'Barcode',
       'Number',
@@ -164,7 +195,7 @@ export function FilesPage() {
       'Shelf barcode',
       'Last movement',
     ];
-    const rows = result.items.map((file) => [
+    const rows = files.map((file) => [
       file.fileBarcode,
       file.fileNumber,
       file.subject,
@@ -186,7 +217,7 @@ export function FilesPage() {
     // Barcode columns (0 and 15) are dropped when barcode features are off.
     const keep = (_: unknown, index: number) => barcode || (index !== 0 && index !== 15);
     downloadCsv(
-      `documents-${new Date().toISOString().slice(0, 10)}.csv`,
+      `documents-${fileNameSuffix}.csv`,
       toCsv(
         columns.filter(keep),
         rows.map((row) => row.filter(keep)),
@@ -201,7 +232,11 @@ export function FilesPage() {
         description="Find a document, open its scan or map, and see where the physical file is kept."
         actions={
           <>
-            <Button variant="ghost" onClick={exportCsv} icon={<DownloadSimple size={17} />}>
+            <Button
+              variant="ghost"
+              onClick={() => exportCsv(result.items, new Date().toISOString().slice(0, 10))}
+              icon={<DownloadSimple size={17} />}
+            >
               <span className="hidden sm:inline">Export this page</span>
               <span className="sm:hidden">Export</span>
             </Button>
@@ -466,6 +501,39 @@ export function FilesPage() {
           )}
         </div>
 
+        {selectedRows.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 border-b border-base bg-accent-soft px-3 py-2.5 sm:px-4">
+            <p className="text-sm font-semibold">
+              {selectedRows.length} selected
+              {selectedRows.length < result.items.length && (
+                <span className="muted font-normal"> of this page</span>
+              )}
+            </p>
+            {allowed('files.edit') && (
+              <Button
+                variant="ghost"
+                onClick={() => setBulkMoving(true)}
+                icon={<ArrowRight size={16} />}
+              >
+                Relocate…
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              icon={<DownloadSimple size={16} />}
+              onClick={() => {
+                exportCsv(selectedRows, 'selected');
+                setSelected(new Set());
+              }}
+            >
+              Export selected
+            </Button>
+            <Button variant="ghost" onClick={() => setSelected(new Set())}>
+              Clear
+            </Button>
+          </div>
+        )}
+
         {loading && result.items.length === 0 ? (
           <div className="p-4 sm:p-6">
             <TableSkeleton rows={10} columns={[1.7, 1.5, 3, 1.3, 0.8, 1.2]} />
@@ -491,6 +559,15 @@ export function FilesPage() {
               <table className="w-full min-w-[1040px] text-left text-sm">
                 <thead className="bg-[var(--rr-bg)] text-[13px] muted">
                   <tr>
+                    <th className="w-10 px-3 py-3">
+                      <input
+                        type="checkbox"
+                        aria-label="Select every row on this page"
+                        checked={allOnPageSelected}
+                        onChange={togglePage}
+                        className="size-4 accent-[var(--rr-accent)]"
+                      />
+                    </th>
                     <th className="px-4 py-3 font-semibold">File</th>
                     <th className="px-4 py-3 font-semibold">Type</th>
                     <th className="px-4 py-3 font-semibold">Department</th>
@@ -504,6 +581,15 @@ export function FilesPage() {
                     const kind = kindOf(file);
                     return (
                       <tr key={file.id} className="align-top hover:bg-[var(--rr-bg)]">
+                        <td className="px-3 py-3.5">
+                          <input
+                            type="checkbox"
+                            aria-label={`Select ${file.fileNumber}`}
+                            checked={selected.has(file.id)}
+                            onChange={(event) => toggleOne(file.id, event.target.checked)}
+                            className="mt-1 size-4 accent-[var(--rr-accent)]"
+                          />
+                        </td>
                         <td className="max-w-[300px] px-4 py-3.5">
                           <Link
                             to={`/files/${file.id}`}
@@ -557,14 +643,25 @@ export function FilesPage() {
                 return (
                   <li key={file.id} className="space-y-3 p-4">
                     <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <Link
-                          to={`/files/${file.id}`}
-                          className="focus-ring mono rounded text-[15px] font-semibold text-accent"
-                        >
-                          {file.fileNumber}
-                        </Link>
-                        {barcode && <p className="mono muted mt-0.5 text-xs">{file.fileBarcode}</p>}
+                      <div className="flex min-w-0 items-start gap-2.5">
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${file.fileNumber}`}
+                          checked={selected.has(file.id)}
+                          onChange={(event) => toggleOne(file.id, event.target.checked)}
+                          className="mt-1 size-4 shrink-0 accent-[var(--rr-accent)]"
+                        />
+                        <div className="min-w-0">
+                          <Link
+                            to={`/files/${file.id}`}
+                            className="focus-ring mono rounded text-[15px] font-semibold text-accent"
+                          >
+                            {file.fileNumber}
+                          </Link>
+                          {barcode && (
+                            <p className="mono muted mt-0.5 text-xs">{file.fileBarcode}</p>
+                          )}
+                        </div>
                       </div>
                       <StatusBadge status={file.status} />
                     </div>
@@ -614,6 +711,18 @@ export function FilesPage() {
       </Card>
 
       {dialogs}
+      {bulkMoving && selectedRows.length > 0 && (
+        <BulkMoveModal
+          files={selectedRows}
+          onClose={() => setBulkMoving(false)}
+          onDone={(message) => {
+            setBulkMoving(false);
+            setSelected(new Set());
+            success(message);
+            reload();
+          }}
+        />
+      )}
     </div>
   );
 }
