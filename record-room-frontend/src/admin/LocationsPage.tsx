@@ -13,7 +13,6 @@ import { PageHeader } from '../components/ui/PageHeader';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
-import { Badge } from '../components/ui/Badge';
 import { Field, TextInput } from '../components/ui/Field';
 import { Flash, StatusBadge } from '../components/ui/Flash';
 import { RoomMap } from '../components/RoomMap';
@@ -27,13 +26,14 @@ const STATUSES: StorageStatus[] = ['Active', 'Maintenance', 'Inactive', 'Decommi
 type Revision = { revision: number; note: string; at: string; actor: string };
 
 type Dialog =
+  | { kind: 'room' }
   | { kind: 'section'; roomId: string }
   | { kind: 'almirah'; sectionId: string }
   | { kind: 'shelf'; almirahId: string }
   | null;
 
 /**
- * Location designer for the full room â†’ section â†’ almirah â†’ shelf hierarchy.
+ * Location designer for the full room → section → almirah → shelf hierarchy.
  *
  * The `section` level was missing from the frontend even though the legacy
  * `Store_model.php` treated it as a first-class guard: a section cannot be
@@ -136,14 +136,7 @@ export function LocationsPage() {
       <PageHeader
         kicker="Physical configuration"
         title="Location designer"
-        description="Room â†’ section â†’ almirah â†’ shelf. Every parent has to be empty before it can be removed, and only active shelves accept new files."
-        actions={
-          allowed('locations.edit') && (
-            <Button icon={<FloppyDisk size={17} />} onClick={saveLayout}>
-              Save layout
-            </Button>
-          )
-        }
+        description="Room → section → almirah → shelf. Every change is saved as you make it; the button in Layout history records who changed what and why."
       />
 
       {flash && <Flash tone={flash.tone} text={flash.text} onDismiss={() => setFlash(null)} />}
@@ -156,31 +149,54 @@ export function LocationsPage() {
                 <Buildings size={18} className="text-accent" />
                 <p className="text-sm font-semibold">Rooms</p>
               </div>
-              <Badge tone="neutral">{rooms.length}</Badge>
+              {allowed('locations.edit') && (
+                <button
+                  type="button"
+                  onClick={() => setDialog({ kind: 'room' })}
+                  className="focus-ring rounded-lg p-1.5 text-accent hover:bg-accent-soft"
+                  aria-label="Add room"
+                >
+                  <Plus size={16} />
+                </button>
+              )}
             </div>
             <div className="mt-4 space-y-2">
               {rooms.map((item) => (
-                <button
+                <div
                   key={item.id}
-                  type="button"
-                  onClick={() => {
-                    setRoomId(item.id);
-                    setSectionId('');
-                    setAlmirahId('');
-                  }}
                   className={cn(
-                    'focus-ring w-full rounded-xl border p-3 text-left transition',
+                    'flex items-start gap-1 rounded-xl border p-3 transition',
                     item.id === room.id
                       ? 'border-[var(--rr-accent)] bg-accent-soft'
                       : 'border-base hover:bg-[var(--rr-surface-2)]',
                   )}
                 >
-                  <p className="text-sm font-semibold">{item.code}</p>
-                  <p className="muted mt-1 text-xs">
-                    {item.name} · {item.sections.length} sections · {item.storageUnits.length}{' '}
-                    almirahs
-                  </p>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRoomId(item.id);
+                      setSectionId('');
+                      setAlmirahId('');
+                    }}
+                    className="focus-ring flex-1 text-left"
+                  >
+                    <p className="text-sm font-semibold">{item.code}</p>
+                    <p className="muted mt-1 text-xs">
+                      {item.name} · {item.sections.length} sections · {item.storageUnits.length}{' '}
+                      almirahs
+                    </p>
+                  </button>
+                  {allowed('locations.edit') && (
+                    <button
+                      type="button"
+                      onClick={() => report(service.locations.deleteRoom(item.id))}
+                      className="focus-ring rounded-lg p-1.5 text-[var(--rr-danger)] hover:bg-[var(--rr-surface-2)]"
+                      aria-label={`Remove room ${item.code}`}
+                    >
+                      <Trash size={14} />
+                    </button>
+                  )}
+                </div>
               ))}
             </div>
           </Card>
@@ -246,7 +262,7 @@ export function LocationsPage() {
                               }),
                             )
                           }
-                          className="focus-ring h-8 flex-1 rounded-lg border border-base bg-[var(--rr-bg)] px-2 text-[11px]"
+                          className="focus-ring h-8 min-w-0 flex-1 rounded-lg border border-base bg-[var(--rr-bg)] px-2 text-[11px]"
                         >
                           {STATUSES.map((status) => (
                             <option key={status} value={status}>
@@ -257,7 +273,7 @@ export function LocationsPage() {
                         <button
                           type="button"
                           onClick={() => report(service.locations.deleteSection(item.id))}
-                          className="focus-ring rounded-lg p-1.5 text-[var(--rr-danger)] hover:bg-[var(--rr-surface-2)]"
+                          className="focus-ring shrink-0 rounded-lg p-1.5 text-[var(--rr-danger)] hover:bg-[var(--rr-surface-2)]"
                           aria-label={`Remove section ${item.name}`}
                         >
                           <Trash size={14} />
@@ -430,7 +446,7 @@ export function LocationsPage() {
                                     }),
                                   )
                                 }
-                                className="focus-ring h-8 flex-1 rounded-lg border border-base bg-[var(--rr-bg)] px-2 text-[11px]"
+                                className="focus-ring h-8 min-w-0 flex-1 rounded-lg border border-base bg-[var(--rr-bg)] px-2 text-[11px]"
                               >
                                 {STATUSES.map((status) => (
                                   <option key={status} value={status}>
@@ -441,7 +457,7 @@ export function LocationsPage() {
                               <button
                                 type="button"
                                 onClick={() => report(service.locations.deleteShelf(shelf.id))}
-                                className="focus-ring rounded-lg p-1.5 text-[var(--rr-danger)] hover:bg-[var(--rr-surface-2)]"
+                                className="focus-ring shrink-0 rounded-lg p-1.5 text-[var(--rr-danger)] hover:bg-[var(--rr-surface-2)]"
                                 aria-label={`Remove ${shelf.code}`}
                               >
                                 <Trash size={14} />
@@ -458,6 +474,12 @@ export function LocationsPage() {
           )}
         </div>
       </div>
+
+      <Modal open={dialog?.kind === 'room'} onClose={() => setDialog(null)} title="Add room">
+        {dialog?.kind === 'room' && (
+          <RoomForm onSubmit={(input) => report(service.locations.addRoom(input))} />
+        )}
+      </Modal>
 
       <Modal open={dialog?.kind === 'section'} onClose={() => setDialog(null)} title="Add section">
         {dialog?.kind === 'section' && (
@@ -551,7 +573,7 @@ function UnitCard({
             value={unit.status}
             aria-label={`Status of ${unit.code}`}
             onChange={(event) => onStatus(event.target.value as StorageStatus)}
-            className="focus-ring h-8 flex-1 rounded-lg border border-base bg-[var(--rr-surface)] px-2 text-[11px]"
+            className="focus-ring h-8 min-w-0 flex-1 rounded-lg border border-base bg-[var(--rr-surface)] px-2 text-[11px]"
           >
             {STATUSES.map((status) => (
               <option key={status} value={status}>
@@ -562,7 +584,7 @@ function UnitCard({
           <button
             type="button"
             onClick={onAddShelf}
-            className="focus-ring rounded-lg p-1.5 text-accent hover:bg-accent-soft"
+            className="focus-ring shrink-0 rounded-lg p-1.5 text-accent hover:bg-accent-soft"
             aria-label={`Add shelf to ${unit.code}`}
           >
             <Plus size={14} />
@@ -570,7 +592,7 @@ function UnitCard({
           <button
             type="button"
             onClick={onDelete}
-            className="focus-ring rounded-lg p-1.5 text-[var(--rr-danger)] hover:bg-[var(--rr-surface-2)]"
+            className="focus-ring shrink-0 rounded-lg p-1.5 text-[var(--rr-danger)] hover:bg-[var(--rr-surface-2)]"
             aria-label={`Remove ${unit.code}`}
           >
             <Trash size={14} />
@@ -578,6 +600,72 @@ function UnitCard({
         </div>
       )}
     </div>
+  );
+}
+
+function RoomForm({
+  onSubmit,
+}: {
+  onSubmit: (input: { name: string; building: string; floor: string; capacity: number }) => void;
+}) {
+  const [name, setName] = useState('');
+  const [building, setBuilding] = useState('');
+  const [floor, setFloor] = useState('');
+  const [capacity, setCapacity] = useState(100);
+  return (
+    <form
+      className="space-y-4"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSubmit({ name, building, floor, capacity });
+      }}
+    >
+      <Field label="Room name" htmlFor="room-name" required hint="Unique across the registry.">
+        <TextInput
+          id="room-name"
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          placeholder="Record Room No. 4"
+        />
+      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Building" htmlFor="room-building">
+          <TextInput
+            id="room-building"
+            value={building}
+            onChange={(event) => setBuilding(event.target.value)}
+          />
+        </Field>
+        <Field label="Floor" htmlFor="room-floor">
+          <TextInput
+            id="room-floor"
+            value={floor}
+            onChange={(event) => setFloor(event.target.value)}
+          />
+        </Field>
+      </div>
+      <Field
+        label="Planned shelf capacity"
+        htmlFor="room-capacity"
+        hint="Shelf-space the room is planned for; defaults to 100."
+      >
+        <TextInput
+          id="room-capacity"
+          type="number"
+          min={1}
+          value={capacity}
+          onChange={(event) => setCapacity(Number(event.target.value))}
+        />
+      </Field>
+      <div className="flex gap-3 rounded-xl bg-accent-soft p-4">
+        <WarningCircle size={17} className="mt-0.5 shrink-0 text-accent" />
+        <p className="muted text-xs leading-6">
+          A room can only be removed once its sections and almirahs are deleted and no file is still
+          recorded inside it.
+        </p>
+      </div>
+      <Button type="submit">Add room</Button>
+    </form>
   );
 }
 
