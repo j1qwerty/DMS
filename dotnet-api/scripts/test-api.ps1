@@ -97,7 +97,25 @@ function Get-Token {
     param([string] $User, [string] $Password)
     $r = Invoke-Api -Method POST -Path '/api/auth/login' -Body @{ userName = $User; password = $Password }
     if ($r.Status -eq 200 -and $r.Data.success) { return $r.Data.data.token }
-    return $null
+
+    # D4 (work plan §2.1): a throttled or failed sign-in used to cascade —
+    # every later call went out with no token and 401'd, so one rate-limit
+    # hit read as nineteen broken assertions. Abort here, with the reason.
+    throw (
+        "Sign-in for '$User' failed (HTTP $($r.Status)). " +
+        "The API rate-limits logins (10 per 60s): wait at least 110 seconds " +
+        "after another run and retry. Aborting so this fails once, not as a 401 cascade."
+    )
+}
+
+# D4: keep a readable verdict when the suite aborts mid-flight instead of a
+# bare stack trace.
+trap {
+    Write-Host "`n================================" -ForegroundColor Cyan
+    Write-Host "  ABORTED after $script:Passed passing assertions" -ForegroundColor Red
+    Write-Host "  $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "================================" -ForegroundColor Cyan
+    exit 1
 }
 
 # ============================================================ health
