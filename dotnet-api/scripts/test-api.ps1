@@ -138,6 +138,13 @@ Write-Step 'Authentication'
 $admin = Get-Token $AdminUser $AdminPassword
 Assert-True ($null -ne $admin) "admin can sign in and receives a token"
 
+# Every role token is fetched once, here: the login limiter is a shared
+# 10-per-60s budget and the suite already spends several attempts on the
+# negative auth cases below.
+$employeeToken = Get-Token 'employee' $AdminPassword
+$operatorToken = Get-Token 'operator' $AdminPassword
+$supervisorToken = Get-Token 'supervisor' $AdminPassword
+
 $me = Invoke-Api -Path '/api/auth/me' -Token $admin
 Assert-Equal 200 $me.Status 'GET /api/auth/me accepts the token'
 Assert-Equal 'Admin' $me.Data.data.user.role 'role claim round-trips'
@@ -203,8 +210,7 @@ if (-not $SkipDestructive) {
     Assert-Equal 'Maintenance' $editedRoom.Data.data.status 'the room status change is saved'
     Assert-Equal $newRoom.Data.data.code $editedRoom.Data.data.code 'a room keeps its code when edited'
 
-    $roomEmployeeToken = Get-Token 'employee' $AdminPassword
-    $employeeAddRoom = Invoke-Api -Method POST -Path '/api/locations/rooms' -Token $roomEmployeeToken -Body @{ name = 'Nope' }
+    $employeeAddRoom = Invoke-Api -Method POST -Path '/api/locations/rooms' -Token $employeeToken -Body @{ name = 'Nope' }
     Assert-Equal 403 $employeeAddRoom.Status 'an employee cannot add a room'
 
     $deleteFullRoom = Invoke-Api -Method DELETE -Path "/api/locations/rooms/$($room1.id)" -Token $admin
@@ -522,79 +528,97 @@ Assert-True (@($logins.Data.data.entries).Count -gt 0) 'login attempts are recor
 $failures = @($logins.Data.data.entries | Where-Object { $_.outcome -eq 'Failed' }).Count
 Assert-True ($failures -gt 0) 'failed sign-in attempts are recorded'
 
-# ============================================================ digitization
-Write-Step 'Digitization versioning and review'
-$batches = Invoke-Api -Path '/api/digitization/batches' -Token $admin
-Assert-Equal 200 $batches.Status 'GET /api/digitization/batches responds'
-Assert-True (@($batches.Data.data).Count -ge 1) 'batches exist'
-$batch = @($batches.Data.data | Where-Object { $_.status -ne 'Approved' })[0]
-Assert-True ($batch.folderPath -like 'uploads/*') 'the legacy folder path is exposed'
+# ============================================================ file scan pages (digitization)
+Write-Step 'File scan pages — add, version, review (file-centric)'
+$scans = Invoke-Api -Path "/api/files/$newFileId/scans" -Token $admin
+Assert-Equal 200 $scans.Status 'GET /api/files/{id}/scans responds'
 
-# The guard is scoped to employee AND folder, so the probe must reuse the
-# batch being tested rather than whichever employee sorts first.
-$clash = Invoke-Api -Method POST -Path '/api/digitization/batches' -Token $admin -Body @{
-    employeeCode = $batch.employeeCode; folder = $batch.folder; note = 'duplicate open batch'
+$badPageNo = Invoke-Api -Method POST -Path "/api/files/$newFileId/scans" -Token $admin -Body @{
+    fileName = ''; pageNo = 0; documentSize = 'A4'
 }
-Assert-Equal 400 $clash.Status 'a second open batch for the same employee and folder is refused'
+Assert-Equal 400 $badPageNo.Status 'a page number below 1 is refused'
 
-$badBarcode = Invoke-Api -Method POST -Path "/api/digitization/batches/$($batch.id)/pages" -Token $admin -Body @{
-    fileBarcode = 'RF-DOES-NOT-EXIST'; pageNo = 1; fileName = ''; bulk = $false
+$badSize = Invoke-Api -Method POST -Path "/api/files/$newFileId/scans" -Token $admin -Body @{
+    fileName = ''; pageNo = 1; documentSize = 'Letter'
 }
-Assert-Equal 400 $badBarcode.Status 'a page for an unknown barcode is refused'
-
-# Pick an employee with no existing apar batch, because the open-batch guard
-# scopes to employee AND folder.
-$employee = Invoke-Api -Path '/api/employees?pageSize=50' -Token $admin
-Assert-True ($employee.Status -eq 200) 'the employee master is readable'
-$aparOwners = @($batches.Data.data |
-    Where-Object { $_.folder -eq 'apar' -and $_.status -ne 'Approved' } |
-    Select-Object -ExpandProperty employeeCode -Unique)
-$freeEmp = @($employee.Data.data.items |
-    Where-Object { $aparOwners -notcontains $_.employeeCode })[0]
-Assert-True ($null -ne $freeEmp) 'an employee without an apar batch exists for the write test'
+Assert-Equal 400 $badSize.Status 'an unknown document size is refused'
 
 if (-not $SkipDestructive) {
-    $newBatch = Invoke-Api -Method POST -Path '/api/digitization/batches' -Token $admin -Body @{
-        employeeCode = $freeEmp.employeeCode; folder = 'apar'; note = 'smoke test'
+    # Pages are registered as metadata rows; the scanned image follows as its
+    # own version. The re-scan of the same page becomes the next version.
+    $page1 = Invoke-Api -Method POST -Path "/api/files/$newFileId/scans" -Token $admin -Body @{
+        fileName = ''; pageNo = 1; documentSize = 'A4'
     }
-    if ($newBatch.Status -eq 200) {
-        $testBatchId = $newBatch.Data.data.id
-        $page1 = Invoke-Api -Method POST -Path "/api/digitization/batches/$testBatchId/pages" -Token $admin -Body @{
-            fileBarcode = $newBarcode; pageNo = 1; fileName = ''; bulk = $false
-        }
-        Assert-Equal 200 $page1.Status 'a scanned page is stored'
-        Assert-Equal 1 $page1.Data.data.version 'the first page is version 1'
-        $page2 = Invoke-Api -Method POST -Path "/api/digitization/batches/$testBatchId/pages" -Token $admin -Body @{
-            fileBarcode = $newBarcode; pageNo = 1; fileName = ''; bulk = $false
-        }
-        Assert-Equal 200 $page2.Status 'a re-scan of the same page is accepted'
-        Assert-Equal 2 $page2.Data.data.version 'the re-scan is stored as the next version'
+    Assert-Equal 200 $page1.Status 'a scanned page is registered'
+    Assert-Equal 1 $page1.Data.data.version 'the first page is version 1'
+    Assert-Equal 'Pending review' $page1.Data.data.status 'a new page awaits review'
+    Assert-Equal 'A4' $page1.Data.data.documentSize 'the page keeps its document size'
 
-        $noReason = Invoke-Api -Method POST -Path "/api/digitization/pages/$($page2.Data.data.id)/review" -Token $admin -Body @{
-            decision = 'Rejected'; note = '  '
-        }
-        Assert-Equal 400 $noReason.Status 'a rejection without a reason is refused'
-        $approved = Invoke-Api -Method POST -Path "/api/digitization/pages/$($page2.Data.data.id)/review" -Token $admin -Body @{
-            decision = 'Approved'; note = ''
-        }
-        Assert-Equal 200 $approved.Status 'a page can be approved'
+    $page2 = Invoke-Api -Method POST -Path "/api/files/$newFileId/scans" -Token $admin -Body @{
+        fileName = ''; pageNo = 1; documentSize = ''
+    }
+    Assert-Equal 200 $page2.Status 'a re-scan of the same page is accepted'
+    Assert-Equal 2 $page2.Data.data.version 'the re-scan is stored as the next version'
+    Assert-Equal $createdFile.Data.data.documentSize $page2.Data.data.documentSize 'a blank document size inherits the file size'
 
-        # Approve the batch itself. The open-batch guard only ignores Approved
-        # batches, so leaving the smoke-test batch open would poison the next
-        # run: every employee would already have an apar batch and the write
-        # test would find no free employee.
-        $batchDone = Invoke-Api -Method POST -Path "/api/digitization/batches/$testBatchId/review" -Token $admin -Body @{
-            decision = 'Approved'; note = ''
-        }
-        Assert-Equal 200 $batchDone.Status 'the smoke-test batch is approved so the employee frees up'
+    $scanPdf = Join-Path $env:TEMP 'rr-smoke-scan.pdf'
+    [IO.File]::WriteAllBytes($scanPdf, [Text.Encoding]::ASCII.GetBytes(
+        "%PDF-1.4`n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj`n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj`n" +
+        "3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj`ntrailer<</Size 4/Root 1 0 R>>`n%%EOF"))
+    $raw = curl.exe -s -X POST "$BaseUrl/api/scans/$($page1.Data.data.id)/document" `
+        -H "Authorization: Bearer $admin" `
+        -F "document=@$scanPdf;type=application/pdf"
+    $uploaded = $raw | ConvertFrom-Json
+    Assert-True ([bool]$uploaded.success) 'the scanned image is attached as a new version'
+    $page3 = $uploaded.data
+    Assert-Equal 3 $page3.version 'the attached scan becomes version 3'
+    Assert-True ($page3.pageCount -eq 1) 'the pdf page count is stored on the scan'
+
+    $empAdd = Invoke-Api -Method POST -Path "/api/files/$newFileId/scans" -Token $employeeToken -Body @{
+        fileName = ''; pageNo = 2; documentSize = 'A4'
     }
-    else {
-        Write-Fail "could not open a test batch: $($newBatch.Body)"
+    Assert-Equal 403 $empAdd.Status 'an employee cannot register scan pages'
+    $opReview = Invoke-Api -Method POST -Path "/api/scans/$($page2.Data.data.id)/review" -Token $operatorToken -Body @{
+        decision = 'Approved'; note = ''
     }
+    Assert-Equal 403 $opReview.Status 'an operator cannot review scan pages'
+    $supRemove = Invoke-Api -Method DELETE -Path "/api/scans/$($page1.Data.data.id)" -Token $supervisorToken
+    Assert-Equal 200 $supRemove.Status 'a supervisor can remove a pending scan page'
+    $supRemoveAgain = Invoke-Api -Method DELETE -Path "/api/scans/$($page1.Data.data.id)" -Token $supervisorToken
+    Assert-Equal 400 $supRemoveAgain.Status 'removing an already removed scan page is refused'
+
+    $noReason = Invoke-Api -Method POST -Path "/api/scans/$($page2.Data.data.id)/review" -Token $admin -Body @{
+        decision = 'Rejected'; note = '  '
+    }
+    Assert-Equal 400 $noReason.Status 'a rejection without a reason is refused'
+    $approved = Invoke-Api -Method POST -Path "/api/scans/$($page2.Data.data.id)/review" -Token $admin -Body @{
+        decision = 'Approved'; note = ''
+    }
+    Assert-Equal 200 $approved.Status 'a scan page can be approved'
+
+    # Leave the smoke-test file clean: approve everything pending so repeated
+    # runs do not accumulate queue entries.
+    $pendingBefore = Invoke-Api -Path '/api/digitization/pending-review-count' -Token $admin
+    Assert-Equal 200 $pendingBefore.Status 'pending review count responds'
+    $queue = Invoke-Api -Path '/api/digitization/pending' -Token $admin
+    Assert-Equal 200 $queue.Status 'the pending-review queue responds'
+    Assert-True ($null -ne $queue.Data.data) 'the queue returns rows'
+
+    $reviewAll = Invoke-Api -Method POST -Path "/api/files/$newFileId/scans/review-all" -Token $admin -Body @{
+        decision = 'Approved'; note = ''
+    }
+    Assert-Equal 200 $reviewAll.Status 'every pending page of a file can be approved at once'
+    Assert-True ($reviewAll.Data.data -ge 1) 'the bulk review reports how many pages moved'
+    $reviewAllAgain = Invoke-Api -Method POST -Path "/api/files/$newFileId/scans/review-all" -Token $admin -Body @{
+        decision = 'Approved'; note = ''
+    }
+    Assert-Equal 400 $reviewAllAgain.Status 'a bulk review with nothing pending is refused'
+
+    $supRemoveApproved = Invoke-Api -Method DELETE -Path "/api/scans/$($page2.Data.data.id)" -Token $supervisorToken
+    Assert-Equal 400 $supRemoveApproved.Status 'a supervisor cannot remove an approved scan'
+    $adminRemoveApproved = Invoke-Api -Method DELETE -Path "/api/scans/$($page2.Data.data.id)" -Token $admin
+    Assert-Equal 200 $adminRemoveApproved.Status 'an admin can remove an approved scan'
 }
-
-$pending = Invoke-Api -Path '/api/digitization/pending-review-count' -Token $admin
-Assert-Equal 200 $pending.Status 'pending review count responds'
 
 # ============================================================ barcodes
 Write-Step 'Barcode payloads and validation'
@@ -707,8 +731,6 @@ Assert-True (@($activity.Data.data).Count -gt 0) 'activity is derived from movem
 
 # ============================================================ roles
 Write-Step 'Role-based access control'
-$operatorToken = Get-Token 'operator' $AdminPassword
-$employeeToken = Get-Token 'employee' $AdminPassword
 Assert-True ($null -ne $operatorToken) 'the operator account can sign in'
 Assert-True ($null -ne $employeeToken) 'the employee account can sign in'
 
@@ -737,8 +759,6 @@ if (-not $SkipDestructive) {
     # Invoke-WebRequest on Windows PowerShell 5.1 cannot post a multipart form,
     # so the upload goes through curl.exe. A minimal one-page PDF is enough:
     # this section exercises the version row lifecycle, not pdf parsing.
-    $supervisorToken = Get-Token 'supervisor' $AdminPassword
-    Assert-True ($null -ne $supervisorToken) 'the supervisor account can sign in'
     $scanPdf = Join-Path $env:TEMP 'rr-smoke-scan.pdf'
     [IO.File]::WriteAllBytes($scanPdf, [Text.Encoding]::ASCII.GetBytes(
         "%PDF-1.4`n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj`n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj`n" +
