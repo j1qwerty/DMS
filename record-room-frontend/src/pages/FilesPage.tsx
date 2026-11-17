@@ -54,6 +54,33 @@ const KIND_TABS: Array<{ value: RecordKind | 'All'; label: string }> = [
 
 const EMPTY: Page<RecordFile> = { items: [], total: 0, page: 1, pageSize: 10 };
 
+/** Hideable registry columns (E5). File and Actions always render. */
+type ColumnKey = 'type' | 'department' | 'status' | 'location';
+const COLUMN_DEFS: Array<{ id: ColumnKey; label: string }> = [
+  { id: 'type', label: 'Type' },
+  { id: 'department', label: 'Department' },
+  { id: 'status', label: 'Status' },
+  { id: 'location', label: 'Location' },
+];
+const COLUMN_STORE_KEY = 'files.hidden-columns';
+
+const loadHiddenColumns = (): Set<ColumnKey> => {
+  try {
+    const raw = window.localStorage.getItem(COLUMN_STORE_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : null;
+    return new Set(
+      Array.isArray(parsed)
+        ? parsed.filter(
+            (id): id is ColumnKey =>
+              typeof id === 'string' && COLUMN_DEFS.some((def) => def.id === id),
+          )
+        : [],
+    );
+  } catch {
+    return new Set();
+  }
+};
+
 const kindOf = (file: RecordFile): RecordKind =>
   file.recordKind ?? (file.documentSize === 'A0' || file.fileType === 'Map' ? 'Map' : 'File');
 
@@ -96,6 +123,21 @@ export function FilesPage() {
       const next = new Set(current);
       if (checked) next.add(id);
       else next.delete(id);
+      return next;
+    });
+
+  // Column show/hide (E5), persisted per browser.
+  const [hiddenColumns, setHiddenColumns] = useState<Set<ColumnKey>>(loadHiddenColumns);
+  const toggleColumn = (id: ColumnKey) =>
+    setHiddenColumns((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      try {
+        window.localStorage.setItem(COLUMN_STORE_KEY, JSON.stringify([...next]));
+      } catch {
+        // Private mode: the choice just does not survive a reload.
+      }
       return next;
     });
 
@@ -555,85 +597,132 @@ export function FilesPage() {
         ) : (
           <>
             {/* Desktop table */}
-            <div className="hidden overflow-x-auto lg:block">
-              <table className="w-full min-w-[1040px] text-left text-sm">
-                <thead className="bg-[var(--rr-bg)] text-[13px] muted">
-                  <tr>
-                    <th className="w-10 px-3 py-3">
-                      <input
-                        type="checkbox"
-                        aria-label="Select every row on this page"
-                        checked={allOnPageSelected}
-                        onChange={togglePage}
-                        className="size-4 accent-[var(--rr-accent)]"
-                      />
-                    </th>
-                    <th className="px-4 py-3 font-semibold">File</th>
-                    <th className="px-4 py-3 font-semibold">Type</th>
-                    <th className="px-4 py-3 font-semibold">Department</th>
-                    <th className="px-4 py-3 font-semibold">Status</th>
-                    <th className="px-4 py-3 font-semibold">Location</th>
-                    <th className="px-4 py-3 font-semibold">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[var(--rr-border)]">
-                  {result.items.map((file) => {
-                    const kind = kindOf(file);
-                    return (
-                      <tr key={file.id} className="align-top hover:bg-[var(--rr-bg)]">
-                        <td className="px-3 py-3.5">
-                          <input
-                            type="checkbox"
-                            aria-label={`Select ${file.fileNumber}`}
-                            checked={selected.has(file.id)}
-                            onChange={(event) => toggleOne(file.id, event.target.checked)}
-                            className="mt-1 size-4 accent-[var(--rr-accent)]"
-                          />
-                        </td>
-                        <td className="max-w-[300px] px-4 py-3.5">
-                          <Link
-                            to={`/files/${file.id}`}
-                            className="focus-ring mono rounded font-semibold text-accent hover:underline"
-                          >
-                            {file.fileNumber}
-                          </Link>
-                          <p className="mt-1 line-clamp-2 text-[13px] leading-5">{file.subject}</p>
-                          {barcode && <p className="mono muted mt-1 text-xs">{file.fileBarcode}</p>}
-                          {file.eOfficeReference?.trim() && (
-                            <p className="muted mt-0.5 break-all text-xs">
-                              e-office: {file.eOfficeReference}
+            <div className="hidden lg:block">
+              <div className="flex items-center justify-end border-b border-base px-4 py-2">
+                <details className="relative">
+                  <summary className="focus-ring inline-flex cursor-pointer list-none items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-semibold text-accent hover:bg-accent-soft [&::-webkit-details-marker]:hidden">
+                    Columns
+                  </summary>
+                  <div className="absolute right-0 z-20 mt-1 w-44 rounded-xl border border-base bg-[var(--rr-surface)] p-3 shadow-lg">
+                    {COLUMN_DEFS.map((def) => (
+                      <label
+                        key={def.id}
+                        className="flex cursor-pointer items-center gap-2 py-1 text-xs"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={!hiddenColumns.has(def.id)}
+                          onChange={() => toggleColumn(def.id)}
+                          className="size-3.5 accent-[var(--rr-accent)]"
+                        />
+                        {def.label}
+                      </label>
+                    ))}
+                  </div>
+                </details>
+              </div>
+              <div className="max-h-[65vh] overflow-auto">
+                <table className="w-full min-w-[1040px] text-left text-sm">
+                  <thead className="sticky top-0 z-10 bg-[var(--rr-bg)] text-[13px] muted">
+                    <tr>
+                      <th className="w-10 px-3 py-3">
+                        <input
+                          type="checkbox"
+                          aria-label="Select every row on this page"
+                          checked={allOnPageSelected}
+                          onChange={togglePage}
+                          className="size-4 accent-[var(--rr-accent)]"
+                        />
+                      </th>
+                      <th className="px-4 py-3 font-semibold">File</th>
+                      {!hiddenColumns.has('type') && (
+                        <th className="px-4 py-3 font-semibold">Type</th>
+                      )}
+                      {!hiddenColumns.has('department') && (
+                        <th className="px-4 py-3 font-semibold">Department</th>
+                      )}
+                      {!hiddenColumns.has('status') && (
+                        <th className="px-4 py-3 font-semibold">Status</th>
+                      )}
+                      {!hiddenColumns.has('location') && (
+                        <th className="px-4 py-3 font-semibold">Location</th>
+                      )}
+                      <th className="px-4 py-3 font-semibold">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[var(--rr-border)]">
+                    {result.items.map((file) => {
+                      const kind = kindOf(file);
+                      return (
+                        <tr key={file.id} className="align-top hover:bg-[var(--rr-bg)]">
+                          <td className="px-3 py-3.5">
+                            <input
+                              type="checkbox"
+                              aria-label={`Select ${file.fileNumber}`}
+                              checked={selected.has(file.id)}
+                              onChange={(event) => toggleOne(file.id, event.target.checked)}
+                              className="mt-1 size-4 accent-[var(--rr-accent)]"
+                            />
+                          </td>
+                          <td className="max-w-[300px] px-4 py-3.5">
+                            <Link
+                              to={`/files/${file.id}`}
+                              className="focus-ring mono rounded font-semibold text-accent hover:underline"
+                            >
+                              {file.fileNumber}
+                            </Link>
+                            <p className="mt-1 line-clamp-2 text-[13px] leading-5">
+                              {file.subject}
                             </p>
+                            {barcode && (
+                              <p className="mono muted mt-1 text-xs">{file.fileBarcode}</p>
+                            )}
+                            {file.eOfficeReference?.trim() && (
+                              <p className="muted mt-0.5 break-all text-xs">
+                                e-office: {file.eOfficeReference}
+                              </p>
+                            )}
+                          </td>
+                          {!hiddenColumns.has('type') && (
+                            <td className="px-4 py-3.5">
+                              <Badge tone={kind === 'Map' ? 'info' : 'neutral'}>{kind}</Badge>
+                              <p className="muted mt-1.5 text-xs">
+                                {file.fileType}
+                                {file.documentSize ? ` · ${file.documentSize}` : ''}
+                              </p>
+                            </td>
                           )}
-                        </td>
-                        <td className="px-4 py-3.5">
-                          <Badge tone={kind === 'Map' ? 'info' : 'neutral'}>{kind}</Badge>
-                          <p className="muted mt-1.5 text-xs">
-                            {file.fileType}
-                            {file.documentSize ? ` · ${file.documentSize}` : ''}
-                          </p>
-                        </td>
-                        <td className="px-4 py-3.5">
-                          <p className="text-[13px]">{file.department}</p>
-                          <p className="muted mt-0.5 text-xs">{file.year}</p>
-                        </td>
-                        <td className="px-4 py-3.5">
-                          <StatusBadge status={file.status} />
-                          {file.status === 'Issued' && file.holder && (
-                            <p className="muted mt-1.5 max-w-[140px] text-xs">with {file.holder}</p>
+                          {!hiddenColumns.has('department') && (
+                            <td className="px-4 py-3.5">
+                              <p className="text-[13px]">{file.department}</p>
+                              <p className="muted mt-0.5 text-xs">{file.year}</p>
+                            </td>
                           )}
-                        </td>
-                        <td className="max-w-[220px] px-4 py-3.5">
-                          <p className="text-[13px] leading-5">{file.location}</p>
-                          <p className="muted mt-0.5 text-xs">Moved {file.lastMovement}</p>
-                        </td>
-                        <td className="px-4 py-3">
-                          <FileRowActions file={file} onAction={open} variant="icons" />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                          {!hiddenColumns.has('status') && (
+                            <td className="px-4 py-3.5">
+                              <StatusBadge status={file.status} />
+                              {file.status === 'Issued' && file.holder && (
+                                <p className="muted mt-1.5 max-w-[140px] text-xs">
+                                  with {file.holder}
+                                </p>
+                              )}
+                            </td>
+                          )}
+                          {!hiddenColumns.has('location') && (
+                            <td className="max-w-[220px] px-4 py-3.5">
+                              <p className="text-[13px] leading-5">{file.location}</p>
+                              <p className="muted mt-0.5 text-xs">Moved {file.lastMovement}</p>
+                            </td>
+                          )}
+                          <td className="px-4 py-3">
+                            <FileRowActions file={file} onAction={open} variant="icons" />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
 
             {/* Phone & tablet cards */}
