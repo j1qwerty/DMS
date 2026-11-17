@@ -4,10 +4,9 @@ import { PageHeader } from '../components/ui/PageHeader';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
-import { Flash } from '../components/ui/Flash';
 import { EmptyState } from '../components/ui/EmptyState';
 import { Pagination } from '../components/ui/Pagination';
-import { useQuery, useService, useSession } from '../hooks/useService';
+import { useFlash, useQuery, useService, useSession } from '../hooks/useService';
 import { exportReport } from '../services';
 import type { ReportDefinition, ReportKey } from '../types';
 import type { ReportResult } from '../services/contracts';
@@ -37,7 +36,7 @@ export function ReportsPage() {
   const [result, setResult] = useState<ReportResult | null>(null);
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [page, setPage] = useState(1);
-  const [flash, setFlash] = useState<{ tone: 'success' | 'info'; text: string } | null>(null);
+  const { success } = useFlash();
 
   /**
    * Builds every definition in one batch.
@@ -80,10 +79,9 @@ export function ReportsPage() {
   const runExport = async () => {
     if (!active) return;
     const built = await exportReport(active);
-    setFlash({
-      tone: 'success',
-      text: `${built.definition.title} exported with ${built.rows.length} row(s). The export is on the audit trail.`,
-    });
+    success(
+      `${built.definition.title} exported with ${built.rows.length} row(s). The export is on the audit trail.`,
+    );
   };
 
   const rows = result ? result.rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE) : [];
@@ -102,8 +100,6 @@ export function ReportsPage() {
           )
         }
       />
-
-      {flash && <Flash tone={flash.tone} text={flash.text} onDismiss={() => setFlash(null)} />}
 
       <div className="grid gap-4 md:grid-cols-4">
         <Kpi label="Reports available" value={String(definitions.length)} />

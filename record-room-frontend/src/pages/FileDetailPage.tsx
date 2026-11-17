@@ -18,11 +18,11 @@ import { Button, LinkButton } from '../components/ui/Button';
 import { PageHeader } from '../components/ui/PageHeader';
 import { EmptyState } from '../components/ui/EmptyState';
 import { Field, SelectInput, TextInput } from '../components/ui/Field';
-import { Flash, StatusBadge } from '../components/ui/Flash';
+import { StatusBadge } from '../components/ui/Flash';
 import { BarcodeSymbol } from '../components/BarcodeSymbol';
 import { ShelfView } from '../components/ShelfView';
 import { DocumentUploadActions } from '../components/DocumentUploadActions';
-import { useQuery, useService, useSession } from '../hooks/useService';
+import { useFlash, useQuery, useService, useSession } from '../hooks/useService';
 import { buildPayload } from '../lib/barcode';
 import type { Page, Result } from '../services/contracts';
 import { err } from '../services/contracts';
@@ -55,7 +55,7 @@ export function FileDetailPage() {
   const [reason, setReason] = useState('');
   const [eOfficeDraft, setEOfficeDraft] = useState<string | null>(null);
   const [savingEOffice, setSavingEOffice] = useState(false);
-  const [flash, setFlash] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null);
+  const { success, danger } = useFlash();
   const [scanMode, setScanMode] = useState<'pdf' | 'page'>('pdf');
   const [pageNoDraft, setPageNoDraft] = useState('1');
   const [sizeDraft, setSizeDraft] = useState('');
@@ -170,16 +170,13 @@ export function FileDetailPage() {
         eOfficeDraft ?? file.eOfficeReference ?? '',
       );
       if (!result.ok) {
-        setFlash({ tone: 'danger', text: result.error });
+        danger(result.error);
         return;
       }
       setEOfficeDraft(result.value.eOfficeReference ?? '');
-      setFlash({
-        tone: 'success',
-        text: result.value.eOfficeReference
-          ? 'E-office reference saved.'
-          : 'E-office reference cleared.',
-      });
+      success(
+        result.value.eOfficeReference ? 'E-office reference saved.' : 'E-office reference cleared.',
+      );
       reloadFile();
     } finally {
       setSavingEOffice(false);
@@ -189,15 +186,14 @@ export function FileDetailPage() {
   const relocate = async () => {
     const result = await service.files.relocate(file.id, shelfId, position, reason);
     if (!result.ok) {
-      setFlash({ tone: 'danger', text: result.error });
+      danger(result.error);
       return;
     }
-    setFlash({
-      tone: 'success',
-      text: barcode
+    success(
+      barcode
         ? `Relocated to ${result.value.location}. Identity ${result.value.fileBarcode} is unchanged.`
         : `Relocated to ${result.value.location}.`,
-    });
+    );
     setShelfId('');
     setReason('');
     // Relocation changes the file row and appends a movement event, so both
@@ -232,8 +228,6 @@ export function FileDetailPage() {
           </>
         }
       />
-
-      {flash && <Flash tone={flash.tone} text={flash.text} onDismiss={() => setFlash(null)} />}
 
       <div className="grid gap-5 xl:grid-cols-[1.1fr_.9fr]">
         <div className="space-y-5">

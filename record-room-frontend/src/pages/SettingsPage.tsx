@@ -13,7 +13,6 @@ import { PageHeader } from '../components/ui/PageHeader';
 import { Card } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
-import { Flash } from '../components/ui/Flash';
 import { useDb, useSession } from '../hooks/useService';
 import { ROLE_DESCRIPTIONS, permissionsFor } from '../services/permissions';
 import { ROLES } from '../types';
@@ -32,7 +31,6 @@ export function SettingsPage() {
   const { user } = useSession();
   const [notifications, setNotifications] = useState(true);
   const [dark, setDark] = useState(localStorage.getItem('rr-dark') === '1');
-  const [flash, setFlash] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null);
 
   const resetDataset = () => {
     if (!window.confirm('Reset every local change and reload the seed dataset?')) return;
@@ -47,8 +45,6 @@ export function SettingsPage() {
         title="Settings"
         description="Configuration surfaces for frontend prototype behaviour. Production values belong behind authenticated administrative APIs."
       />
-
-      {flash && <Flash tone={flash.tone} text={flash.text} onDismiss={() => setFlash(null)} />}
 
       <div className="grid gap-5 xl:grid-cols-2">
         <Card>

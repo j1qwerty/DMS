@@ -17,7 +17,7 @@ import { Button, LinkButton } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { Field, SelectInput } from '../components/ui/Field';
 import { Pagination } from '../components/ui/Pagination';
-import { Flash, StatusBadge } from '../components/ui/Flash';
+import { StatusBadge } from '../components/ui/Flash';
 import { EmptyState } from '../components/ui/EmptyState';
 import { TableSkeleton } from '../components/ui/Skeletons';
 import { FileRowActions } from '../components/files/FileRowActions';
@@ -99,7 +99,7 @@ const DEFAULT_QUERY: FileQuery = {
 export function FilesPage() {
   const service = useService();
   const { allowed } = useSession();
-  const { flash, success, clear } = useFlash();
+  const { success } = useFlash();
   const { barcode } = useFeatures();
 
   // Dashboard shortcuts link here with ?status=Missing or ?q=...
@@ -300,8 +300,6 @@ export function FilesPage() {
           </>
         }
       />
-
-      {flash && <Flash tone={flash.tone} text={flash.text} onDismiss={clear} />}
 
       <Card padding={false} className="overflow-hidden">
         {/* Record kind tabs */}

@@ -14,6 +14,7 @@ import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 
 import { service, store, type RecordRoomService } from '../services';
 import { session } from '../services/impl/session';
 import { realtime, type Channel } from '../services/realtime';
+import { pushToast } from '../lib/toastStore';
 import type { DbShape } from '../services/store';
 import type { AppUser, Role } from '../types';
 import type { Permission } from '../services/permissions';
@@ -165,29 +166,20 @@ export function useForm<T extends object>(initial: T) {
   return { value, set, setValue, reset };
 }
 
-/** Tracks a transient status message for form-heavy pages. */
+/**
+ * Transient result messages (E6). Every message joins the one global toast
+ * stack (`components/ui/Toasts.tsx`), so a confirmation shows in the same
+ * corner of the screen on every page instead of a per-page banner.
+ */
 export function useFlash() {
-  const [flash, setFlash] = useState<{ tone: 'success' | 'danger' | 'info'; text: string } | null>(
-    null,
-  );
-
-  useEffect(() => {
-    if (!flash) return;
-    const timer = window.setTimeout(() => setFlash(null), 6000);
-    return () => window.clearTimeout(timer);
-  }, [flash]);
-
-  const api = useMemo(
+  return useMemo(
     () => ({
-      success: (text: string) => setFlash({ tone: 'success', text }),
-      danger: (text: string) => setFlash({ tone: 'danger', text }),
-      info: (text: string) => setFlash({ tone: 'info', text }),
-      clear: () => setFlash(null),
+      success: (text: string) => pushToast('success', text),
+      danger: (text: string) => pushToast('danger', text),
+      info: (text: string) => pushToast('info', text),
     }),
     [],
   );
-
-  return { flash, ...api };
 }
 
 export type { AppUser, Permission };

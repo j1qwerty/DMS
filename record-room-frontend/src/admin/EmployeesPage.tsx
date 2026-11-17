@@ -11,11 +11,11 @@ import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
 import { Field, FormGrid, SelectInput, TextInput } from '../components/ui/Field';
-import { Flash, StatusBadge } from '../components/ui/Flash';
+import { StatusBadge } from '../components/ui/Flash';
 import { EmptyState } from '../components/ui/EmptyState';
 import { TableSkeleton } from '../components/ui/Skeletons';
 import { Pagination } from '../components/ui/Pagination';
-import { useQuery, useService, useSession } from '../hooks/useService';
+import { useFlash, useQuery, useService, useSession } from '../hooks/useService';
 import type { Page } from '../services/contracts';
 import type { Employee, EmployeeStatus, Role } from '../types';
 
@@ -45,7 +45,7 @@ export function EmployeesPage() {
   const [pageSize, setPageSize] = useState(10);
   const [editing, setEditing] = useState<Employee | null>(null);
   const [creating, setCreating] = useState(false);
-  const [flash, setFlash] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null);
+  const { success, danger } = useFlash();
 
   // The API filters, sorts and pages the registry, so every control above is a
   // request parameter rather than a client-side predicate.
@@ -73,11 +73,8 @@ export function EmployeesPage() {
 
   const remove = async (employee: Employee) => {
     const outcome = await service.employees.remove(employee.id);
-    setFlash(
-      outcome.ok
-        ? { tone: 'success', text: `${employee.employeeCode} removed.` }
-        : { tone: 'danger', text: outcome.error },
-    );
+    if (outcome.ok) success(`${employee.employeeCode} removed.`);
+    else danger(outcome.error);
     if (outcome.ok) reload();
   };
 
@@ -95,8 +92,6 @@ export function EmployeesPage() {
           )
         }
       />
-
-      {flash && <Flash tone={flash.tone} text={flash.text} onDismiss={() => setFlash(null)} />}
 
       <Card padding={false} className="overflow-hidden">
         <div className="grid gap-3 border-b border-base p-4 lg:grid-cols-[1.4fr_1fr_1fr]">
@@ -236,11 +231,11 @@ export function EmployeesPage() {
           onSubmit={async (value) => {
             const outcome = await service.employees.create(value);
             if (!outcome.ok) {
-              setFlash({ tone: 'danger', text: outcome.error });
+              danger(outcome.error);
               return;
             }
             setCreating(false);
-            setFlash({ tone: 'success', text: `${outcome.value.employeeCode} registered.` });
+            success(`${outcome.value.employeeCode} registered.`);
             reload();
           }}
         />
@@ -253,11 +248,11 @@ export function EmployeesPage() {
             onSubmit={async (value) => {
               const outcome = await service.employees.update(editing.id, value);
               if (!outcome.ok) {
-                setFlash({ tone: 'danger', text: outcome.error });
+                danger(outcome.error);
                 return;
               }
               setEditing(null);
-              setFlash({ tone: 'success', text: `${outcome.value.employeeCode} updated.` });
+              success(`${outcome.value.employeeCode} updated.`);
               reload();
             }}
           />

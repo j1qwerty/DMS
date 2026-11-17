@@ -1,4 +1,4 @@
-﻿import { useFeatures } from '../lib/features';
+import { useFeatures } from '../lib/features';
 import { useState } from 'react';
 import {
   Buildings,
@@ -14,10 +14,10 @@ import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
 import { Field, TextInput } from '../components/ui/Field';
-import { Flash, StatusBadge } from '../components/ui/Flash';
+import { StatusBadge } from '../components/ui/Flash';
 import { RoomMap } from '../components/RoomMap';
 import { ShelfView } from '../components/ShelfView';
-import { useQuery, useService, useSession } from '../hooks/useService';
+import { useFlash, useQuery, useService, useSession } from '../hooks/useService';
 import { cn } from '../lib/utils';
 import type { Room, StorageStatus, StorageUnit } from '../types';
 
@@ -51,7 +51,7 @@ export function LocationsPage() {
   const [sectionId, setSectionId] = useState('');
   const [almirahId, setAlmirahId] = useState('');
   const [dialog, setDialog] = useState<Dialog>(null);
-  const [flash, setFlash] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null);
+  const { success, danger } = useFlash();
   const [layoutNote, setLayoutNote] = useState('');
 
   // The whole hierarchy comes from one read: a room carries its sections, and
@@ -96,11 +96,8 @@ export function LocationsPage() {
 
   const report = async (pending: Promise<{ ok: boolean; error?: string }>) => {
     const result = await pending;
-    setFlash(
-      result.ok
-        ? { tone: 'success', text: 'Layout updated.' }
-        : { tone: 'danger', text: result.error ?? 'That change was refused.' },
-    );
+    if (result.ok) success('Layout updated.');
+    else danger(result.error ?? 'That change was refused.');
     if (result.ok) {
       setDialog(null);
       reload();
@@ -111,11 +108,8 @@ export function LocationsPage() {
     // `roomId` starts empty so the first room can fall into place; the resolved
     // room is what the revision is actually filed against.
     const outcome = await service.locations.saveLayout(selectedRoomId || roomId, layoutNote);
-    setFlash(
-      outcome.ok
-        ? { tone: 'success', text: `Layout revision ${outcome.value.revision} saved.` }
-        : { tone: 'danger', text: outcome.error },
-    );
+    if (outcome.ok) success(`Layout revision ${outcome.value.revision} saved.`);
+    else danger(outcome.error);
     if (outcome.ok) {
       setLayoutNote('');
       reload();
@@ -138,8 +132,6 @@ export function LocationsPage() {
         title="Location designer"
         description="Room → section → almirah → shelf. Every change is saved as you make it; the button in Layout history records who changed what and why."
       />
-
-      {flash && <Flash tone={flash.tone} text={flash.text} onDismiss={() => setFlash(null)} />}
 
       <div className="grid gap-5 xl:grid-cols-[300px_1fr]">
         <div className="space-y-5">

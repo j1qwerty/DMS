@@ -5,9 +5,8 @@ import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { Field, SelectInput, TextInput } from '../components/ui/Field';
-import { Flash } from '../components/ui/Flash';
 import { BarcodeSymbol } from '../components/BarcodeSymbol';
-import { useQuery, useService } from '../hooks/useService';
+import { useFlash, useQuery, useService } from '../hooks/useService';
 import { buildQrPayload } from '../lib/barcode';
 import type { Area, BarcodeJob, BarcodePayload, BarcodeSubject, RecordFile, Room } from '../types';
 import type { Page } from '../services/contracts';
@@ -38,7 +37,7 @@ export function BarcodesPage() {
   const [subject, setSubject] = useState<BarcodeSubject>('File');
   const [targetId, setTargetId] = useState('');
   const [quantity, setQuantity] = useState(1);
-  const [flash, setFlash] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null);
+  const { success, danger } = useFlash();
 
   // Every read on this page crosses the network now: the location tree for the
   // non-file subjects, the registry for file subjects, and the subject list for
@@ -90,14 +89,11 @@ export function BarcodesPage() {
   const queue = async () => {
     if (!targetId) return;
     const result = await service.barcodes.createJob({ subject, targetId, quantity });
-    setFlash(
-      result.ok
-        ? {
-            tone: 'success',
-            text: `Queued ${result.value.quantity} label(s) for ${result.value.label}.`,
-          }
-        : { tone: 'danger', text: result.error },
-    );
+    if (result.ok) {
+      success(`Queued ${result.value.quantity} label(s) for ${result.value.label}.`);
+    } else {
+      danger(result.error);
+    }
     // The queue list is a read, so a successful write has to refresh it or the
     // new job does not appear until the page is revisited.
     if (result.ok) reloadJobs();
@@ -119,8 +115,6 @@ export function BarcodesPage() {
           </Button>
         }
       />
-
-      {flash && <Flash tone={flash.tone} text={flash.text} onDismiss={() => setFlash(null)} />}
 
       <div className="grid gap-5 xl:grid-cols-[.9fr_1.1fr]">
         <Card>
@@ -261,10 +255,7 @@ export function BarcodesPage() {
                           variant="ghost"
                           icon={<CheckCircle size={15} />}
                           onClick={() => {
-                            setFlash({
-                              tone: 'success',
-                              text: 'Marked as printed. Reprints stay auditable.',
-                            });
+                            success('Marked as printed. Reprints stay auditable.');
                           }}
                         >
                           Mark printed

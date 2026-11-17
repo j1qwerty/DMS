@@ -4,8 +4,7 @@ import { PageHeader } from '../components/ui/PageHeader';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Field, FormGrid, TextArea } from '../components/ui/Field';
-import { Flash } from '../components/ui/Flash';
-import { useQuery, useService } from '../hooks/useService';
+import { useFlash, useQuery, useService } from '../hooks/useService';
 import type { InquiryRecord } from '../services/impl/inquiries';
 
 /**
@@ -18,7 +17,7 @@ import type { InquiryRecord } from '../services/impl/inquiries';
 export function SupportPage() {
   const service = useService();
   const [form, setForm] = useState({ name: '', email: '', department: '', message: '' });
-  const [flash, setFlash] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null);
+  const { success, danger } = useFlash();
 
   const { data: submitted, reload } = useQuery(
     () => service.inquiries.list(),
@@ -30,13 +29,12 @@ export function SupportPage() {
     event.preventDefault();
     const result = await service.inquiries.save(form);
     if (!result.ok) {
-      setFlash({ tone: 'danger', text: result.error });
+      danger(result.error);
       return;
     }
-    setFlash({
-      tone: 'success',
-      text: `Inquiry saved locally at ${result.value.createdAt}. It will not survive a dataset reset.`,
-    });
+    success(
+      `Inquiry saved locally at ${result.value.createdAt}. It will not survive a dataset reset.`,
+    );
     setForm({ name: '', email: '', department: '', message: '' });
     // The "submitted in this session" list is a query result, not local state.
     reload();
@@ -52,8 +50,6 @@ export function SupportPage() {
         title="Send an implementation inquiry"
         description="Small operational inquiries are captured in the browser for now. Production persistence belongs to the .NET 10 API."
       />
-
-      {flash && <Flash tone={flash.tone} text={flash.text} onDismiss={() => setFlash(null)} />}
 
       <div className="grid gap-5 xl:grid-cols-[1fr_.7fr]">
         <Card>
@@ -87,12 +83,7 @@ export function SupportPage() {
                 className="focus-ring h-11 w-full rounded-xl border border-base bg-[var(--rr-bg)] px-3 text-sm outline-none"
               />
             </Field>
-            <Field
-              label="Message"
-              htmlFor="inq-message"
-              required
-              error={flash?.tone === 'danger' ? flash.text : undefined}
-            >
+            <Field label="Message" htmlFor="inq-message" required>
               <TextArea
                 id="inq-message"
                 required

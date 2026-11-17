@@ -14,7 +14,7 @@ import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { EmptyState } from '../components/ui/EmptyState';
-import { Flash, StatusBadge } from '../components/ui/Flash';
+import { StatusBadge } from '../components/ui/Flash';
 import { DocumentViewer } from '../components/files/DocumentViewer';
 import {
   MoveFileModal,
@@ -47,7 +47,7 @@ export function FileViewerPage() {
   const [params, setParams] = useSearchParams();
   const service = useService();
   const { allowed, user } = useSession();
-  const { flash, success, danger, clear } = useFlash();
+  const { success, danger } = useFlash();
   const features = useFeatures();
   const [dialog, setDialog] = useState<Dialog>(null);
 
@@ -192,8 +192,6 @@ export function FileViewerPage() {
           </Link>
         </div>
       </div>
-
-      {flash && <Flash tone={flash.tone} text={flash.text} onDismiss={clear} />}
 
       {/* Scan / Map tabs */}
       <div className="flex gap-1 overflow-x-auto border-b border-base">

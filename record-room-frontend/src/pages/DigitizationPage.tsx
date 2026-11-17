@@ -6,10 +6,9 @@ import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { Modal } from '../components/ui/Modal';
 import { Field, TextArea, TextInput } from '../components/ui/Field';
-import { Flash } from '../components/ui/Flash';
 import { EmptyState } from '../components/ui/EmptyState';
 import { RowSkeleton } from '../components/ui/Skeletons';
-import { useQuery, useService, useSession } from '../hooks/useService';
+import { useFlash, useQuery, useService, useSession } from '../hooks/useService';
 import type { FileScan } from '../types';
 
 /**
@@ -24,7 +23,7 @@ export function DigitizationPage() {
   const [search, setSearch] = useState('');
   const [busyId, setBusyId] = useState('');
   const [rejecting, setRejecting] = useState<FileScan | null>(null);
-  const [flash, setFlash] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null);
+  const { success, danger } = useFlash();
 
   // The API owns the filtering; the rows on screen are exactly the pending
   // queue for the current search. Live updates from other screens arrive on
@@ -42,10 +41,10 @@ export function DigitizationPage() {
     try {
       const result = await service.digitization.review(scan.id, decision, note);
       if (!result.ok) {
-        setFlash({ tone: 'danger', text: result.error });
+        danger(result.error);
         return;
       }
-      setFlash({ tone: 'success', text: `${scan.filename} ${decision.toLowerCase()}.` });
+      success(`${scan.filename} ${decision.toLowerCase()}.`);
       reload();
     } finally {
       setBusyId('');
@@ -59,8 +58,6 @@ export function DigitizationPage() {
         title="Scan review queue"
         description="Every page scan awaiting review, across all files. Pages are added from their file; approving here marks the page complete for the registry."
       />
-
-      {flash && <Flash tone={flash.tone} text={flash.text} onDismiss={() => setFlash(null)} />}
 
       <div className="grid gap-4 md:grid-cols-2">
         <Metric icon={<Scan />} label="In queue" value={String(queue.length)} />

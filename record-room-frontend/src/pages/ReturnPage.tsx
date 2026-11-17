@@ -5,9 +5,9 @@ import { PageHeader } from '../components/ui/PageHeader';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { SelectInput, TextInput } from '../components/ui/Field';
-import { Flash, StatusBadge } from '../components/ui/Flash';
+import { StatusBadge } from '../components/ui/Flash';
 import { EmptyState } from '../components/ui/EmptyState';
-import { useQuery, useService, useSession } from '../hooks/useService';
+import { useFlash, useQuery, useService, useSession } from '../hooks/useService';
 import { cn } from '../lib/utils';
 import type { IssueRecord, RecordFile } from '../types';
 import type { Page } from '../services/contracts';
@@ -39,7 +39,7 @@ export function ReturnPage() {
   const [receiptSearch, setReceiptSearch] = useState('');
   const [selected, setSelected] = useState<string[]>([]);
   const [condition, setCondition] = useState(CONDITIONS[0]);
-  const [flash, setFlash] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null);
+  const { success, danger } = useFlash();
   const [returning, setReturning] = useState(false);
 
   // The open list and the chosen receipt are two separate asks; both are refetched
@@ -83,14 +83,13 @@ export function ReturnPage() {
     try {
       const result = await service.issues.returnFiles(receipt.id, selected, condition);
       if (!result.ok) {
-        setFlash({ tone: 'danger', text: result.error });
+        danger(result.error);
         return;
       }
       const returned = selected.length;
-      setFlash({
-        tone: 'success',
-        text: `${returned} file(s) returned against ${receipt.receiptNumber}. Receipt is now ${result.value.status}.`,
-      });
+      success(
+        `${returned} file(s) returned against ${receipt.receiptNumber}. Receipt is now ${result.value.status}.`,
+      );
       setSelected([]);
       reloadReceipt();
       reloadOpen();
@@ -119,7 +118,6 @@ export function ReturnPage() {
               onChange={(event) => {
                 setReceiptId(event.target.value);
                 setSelected([]);
-                setFlash(null);
               }}
               aria-label="Select receipt"
             >
@@ -144,7 +142,6 @@ export function ReturnPage() {
                   setReceiptSearch(event.target.value);
                   setReceiptId('');
                   setSelected([]);
-                  setFlash(null);
                 }}
                 placeholder={
                   barcode
@@ -268,10 +265,6 @@ export function ReturnPage() {
                   ))}
                 </SelectInput>
               </div>
-
-              {flash && (
-                <Flash tone={flash.tone} text={flash.text} onDismiss={() => setFlash(null)} />
-              )}
 
               <Button
                 className="w-full"

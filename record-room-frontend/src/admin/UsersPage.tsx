@@ -6,10 +6,10 @@ import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { Modal } from '../components/ui/Modal';
 import { Field, SelectInput, TextInput } from '../components/ui/Field';
-import { Flash, StatusBadge } from '../components/ui/Flash';
+import { StatusBadge } from '../components/ui/Flash';
 import { EmptyState } from '../components/ui/EmptyState';
 import { TableSkeleton } from '../components/ui/Skeletons';
-import { useQuery, useService, useSession } from '../hooks/useService';
+import { useFlash, useQuery, useService, useSession } from '../hooks/useService';
 import { ROLE_DESCRIPTIONS } from '../services/permissions';
 import { PERMISSIONS } from '../services/permissions';
 import { can } from '../services/permissions';
@@ -28,7 +28,7 @@ export function UsersPage() {
 
   const [editing, setEditing] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
-  const [flash, setFlash] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null);
+  const { success, danger } = useFlash();
 
   // Three independent reads: the login table, the employee master it links to,
   // and the role list the permission matrix is drawn from.
@@ -49,11 +49,8 @@ export function UsersPage() {
 
   const remove = async (id: string) => {
     const result = await service.users.remove(id);
-    setFlash(
-      result.ok
-        ? { tone: 'success', text: 'Login removed.' }
-        : { tone: 'danger', text: result.error },
-    );
+    if (result.ok) success('Login removed.');
+    else danger(result.error);
     if (result.ok) reload();
   };
 
@@ -61,15 +58,11 @@ export function UsersPage() {
     const user = users.find((item) => item.id === id);
     if (!user) return;
     const result = await service.users.update(id, { active: !user.active });
-    setFlash(
-      result.ok
-        ? {
-            tone: 'success',
-            text: `${user.displayName} is now ${result.value.active ? 'active' : 'deactivated'}.`,
-          }
-        : { tone: 'danger', text: result.error },
-    );
-    if (result.ok) reload();
+    if (result.ok) {
+      success(`${user.displayName} is now ${result.value.active ? 'active' : 'deactivated'}.`);
+    } else {
+      danger(result.error);
+    }
   };
 
   return (
@@ -86,8 +79,6 @@ export function UsersPage() {
           )
         }
       />
-
-      {flash && <Flash tone={flash.tone} text={flash.text} onDismiss={() => setFlash(null)} />}
 
       <Card padding={false} className="overflow-hidden">
         {loading && users.length === 0 ? (
@@ -220,11 +211,11 @@ export function UsersPage() {
           onSubmit={async (input) => {
             const result = await service.users.create(input);
             if (!result.ok) {
-              setFlash({ tone: 'danger', text: result.error });
+              danger(result.error);
               return;
             }
             setCreating(false);
-            setFlash({ tone: 'success', text: `Login created for ${result.value.displayName}.` });
+            success(`Login created for ${result.value.displayName}.`);
             reload();
           }}
         />
@@ -248,11 +239,11 @@ export function UsersPage() {
               void password;
               const result = await service.users.update(target.id, input);
               if (!result.ok) {
-                setFlash({ tone: 'danger', text: result.error });
+                danger(result.error);
                 return;
               }
               setEditing(null);
-              setFlash({ tone: 'success', text: `${result.value.displayName} updated.` });
+              success(`${result.value.displayName} updated.`);
               reload();
             }}
           />

@@ -1,13 +1,12 @@
-﻿import { useFeatures } from '../lib/features';
+import { useFeatures } from '../lib/features';
 import { useState } from 'react';
 import { CheckCircle, Paperclip, UploadSimple, WarningCircle } from '@phosphor-icons/react';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Field, TextArea, TextInput } from '../components/ui/Field';
-import { Flash } from '../components/ui/Flash';
 import { EmptyState } from '../components/ui/EmptyState';
-import { useQuery, useService } from '../hooks/useService';
+import { useFlash, useQuery, useService } from '../hooks/useService';
 import { downloadCsv, slugify, toCsv } from '../lib/csv';
 import type { BulkImportJob, BulkImportRow } from '../types';
 
@@ -43,7 +42,7 @@ export function BulkImportPage() {
   const [folder, setFolder] = useState('bulk/Temp00432/');
   const [csv, setCsv] = useState('');
   const [jobId, setJobId] = useState<string | null>(null);
-  const [flash, setFlash] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null);
+  const { success, danger } = useFlash();
 
   const { data: jobs, reload: reloadJobs } = useQuery(
     () => service.bulk.jobs(),
@@ -59,14 +58,13 @@ export function BulkImportPage() {
   const validate = async () => {
     const result = await service.bulk.validateCsv(csv, folder);
     if (!result.ok) {
-      setFlash({ tone: 'danger', text: result.error });
+      danger(result.error);
       return;
     }
     setJobId(result.value.id);
-    setFlash({
-      tone: result.value.accepted > 0 ? 'success' : 'danger',
-      text: `${result.value.rows.length} row(s) validated: ${result.value.accepted} accepted, ${result.value.rejected} rejected.`,
-    });
+    (result.value.accepted > 0 ? success : danger)(
+      `${result.value.rows.length} row(s) validated: ${result.value.accepted} accepted, ${result.value.rejected} rejected.`,
+    );
     // Validating stages a job, so it belongs at the top of the import history.
     reloadJobs();
   };
@@ -75,13 +73,10 @@ export function BulkImportPage() {
     if (!job) return;
     const result = await service.bulk.commit(job.id);
     if (!result.ok) {
-      setFlash({ tone: 'danger', text: result.error });
+      danger(result.error);
       return;
     }
-    setFlash({
-      tone: 'success',
-      text: `Committed ${result.value.accepted} registry row(s) from ${result.value.filename}.`,
-    });
+    success(`Committed ${result.value.accepted} registry row(s) from ${result.value.filename}.`);
     // Committing flips the job status and writes registry rows, so both the
     // open job and the history have to come back from the API.
     reloadJob();
@@ -112,8 +107,6 @@ export function BulkImportPage() {
         title="Bulk import"
         description="Validate a staged batch against the registry before committing. Nothing is written until you confirm, and every refusal carries a reason."
       />
-
-      {flash && <Flash tone={flash.tone} text={flash.text} onDismiss={() => setFlash(null)} />}
 
       <div className="grid gap-5 xl:grid-cols-[.9fr_1.1fr]">
         <Card>

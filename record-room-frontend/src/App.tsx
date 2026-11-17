@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, type ComponentType } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useSearchParams } from 'react-router-dom';
 import { AppShell } from './layouts/AppShell';
+import { ToastHost } from './components/ui/Toasts';
 import { AdminLayout } from './admin/AdminLayout';
 import { RequireAuth, RequirePermission } from './layouts/RouteGuards';
 import { DashboardPage } from './pages/DashboardPage';
@@ -111,6 +112,7 @@ export function App() {
   return (
     <BrowserRouter>
       <Suspense fallback={<RouteFallback />}>
+        <ToastHost />
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route

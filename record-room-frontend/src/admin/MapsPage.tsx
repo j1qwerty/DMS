@@ -14,7 +14,7 @@ import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
 import { Badge } from '../components/ui/Badge';
-import { Flash, StatusBadge } from '../components/ui/Flash';
+import { StatusBadge } from '../components/ui/Flash';
 import { EmptyState } from '../components/ui/EmptyState';
 import { TableSkeleton } from '../components/ui/Skeletons';
 import { DropZone } from '../components/files/DropZone';
@@ -43,7 +43,7 @@ export function MapsPage() {
   // Map rows are digitization scans, so reuse that permission. It matches the
   // API's gate on `POST /api/uploads/maps/{id}/document`.
   const canUpload = allowed('digitization.upload') || allowed('files.edit');
-  const { flash, success, danger, clear } = useFlash();
+  const { success, danger } = useFlash();
 
   const [search, setSearch] = useState('');
   const [picking, setPicking] = useState(false);
@@ -137,8 +137,6 @@ export function MapsPage() {
           )
         }
       />
-
-      {flash && <Flash tone={flash.tone} text={flash.text} onDismiss={clear} />}
 
       <Card padding={false} className="overflow-hidden">
         <div className="border-b border-base p-3 sm:p-4">

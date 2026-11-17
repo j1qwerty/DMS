@@ -14,7 +14,6 @@ import { Button, LinkButton } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { Modal } from '../components/ui/Modal';
 import { Field, SelectInput, TextInput } from '../components/ui/Field';
-import { Flash } from '../components/ui/Flash';
 import { EmptyState } from '../components/ui/EmptyState';
 import { Badge } from '../components/ui/Badge';
 import { Spine } from '../components/ShelfSpines';
@@ -40,7 +39,7 @@ function shelfCount(room: Room) {
 export function RoomsPage() {
   const service = useService();
   const { allowed } = useSession();
-  const { flash, success, clear } = useFlash();
+  const { success } = useFlash();
   const canEdit = allowed('locations.edit');
 
   const [editing, setEditing] = useState<Room | 'new' | null>(null);
@@ -72,8 +71,6 @@ export function RoomsPage() {
           </>
         }
       />
-
-      {flash && <Flash tone={flash.tone} text={flash.text} onDismiss={clear} />}
 
       {rooms.length === 0 ? (
         <EmptyState
