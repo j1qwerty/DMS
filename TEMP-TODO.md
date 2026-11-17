@@ -7,16 +7,21 @@ change touches the API; no browser walkthrough until everything is built.
 ## v1 — remaining
 
 - [x] E3 skeleton loaders (tables + card rows) — commit `Skeletons.tsx` + 7 pages
-- [ ] **E4 bulk selection + bulk actions on the registry** — committed
+- [x] **E4 bulk selection + bulk actions on the registry** — committed
       checkbox column + card checkboxes, select-page-all, bulk bar:
       Relocate… / Export selected / Clear; BulkMoveModal loops
       `files.relocate` per file (issued files skipped with a count), CSV
       reuses the page export columns
-- [ ] E5 registry table sticky header + column show/hide
-- [ ] E6 one consistent flash/toast location
-- [ ] E7 responsive audit below 768px: registry, issue desk, location designer
-- [ ] E8 command palette: build it — recent files, recent searches, per-result
-      match context
+- [x] E5 registry table sticky header + column show/hide
+- [x] E6 one consistent flash/toast location
+- [x] E7 responsive audit below 768px: registry (card list already), issue desk
+      (borrower list as cards below md), location designer (overflow fixed
+      earlier); Modal is a bottom sheet on phones; other wide admin tables
+      scroll inside overflow containers by design
+- [x] E8 command palette (`/` or Ctrl/Cmd+K): debounced registry search with
+      per-result match context, recent files (recorded on detail-page visits),
+      recent searches (recorded on every registry search), role-filtered
+      page jumps; arrow/enter navigation inside the E2 modal
 
 ## v2 — most important first (proposal; confirm with user before starting)
 
