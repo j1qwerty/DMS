@@ -402,6 +402,35 @@ public static class DatabaseSeeder
 
         await db.SaveChangesAsync(ct);
 
+        // Custody chain (§3.8): a reconciled intake and a signed-off return so
+        // the register has both directions to show on a fresh database.
+        db.CustodyEvents.Add(new CustodyEvent
+        {
+            Direction = CustodyDirection.In,
+            BatchRef = "DIG-2026-04",
+            Department = "Establishment",
+            Vendor = "ScanServe",
+            FileCount = 40,
+            ReconciledCount = 39,
+            RecordedBy = "seed",
+            RecordedAt = DateTime.UtcNow.AddDays(-5),
+            Remarks = "One file held back: cover page torn, sent for repair.",
+        });
+        db.CustodyEvents.Add(new CustodyEvent
+        {
+            Direction = CustodyDirection.Out,
+            BatchRef = "DIG-2026-03",
+            Department = "Engineering",
+            Vendor = "ScanServe",
+            FileCount = 22,
+            RecordedBy = "seed",
+            RecordedAt = DateTime.UtcNow.AddDays(-2),
+            SignedOffBy = "Seed Supervisor",
+            SignedOffAt = DateTime.UtcNow.AddDays(-1),
+            Remarks = "Digital copies handed over with the physical files.",
+        });
+        await db.SaveChangesAsync(ct);
+
         // Ids are assigned now, so the display path can be built.
         await RefreshLocationDisplayAsync(db, ct);
 

@@ -812,6 +812,76 @@ $unsafe = Invoke-Api -Method POST -Path '/api/media-links' -Token $employeeToken
 }
 Assert-Equal 400 $unsafe.Status 'a non-http(s) media URL is refused'
 
+# ============================================================ custody chain
+Write-Step 'Custody chain — intake register and return sign-off'
+
+$empCustodyList = Invoke-Api -Path '/api/custody' -Token $employeeToken
+Assert-Equal 200 $empCustodyList.Status 'any authenticated user can read the custody register'
+
+$empCustodyWrite = Invoke-Api -Method POST -Path '/api/custody' -Token $employeeToken -Body @{
+    direction = 'Intake'; department = 'Audit'; fileCount = 3
+}
+Assert-Equal 403 $empCustodyWrite.Status 'an employee cannot record custody'
+
+$opCustodyWrite = Invoke-Api -Method POST -Path '/api/custody' -Token $operatorToken -Body @{
+    direction = 'Intake'; department = 'Audit'; fileCount = 3
+}
+Assert-Equal 403 $opCustodyWrite.Status 'an operator cannot record custody'
+
+$badCustody = Invoke-Api -Method POST -Path '/api/custody' -Token $admin -Body @{
+    direction = 'Intake'; department = ''; fileCount = 0
+}
+Assert-Equal 400 $badCustody.Status 'an intake without a department or count is refused'
+
+$intake = Invoke-Api -Method POST -Path '/api/custody' -Token $admin -Body @{
+    direction = 'Intake'; department = 'Audit'; fileCount = 5
+    batchRef = 'DIG-SMOKE'; vendor = 'ScanServe'; remarks = 'Smoke-test intake.'
+}
+Assert-Equal 200 $intake.Status 'an intake is recorded'
+$custodyId = $intake.Data.data.id
+Assert-Equal 'Intake' $intake.Data.data.direction 'the intake keeps the contract direction word'
+Assert-Equal 'Farida Begum' $intake.Data.data.recordedBy 'the intake names the recorder by display name'
+
+$reconcile = Invoke-Api -Method POST -Path "/api/custody/$custodyId/reconcile" -Token $admin -Body @{
+    reconciledCount = 4; remarks = 'One file short at counting.'
+}
+Assert-Equal 200 $reconcile.Status 'the intake is reconciled'
+Assert-Equal 4 $reconcile.Data.data.reconciledCount 'the counted total is stored'
+
+$return = Invoke-Api -Method POST -Path '/api/custody' -Token $admin -Body @{
+    direction = 'Return'; department = 'Audit'; fileCount = 4; batchRef = 'DIG-SMOKE'
+}
+Assert-Equal 200 $return.Status 'a return is recorded'
+$returnId = $return.Data.data.id
+
+$returnCount = Invoke-Api -Method POST -Path "/api/custody/$returnId/reconcile" -Token $admin -Body @{
+    reconciledCount = 4
+}
+Assert-Equal 400 $returnCount.Status 'a return cannot be reconciled'
+
+$signOff = Invoke-Api -Method POST -Path "/api/custody/$returnId/sign-off" -Token $admin -Body @{
+    signedOffBy = 'Audit Officer'
+}
+Assert-Equal 200 $signOff.Status 'the return is signed off'
+Assert-Equal 'Audit Officer' $signOff.Data.data.signedOffBy 'the sign-off names the signer'
+Assert-True ($null -ne $signOff.Data.data.signedOffAt) 'the sign-off stamps a time'
+
+$reSign = Invoke-Api -Method POST -Path "/api/custody/$returnId/sign-off" -Token $admin -Body @{ }
+Assert-Equal 400 $reSign.Status 'a signed-off event cannot be signed off twice'
+
+$intakeSign = Invoke-Api -Method POST -Path "/api/custody/$custodyId/sign-off" -Token $admin -Body @{ }
+Assert-Equal 200 $intakeSign.Status 'a reconciled intake can be signed off'
+Assert-Equal 'Farida Begum' $intakeSign.Data.data.signedOffBy 'a blank sign-off defaults to the current user'
+
+$reCount = Invoke-Api -Method POST -Path "/api/custody/$custodyId/reconcile" -Token $admin -Body @{
+    reconciledCount = 5
+}
+Assert-Equal 400 $reCount.Status 'a signed-off event can no longer be changed'
+
+$filtered = Invoke-Api -Path '/api/custody?direction=Intake&search=SMOKE' -Token $admin
+Assert-Equal 200 $filtered.Status 'the register filters by direction and text'
+Assert-True ($filtered.Data.data.items.Count -ge 1) 'the smoke-test intake appears in the filtered register'
+
 # ============================================================ summary
 Write-Host "`n================================" -ForegroundColor Cyan
 Write-Host "  passed: $script:Passed   failed: $script:Failed" -ForegroundColor Cyan

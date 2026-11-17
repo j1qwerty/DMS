@@ -31,6 +31,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<Inquiry> Inquiries => Set<Inquiry>();
     public DbSet<MediaLink> MediaLinks => Set<MediaLink>();
+    public DbSet<CustodyEvent> CustodyEvents => Set<CustodyEvent>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -236,6 +237,20 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         {
             e.ToTable("MediaLinks");
             e.Property(x => x.Url).HasMaxLength(1000);
+        });
+
+        b.Entity<CustodyEvent>(e =>
+        {
+            e.ToTable("CustodyEvents");
+            e.Property(x => x.BatchRef).HasMaxLength(64);
+            e.Property(x => x.Department).HasMaxLength(128);
+            e.Property(x => x.Vendor).HasMaxLength(128);
+            e.Property(x => x.RecordedBy).HasMaxLength(64);
+            e.Property(x => x.SignedOffBy).HasMaxLength(64);
+            e.Property(x => x.Remarks).HasMaxLength(500);
+            e.HasIndex(x => x.RecordedAt);
+            e.HasIndex(x => x.Department);
+            e.HasIndex(x => x.Direction);
         });
     }
 }

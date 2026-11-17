@@ -30,6 +30,13 @@ public static class Display
         _ => status.ToString(),
     };
 
+    public static string Custody(CustodyDirection direction) => direction switch
+    {
+        CustodyDirection.In => "Intake",
+        CustodyDirection.Out => "Return",
+        _ => direction.ToString(),
+    };
+
     public static string Movement(MovementKind kind) => kind switch
     {
         MovementKind.LocationChange => "Location change",
@@ -62,6 +69,14 @@ public static class Display
         null or "" or "All" => null,
         "Pending review" => PageStatus.PendingReview,
         _ => Enum.TryParse<PageStatus>(value, true, out var parsed) ? parsed : null,
+    };
+
+    public static CustodyDirection? ParseCustody(string? value) => value switch
+    {
+        null or "" or "All" => null,
+        "Intake" => CustodyDirection.In,
+        "Return" => CustodyDirection.Out,
+        _ => Enum.TryParse<CustodyDirection>(value, true, out var parsed) ? parsed : null,
     };
 
     public static MovementKind? ParseMovement(string? value) => value switch

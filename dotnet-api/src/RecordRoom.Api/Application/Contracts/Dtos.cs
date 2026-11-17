@@ -304,6 +304,43 @@ public sealed record FileScanPageDto(
 public sealed record ScanAddInput(string FileName, int PageNo, string? DocumentSize = null, string? Note = null);
 public sealed record PageReviewInput(string Decision, string Note = "");
 
+// Custody chain (§3.8) ---------------------------------------------------------
+
+/// <summary>
+/// One handover in the digitization custody chain: an intake ("In" — files
+/// received and counted) or a return ("Out" — files handed back with sign-off).
+/// </summary>
+public sealed record CustodyEventDto(
+    long Id,
+    string Direction,
+    string BatchRef,
+    string Department,
+    string Vendor,
+    int FileCount,
+    int? ReconciledCount,
+    string RecordedBy,
+    DateTime RecordedAt,
+    string? SignedOffBy,
+    DateTime? SignedOffAt,
+    string Remarks);
+
+public sealed record CustodyQuery(
+    string? Direction = null,
+    string? Search = null,
+    int Page = 1,
+    int PageSize = 20);
+
+public sealed record CustodyRecordInput(
+    string Direction,
+    string Department,
+    int FileCount,
+    string BatchRef = "",
+    string Vendor = "",
+    string Remarks = "");
+
+public sealed record CustodyReconcileInput(int ReconciledCount, string Remarks = "");
+public sealed record CustodySignOffInput(string SignedOffBy = "");
+
 // Uploads ---------------------------------------------------------------------
 
 public sealed record MapUploadDto(

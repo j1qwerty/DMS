@@ -92,6 +92,14 @@ public enum EmployeeStatus
     Retired = 2,
 }
 
+public enum CustodyDirection
+{
+    /// <summary>Intake — files received from a department for digitization.</summary>
+    In = 0,
+    /// <summary>Return — files handed back to a department with sign-off.</summary>
+    Out = 1,
+}
+
 public enum BarcodeSubject
 {
     File = 0,

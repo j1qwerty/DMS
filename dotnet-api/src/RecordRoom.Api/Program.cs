@@ -161,6 +161,7 @@ builder.Services.AddScoped<IRecordFileDocumentsService, RecordFileDocumentsServi
 builder.Services.AddSingleton<IPrivateDocumentStore, PrivateDocumentStore>();
 builder.Services.AddScoped<IIssuesService, IssuesService>();
 builder.Services.AddScoped<IFileScansService, FileScansService>();
+builder.Services.AddScoped<ICustodyService, CustodyService>();
 builder.Services.AddScoped<IEmployeesService, EmployeesService>();
 builder.Services.AddScoped<IUsersService, UsersService>();
 builder.Services.AddScoped<IContentService, ContentService>();

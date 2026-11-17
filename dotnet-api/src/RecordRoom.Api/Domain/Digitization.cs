@@ -117,3 +117,30 @@ public class MediaLink
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public string Source { get; set; } = "record-room-frontend";
 }
+
+/// <summary>
+/// One custody handover in the digitization chain (work plan §3.8): "In" is an
+/// intake — a department's files received and counted for digitization; "Out"
+/// is the return / digital-handover sign-off back to the department. Rows are
+/// immutable: corrections are new events, never edits. The difference between
+/// the declared and reconciled count on the intake side is the
+/// count-reconciliation the tender's counting step implies.
+/// </summary>
+public class CustodyEvent
+{
+    public long Id { get; set; }
+    public CustodyDirection Direction { get; set; } = CustodyDirection.In;
+    /// <summary>Free-text digitization batch / reference the handover is tied to.</summary>
+    public string BatchRef { get; set; } = string.Empty;
+    public required string Department { get; set; }
+    public string Vendor { get; set; } = string.Empty;
+    /// <summary>Files declared by the department (intake) or leaving the room (return).</summary>
+    public int FileCount { get; set; }
+    /// <summary>Files actually counted; null until the intake side is reconciled.</summary>
+    public int? ReconciledCount { get; set; }
+    public string RecordedBy { get; set; } = string.Empty;
+    public DateTime RecordedAt { get; set; } = DateTime.UtcNow;
+    public string? SignedOffBy { get; set; }
+    public DateTime? SignedOffAt { get; set; }
+    public string Remarks { get; set; } = string.Empty;
+}

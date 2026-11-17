@@ -80,6 +80,18 @@ public class DisplayTests
         Assert.Equal(kind, Display.ParseMovement(Display.Movement(kind)));
 
     [Theory]
+    [InlineData(CustodyDirection.In, "Intake")]
+    [InlineData(CustodyDirection.Out, "Return")]
+    public void Custody_direction_uses_the_contract_spelling(CustodyDirection direction, string expected) =>
+        Assert.Equal(expected, Display.Custody(direction));
+
+    [Theory]
+    [InlineData(CustodyDirection.In)]
+    [InlineData(CustodyDirection.Out)]
+    public void Custody_direction_round_trips(CustodyDirection direction) =>
+        Assert.Equal(direction, Display.ParseCustody(Display.Custody(direction)));
+
+    [Theory]
     [InlineData("All")]
     [InlineData("")]
     [InlineData(null)]
@@ -90,6 +102,7 @@ public class DisplayTests
         Assert.Null(Display.ParseRecord(value));
         Assert.Null(Display.ParseIssue(value));
         Assert.Null(Display.ParsePage(value));
+        Assert.Null(Display.ParseCustody(value));
     }
 
     [Fact]
@@ -98,6 +111,7 @@ public class DisplayTests
         Assert.Null(Display.ParseRecord("Teleported"));
         Assert.Null(Display.ParseIssue("Teleported"));
         Assert.Null(Display.ParsePage("Teleported"));
+        Assert.Null(Display.ParseCustody("Teleported"));
     }
 
     [Fact]
