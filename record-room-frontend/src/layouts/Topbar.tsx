@@ -3,6 +3,7 @@ import { Gear, List, MagnifyingGlass, Moon, SignOut, Sun } from '@phosphor-icons
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useSession } from '../hooks/useService';
 import { BrandMark } from './Sidebar';
+import { CommandPalette } from '../components/CommandPalette';
 import { useFeatures } from '../lib/features';
 import { APP_SHORT } from '../lib/brand';
 
@@ -22,17 +23,25 @@ export function Topbar({
   const features = useFeatures();
   const [term, setTerm] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // "/" jumps to search from anywhere that is not already a text field.
+  // "/" and Ctrl/Cmd+K open the command palette (E8) from anywhere that is not
+  // already a text field. On /files the topbar search box is hidden, so the
+  // palette is the only search surface this shortcut reaches there.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       const typing = target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName);
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setPaletteOpen(true);
+        return;
+      }
       if (event.key === '/' && !typing) {
         event.preventDefault();
-        inputRef.current?.focus();
+        setPaletteOpen(true);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -154,6 +163,8 @@ export function Topbar({
           )}
         </div>
       </div>
+
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
     </header>
   );
 }

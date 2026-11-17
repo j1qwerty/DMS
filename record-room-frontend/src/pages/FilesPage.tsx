@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ArrowRight,
   DownloadSimple,
@@ -25,6 +25,7 @@ import { BulkMoveModal } from '../components/files/BulkMoveModal';
 import { useFileActions } from '../components/files/useFileActions';
 import { useFlash, useQuery, useService, useSession } from '../hooks/useService';
 import { useFeatures } from '../lib/features';
+import { pushRecentSearch } from '../lib/recent';
 import { downloadCsv, toCsv } from '../lib/csv';
 import { cn } from '../lib/utils';
 import type { FileStatus, FileType, RecordFile, RecordKind, Room } from '../types';
@@ -112,6 +113,13 @@ export function FilesPage() {
       search: params.get('q') ?? undefined,
     };
   });
+
+  // E8: every registry search — from the topbar, the dashboard or the palette —
+  // feeds the command palette's recent-searches list.
+  const searched = params.get('q');
+  useEffect(() => {
+    pushRecentSearch(searched ?? '');
+  }, [searched]);
   const [showFilters, setShowFilters] = useState(false);
   // Bulk selection (E4). Selection is page-local: it only matches ids the
   // current result actually shows, so paging or filtering implicitly prunes it.

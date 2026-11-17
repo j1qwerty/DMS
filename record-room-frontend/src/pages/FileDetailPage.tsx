@@ -1,5 +1,5 @@
 import { useFeatures } from '../lib/features';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ArrowLeft,
   Barcode,
@@ -24,6 +24,7 @@ import { ShelfView } from '../components/ShelfView';
 import { DocumentUploadActions } from '../components/DocumentUploadActions';
 import { useFlash, useQuery, useService, useSession } from '../hooks/useService';
 import { buildPayload } from '../lib/barcode';
+import { pushRecentFile } from '../lib/recent';
 import type { Page, Result } from '../services/contracts';
 import { err } from '../services/contracts';
 import type {
@@ -69,6 +70,18 @@ export function FileDetailPage() {
     reload: reloadFile,
   } = useQuery(() => service.files.get(fileId ?? ''), [fileId], null as RecordFile | null);
   const { data: rooms } = useQuery(() => service.locations.listRooms(), [], EMPTY_ROOMS);
+
+  // E8: a visit feeds the command palette's recent-files list. Pure localStorage
+  // write — no component state, so the effect stays side-effect-only.
+  useEffect(() => {
+    if (!file) return;
+    pushRecentFile({
+      id: file.id,
+      ref: barcode ? file.fileBarcode : file.fileNumber,
+      subject: file.subject,
+      status: file.status,
+    });
+  }, [file, barcode]);
   const { data: movements, reload: reloadMovements } = useQuery(
     () => service.movements.list({ fileId: fileId ?? '', limit: 50 }),
     [fileId],
