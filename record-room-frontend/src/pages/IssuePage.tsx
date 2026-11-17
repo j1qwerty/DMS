@@ -507,38 +507,63 @@ function BorrowerPanel({ rows }: { rows: BorrowerRow[] }) {
           />
         </div>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] text-left text-sm">
-            <thead className="bg-[var(--rr-bg)] text-xs uppercase tracking-wider muted">
-              <tr>
-                <th className="px-5 py-3">Borrower</th>
-                <th className="px-5 py-3">Code</th>
-                <th className="px-5 py-3">Department</th>
-                <th className="px-5 py-3">Files out</th>
-                <th className="px-5 py-3">Oldest due</th>
-                <th className="px-5 py-3">State</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[var(--rr-border)]">
-              {rows.map((row) => (
-                <tr key={row.employeeCode} className="hover:bg-[var(--rr-bg)]">
-                  <td className="px-5 py-4 font-semibold">{row.name}</td>
-                  <td className="px-5 py-4 font-mono text-xs">{row.employeeCode}</td>
-                  <td className="px-5 py-4">{row.department}</td>
-                  <td className="px-5 py-4">{row.openFiles}</td>
-                  <td className="px-5 py-4 text-xs muted">{row.oldestDue}</td>
-                  <td className="px-5 py-4">
-                    {row.overdue ? (
-                      <Badge tone="danger">Overdue</Badge>
-                    ) : (
-                      <Badge tone="info">Open</Badge>
-                    )}
-                  </td>
+        <>
+          {/* E7: the full table needs 760px, so below md the same rows render
+              as cards instead of forcing a sideways scroll on a phone. */}
+          <div className="hidden overflow-x-auto md:block">
+            <table className="w-full min-w-[760px] text-left text-sm">
+              <thead className="bg-[var(--rr-bg)] text-xs uppercase tracking-wider muted">
+                <tr>
+                  <th className="px-5 py-3">Borrower</th>
+                  <th className="px-5 py-3">Code</th>
+                  <th className="px-5 py-3">Department</th>
+                  <th className="px-5 py-3">Files out</th>
+                  <th className="px-5 py-3">Oldest due</th>
+                  <th className="px-5 py-3">State</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody className="divide-y divide-[var(--rr-border)]">
+                {rows.map((row) => (
+                  <tr key={row.employeeCode} className="hover:bg-[var(--rr-bg)]">
+                    <td className="px-5 py-4 font-semibold">{row.name}</td>
+                    <td className="px-5 py-4 font-mono text-xs">{row.employeeCode}</td>
+                    <td className="px-5 py-4">{row.department}</td>
+                    <td className="px-5 py-4">{row.openFiles}</td>
+                    <td className="px-5 py-4 text-xs muted">{row.oldestDue}</td>
+                    <td className="px-5 py-4">
+                      {row.overdue ? (
+                        <Badge tone="danger">Overdue</Badge>
+                      ) : (
+                        <Badge tone="info">Open</Badge>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <ul className="divide-y divide-[var(--rr-border)] md:hidden">
+            {rows.map((row) => (
+              <li key={row.employeeCode} className="p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold">{row.name}</p>
+                    <p className="muted mt-0.5 font-mono text-xs">{row.employeeCode}</p>
+                    <p className="muted mt-0.5 text-xs">{row.department}</p>
+                  </div>
+                  {row.overdue ? (
+                    <Badge tone="danger">Overdue</Badge>
+                  ) : (
+                    <Badge tone="info">Open</Badge>
+                  )}
+                </div>
+                <p className="muted mt-2 text-xs">
+                  {row.openFiles} file(s) out · oldest due {row.oldestDue}
+                </p>
+              </li>
+            ))}
+          </ul>
+        </>
       )}
     </Card>
   );
