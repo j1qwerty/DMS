@@ -1,3 +1,5 @@
+> **Final proposal override (2026-11-18):** This PRD is a historical product requirements source. The current signed-off scope and clause-by-clause acceptance status are in [`../ZILA_PANCHAYAT_CODEX.MD`](../ZILA_PANCHAYAT_CODEX.MD). Where this document mentions extra functionality, treat it as retained/deferred unless it appears in the final proposal; where the final proposal adds e-office transfer, OCR text search, scan quality/PDF production or digital handover, those are required gaps even when this PRD marks them as future work.
+
 RECORD ROOM SOFTWARE
 (Digitization) & Implementation
 
