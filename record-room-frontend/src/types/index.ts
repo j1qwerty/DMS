@@ -354,6 +354,12 @@ export interface CustodyEvent {
   fileCount: number;
   /** Files actually counted; null until the intake side is reconciled. */
   reconciledCount?: number | null;
+  reconciledBy?: string | null;
+  reconciledAt?: string | null;
+  /** Parent intake when this is a linked partial/complete return. */
+  parentEventId?: string | null;
+  returnedCount?: number;
+  remainingCount?: number;
   recordedBy: string;
   recordedAt: string;
   signedOffBy?: string | null;

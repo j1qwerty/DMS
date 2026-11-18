@@ -374,6 +374,8 @@ export interface CustodyApi {
   }): Promise<Result<CustodyEvent>>;
   /** Sets the counted file total on an intake (the reconciliation step). */
   reconcile(id: string, reconciledCount: number, remarks?: string): Promise<Result<CustodyEvent>>;
+  /** Records a whole or partial return against a signed-off intake. */
+  recordReturn(id: string, input: { fileCount: number; signedOffBy?: string; remarks?: string }): Promise<Result<CustodyEvent>>;
   /** Closes an event with a sign-off; closed events become read-only. */
   signOff(id: string, signedOffBy?: string): Promise<Result<CustodyEvent>>;
 }

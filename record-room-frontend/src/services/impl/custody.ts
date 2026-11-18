@@ -38,7 +38,20 @@ export const custodyService: CustodyApi = {
 
     const page = Math.max(query?.page ?? 1, 1);
     const pageSize = Math.min(Math.max(query?.pageSize ?? PAGE_DEFAULT, 1), 100);
-    const items = rows.slice((page - 1) * pageSize, page * pageSize);
+    const returnCounts = new Map<string, number>();
+    for (const row of rows) {
+      if (row.parentEventId) {
+        returnCounts.set(row.parentEventId, (returnCounts.get(row.parentEventId) ?? 0) + row.fileCount);
+      }
+    }
+    const withReturnTotals = rows.map((row) => ({
+      ...row,
+      returnedCount: returnCounts.get(row.id) ?? (row.parentEventId ? row.fileCount : 0),
+      remainingCount: row.direction === 'Intake'
+        ? Math.max(0, (row.reconciledCount ?? 0) - (returnCounts.get(row.id) ?? 0))
+        : 0,
+    }));
+    const items = withReturnTotals.slice((page - 1) * pageSize, page * pageSize);
     const result: Page<CustodyEvent> = {
       items,
       total: rows.length,
@@ -70,6 +83,10 @@ export const custodyService: CustodyApi = {
       recordedAt: timestamp(),
       signedOffBy: null,
       signedOffAt: null,
+      reconciledBy: input.direction === 'Return' ? session.actorName() : null,
+      reconciledAt: input.direction === 'Return' ? timestamp() : null,
+      returnedCount: 0,
+      remainingCount: 0,
       remarks: input.remarks?.trim() ?? '',
     };
     store.update((draft) => {
@@ -105,6 +122,8 @@ export const custodyService: CustodyApi = {
       const event = draft.custodyEvents.find((item) => item.id === id);
       if (!event) return;
       event.reconciledCount = reconciledCount;
+      event.reconciledBy = session.actorName();
+      event.reconciledAt = timestamp();
       if (remarks?.trim()) event.remarks = remarks.trim();
       log(draft, {
         action: 'Update',
@@ -117,6 +136,52 @@ export const custodyService: CustodyApi = {
     });
     const updated = store.getState().custodyEvents.find((event) => event.id === id);
     return updated ? ok(updated) : err('Custody event not found.');
+  },
+
+  async recordReturn(id, input) {
+    const intake = store.getState().custodyEvents.find((event) => event.id === id);
+    if (!intake) return err('Intake event not found.');
+    if (intake.direction !== 'Intake') return err('Returns must be recorded against an intake event.');
+    if (!intake.signedOffAt || intake.reconciledCount == null) return err('Count and sign off the intake before recording its return.');
+    if (!Number.isFinite(input.fileCount) || input.fileCount < 1) return err('Return count must be at least 1.', 'fileCount');
+    const returned = store.getState().custodyEvents
+      .filter((event) => event.parentEventId === id)
+      .reduce((total, event) => total + event.fileCount, 0);
+    const remaining = intake.reconciledCount - returned;
+    if (input.fileCount > remaining) return err(`Only ${remaining} file(s) remain to be returned.`, 'fileCount');
+    const actor = session.actorName();
+    const now = timestamp();
+    const event: CustodyEvent = {
+      id: newId('custody'),
+      direction: 'Return',
+      parentEventId: intake.id,
+      batchRef: intake.batchRef,
+      department: intake.department,
+      vendor: intake.vendor,
+      fileCount: input.fileCount,
+      reconciledCount: input.fileCount,
+      reconciledBy: actor,
+      reconciledAt: now,
+      recordedBy: actor,
+      recordedAt: now,
+      signedOffBy: input.signedOffBy?.trim() || actor,
+      signedOffAt: now,
+      returnedCount: input.fileCount,
+      remainingCount: 0,
+      remarks: input.remarks?.trim() ?? '',
+    };
+    store.update((draft) => {
+      draft.custodyEvents.push(event);
+      log(draft, {
+        action: 'Create',
+        entity: 'CustodyEvent',
+        entityId: event.id,
+        before: '—',
+        after: `Return · ${intake.batchRef} · ${input.fileCount} file(s)`,
+        summary: `Return of ${input.fileCount} file(s) against intake ${intake.id} recorded and signed off.`,
+      });
+    });
+    return ok(event);
   },
 
   async signOff(id, signedOffBy) {

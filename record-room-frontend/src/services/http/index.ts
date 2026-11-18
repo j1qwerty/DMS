@@ -1105,4 +1105,17 @@ export const httpCustodyService: CustodyApi = {
     );
     return result.ok ? ok(toCustodyEvent(result.value)) : result;
   },
+
+  async recordReturn(id, input) {
+    const result = await attempt<CustodyDto>(
+      'POST',
+      `/api/custody/${toApiId(id, 'custody')}/return`,
+      {
+        fileCount: input.fileCount,
+        signedOffBy: input.signedOffBy ?? '',
+        remarks: input.remarks ?? '',
+      },
+    );
+    return result.ok ? ok(toCustodyEvent(result.value)) : result;
+  },
 };
