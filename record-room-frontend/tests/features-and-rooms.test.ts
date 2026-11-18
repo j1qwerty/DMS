@@ -52,7 +52,7 @@ describe('barcode feature switch', () => {
     });
   });
 
-  it.each(['false', '0', 'off', 'no', 'disabled', 'FALSE', ' Off '])(
+  it.each(['false', '0', 'off', 'no', 'disabled', 'FALSE', ' Off ', ''])(
     'turns off for %j',
     async (value) => {
       const { getFeatures } = await freshFeatures(value);
@@ -60,7 +60,7 @@ describe('barcode feature switch', () => {
     },
   );
 
-  it.each(['true', '1', 'on', ''])('stays on for %j', async (value) => {
+  it.each(['true', '1', 'on'])('stays on for %j', async (value) => {
     const { getFeatures } = await freshFeatures(value);
     expect(getFeatures().barcode).toBe(true);
   });
