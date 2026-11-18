@@ -10,10 +10,12 @@ The final Zila Panchayat proposal is the acceptance authority for this branch.
 The clause-by-clause work plan, implemented gaps, pending integrations, department
 inputs and tests are tracked in `ZILA_PANCHAYAT_CODEX.MD`. Current scope is not
 complete: e-office transfer, OCR extraction/search, automated image-quality
-gates, full Scan Studio editing, PDF/A certification and editable permission
-management remain open. Metadata Full-Text setup, approved-page PDF composition
-and a checksum-backed digital handover workflow are implemented but still need
-live SQL Server verification and Department acceptance.
+gates, OCR extraction/search, e-office transfer, full Scan Studio editing and
+PDF/A certification remain open. The four-role server capability matrix,
+metadata Full-Text setup, approved-page PDF composition and a checksum-backed
+digital handover workflow are implemented but still need live SQL Server
+verification and Department acceptance. A database-editable permission editor
+is not explicit in the approved proposal and is not a delivery blocker.
 
 Barcode and other retained non-scope modules are hidden by default, not deleted.
 See `docs/BARCODE-SWITCH.md` and the final-scope tracker.
