@@ -43,7 +43,7 @@ public sealed class DigitalHandoverService(
     private static DigitalHandoverBatchDto ToDto(DigitalHandoverBatch batch) => new(
         batch.Id, batch.BatchRef, batch.Department, batch.Notes, batch.Status,
         batch.ManifestSha256, batch.Items.Count, batch.PreparedBy, batch.PreparedAt,
-        batch.DeliveredBy, batch.DeliveredAt, batch.AcceptedBy, batch.AcceptedAt,
+        batch.DeliveredBy, batch.DeliveredAt, batch.SignedOffBy, batch.SignedOffAt,
         batch.DecisionNotes, batch.Items.OrderBy(x => x.FileNumber, StringComparer.OrdinalIgnoreCase)
             .Select(ToItemDto).ToArray());
 
@@ -250,8 +250,8 @@ public sealed class DigitalHandoverService(
             return Result<DigitalHandoverBatchDto>.Fail("A rejection reason is required.", "notes");
 
         batch.Status = accepted ? "Accepted" : "Rejected";
-        batch.AcceptedBy = signer;
-        batch.AcceptedAt = DateTime.UtcNow;
+        batch.SignedOffBy = signer;
+        batch.SignedOffAt = DateTime.UtcNow;
         batch.DecisionNotes = notes;
         await audit.LogAsync(db, accepted ? AuditAction.Approve : AuditAction.Reject,
             "DigitalHandoverBatch", batch.Id.ToString(),
