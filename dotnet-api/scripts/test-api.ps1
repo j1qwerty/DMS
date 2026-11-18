@@ -1036,6 +1036,10 @@ Assert-Equal 403 $operatorCustodyWrite.Status 'custody.manage is required to wri
 
 $employeeHandovers = Invoke-Api -Path '/api/digital-handovers' -Token $employeeToken
 Assert-Equal 200 $employeeHandovers.Status 'an employee with custody.view can read digital handover records'
+$employeeDownloadHandover = Invoke-Api -Path '/api/digital-handovers/1/package' -Token $employeeToken -Raw
+Assert-Equal 403 $employeeDownloadHandover.Status 'an employee cannot download a handover package without custody.manage'
+$operatorDownloadHandover = Invoke-Api -Path '/api/digital-handovers/1/package' -Token $operatorToken -Raw
+Assert-Equal 403 $operatorDownloadHandover.Status 'an operator cannot download a handover package without custody.manage'
 $employeePrepareHandover = Invoke-Api -Method POST -Path '/api/digital-handovers' -Token $employeeToken -Body @{
     batchRef = 'DENIED-EMPLOYEE'; department = 'Audit'; fileIds = @(1)
 }
