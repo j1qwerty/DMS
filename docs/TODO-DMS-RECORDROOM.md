@@ -67,7 +67,7 @@ Verified here by compiling the whole API against stand-in packages and executing
   DTO enrichment). Those 13 are not shipped, because they need the EF in-memory provider.
 
 ## Final proposal scope corrections
-OCR text search, e-office transfer, approved metadata indexing, composed PDF output, scan quality gates, backup/restore, and digital handover are requirements of the final proposal. They remain open until recorded as accepted in `../ZILA_PANCHAYAT_CODEX.MD`.
+OCR extraction/search, e-office transfer, approved metadata indexing, composed PDF output, scan quality gates and backup/restore are requirements of the final proposal. Final application handover to the Department is a project delivery gate—not an in-app workflow—and remains open until recorded as accepted in `../ZILA_PANCHAYAT_CODEX.MD` and `DEPARTMENT-APPLICATION-HANDOVER.md`.
 
 ## Waiting on you
 - [ ] Command palette: send the files and instructions; it was not in this repo and was not touched.
