@@ -138,7 +138,14 @@ export function App() {
             <Route path="/maps" element={guarded(MapsPage, 'files.view')} />
             <Route path="/issue" element={<IssuePage />} />
             <Route path="/return" element={<ReturnPage />} />
-            <Route path="/movement" element={<RequireFeature feature="movement"><MovementPage /></RequireFeature>} />
+            <Route
+              path="/movement"
+              element={
+                <RequireFeature feature="movement">
+                  <MovementPage />
+                </RequireFeature>
+              }
+            />
             <Route
               path="/barcodes"
               element={
@@ -158,7 +165,14 @@ export function App() {
             <Route path="/digitization" element={<DigitizationPage />} />
             <Route path="/custody" element={<CustodyPage />} />
             <Route path="/reports" element={<ReportsPage />} />
-            <Route path="/support" element={<RequireFeature feature="support"><SupportPage /></RequireFeature>} />
+            <Route
+              path="/support"
+              element={
+                <RequireFeature feature="support">
+                  <SupportPage />
+                </RequireFeature>
+              }
+            />
             <Route path="/settings" element={<SettingsPage />} />
 
             <Route path="/admin" element={<AdminLayout />}>
@@ -166,7 +180,14 @@ export function App() {
               <Route path="users" element={guarded(UsersPage, 'users.view')} />
               <Route path="employees" element={guarded(EmployeesPage, 'employees.view')} />
               <Route path="locations" element={guarded(LocationsPage, 'locations.view')} />
-              <Route path="bulk-import" element={<RequireFeature feature="bulkImport">{guarded(BulkImportPage, 'files.bulkImport')}</RequireFeature>} />
+              <Route
+                path="bulk-import"
+                element={
+                  <RequireFeature feature="bulkImport">
+                    {guarded(BulkImportPage, 'files.bulkImport')}
+                  </RequireFeature>
+                }
+              />
               <Route path="maps" element={guarded(MapsPage, 'files.view')} />
               <Route path="audit" element={guarded(AuditPage, 'audit.view')} />
             </Route>
