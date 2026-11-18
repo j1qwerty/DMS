@@ -74,6 +74,7 @@ public enum AuditAction
     Approve = 8,
     Reject = 9,
     Export = 10,
+    Access = 11,
 }
 
 public enum PageStatus
