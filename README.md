@@ -37,6 +37,7 @@ See `docs/BARCODE-SWITCH.md` and the final-scope tracker.
 2. `docs/ARCHITECTURE.md`, `docs/DATA-MODEL.md`, `docs/FRONTEND-SPEC.md`
 3. `docs/LEGACY-GAP-REPORT.md` — legacy-vs-frontend feature audit and status
 4. `docs/IMPLEMENTATION-TODO.md`, `docs/QA.md`, `docs/SECURITY.md`
+5. `docs/DEPARTMENT-APPLICATION-HANDOVER.md`, `docs/OPERATIONS-RUNBOOK.md`
 5. Design system: `docs/skills/design.md`; workflow prefs: `docs/skills/react-pnpm-skill (1).md`
 
 ## Frontend (the current build)
