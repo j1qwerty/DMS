@@ -1,22 +1,10 @@
 import { useSyncExternalStore } from 'react';
 
-/**
- * Optional feature switches.
- *
- * `barcode` turns barcode-based identification of physical files and locations on or
- * off. It is ON by default. It only affects the record-room section: the issue,
- * return, movement and room screens stay, but scanning, label printing and every
- * on-screen barcode value go away, and files are identified by file number instead.
- *
- * Source of truth, in order:
- *   1. `GET /api/config` from the API (http mode), so a server setting needs no rebuild.
- *   2. `VITE_ENABLE_BARCODE` at build time (also the only source in local mode).
- *   3. On.
- *
- * See `.env.example` for the exact list of what is hidden on which page.
- */
 export interface Features {
   barcode: boolean;
+  movement: boolean;
+  support: boolean;
+  bulkImport: boolean;
 }
 
 const OFF = new Set(['false', '0', 'off', 'no', 'disabled']);
@@ -24,10 +12,18 @@ const OFF = new Set(['false', '0', 'off', 'no', 'disabled']);
 function parseFlag(value: unknown, fallback: boolean): boolean {
   if (typeof value === 'boolean') return value;
   if (typeof value !== 'string' || value.trim() === '') return fallback;
-  return !OFF.has(value.trim().toLowerCase());
+  const text = value.trim().toLowerCase();
+  if (OFF.has(text)) return false;
+  if (['true', '1', 'on', 'yes', 'enabled'].includes(text)) return true;
+  return fallback;
 }
 
-let current: Features = { barcode: parseFlag(import.meta.env.VITE_ENABLE_BARCODE, true) };
+let current: Features = {
+  barcode: parseFlag(import.meta.env.VITE_ENABLE_BARCODE, false),
+  movement: parseFlag(import.meta.env.VITE_ENABLE_MOVEMENT, false),
+  support: parseFlag(import.meta.env.VITE_ENABLE_SUPPORT, false),
+  bulkImport: parseFlag(import.meta.env.VITE_ENABLE_BULK_IMPORT, false),
+};
 const listeners = new Set<() => void>();
 
 function subscribe(listener: () => void) {
@@ -41,39 +37,48 @@ export function getFeatures(): Features {
 
 export function applyFeatures(next: Partial<Features>): void {
   const merged = { ...current, ...next };
-  if (merged.barcode === current.barcode) return;
+  if (
+    merged.barcode === current.barcode &&
+    merged.movement === current.movement &&
+    merged.support === current.support &&
+    merged.bulkImport === current.bulkImport
+  ) return;
   current = merged;
   listeners.forEach((listener) => listener());
 }
 
-/** Reactive read for components. */
 export function useFeatures(): Features {
   return useSyncExternalStore(subscribe, getFeatures, getFeatures);
 }
 
-/**
- * Asks the API which features are on. A missing endpoint (older API) or a network
- * error is not a failure: the build-time value simply stays.
- */
+/** API configuration is authoritative in HTTP mode; failed requests keep safe build defaults. */
 export async function loadRuntimeFeatures(baseUrl: string): Promise<void> {
   try {
     const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/api/config`, {
       headers: { Accept: 'application/json' },
     });
     if (!response.ok) return;
-    const body = (await response.json()) as { features?: { barcode?: unknown } };
-    if (body.features && 'barcode' in body.features) {
-      applyFeatures({ barcode: parseFlag(body.features.barcode, current.barcode) });
-    }
+    const body = (await response.json()) as {
+      features?: {
+        barcode?: unknown;
+        movement?: unknown;
+        support?: unknown;
+        bulkImport?: unknown;
+      };
+    };
+    const remote = body.features;
+    if (!remote) return;
+    applyFeatures({
+      ...(typeof remote.barcode !== 'undefined' ? { barcode: parseFlag(remote.barcode, current.barcode) } : {}),
+      ...(typeof remote.movement !== 'undefined' ? { movement: parseFlag(remote.movement, current.movement) } : {}),
+      ...(typeof remote.support !== 'undefined' ? { support: parseFlag(remote.support, current.support) } : {}),
+      ...(typeof remote.bulkImport !== 'undefined' ? { bulkImport: parseFlag(remote.bulkImport, current.bulkImport) } : {}),
+    });
   } catch {
-    /* keep the build-time value */
+    /* keep the build-time values */
   }
 }
 
-/**
- * Server-written sentences (movement details, activity feed) lead with the file's
- * barcode id. With barcodes off that id is removed so the sentence still reads well.
- */
 export function hideFileIds(text: string, barcodeOn: boolean): string {
   if (barcodeOn) return text;
   return text.replace(/\bRF-\d{6,}\s*[—–-]\s*/g, '').replace(/\bRF-\d{6,}\b/g, 'this file');
