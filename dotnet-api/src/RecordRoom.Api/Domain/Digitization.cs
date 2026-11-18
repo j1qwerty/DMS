@@ -12,6 +12,8 @@ public class FileScanPage
     public required string Barcode { get; set; }
     public required string FileName { get; set; }
     public int PageNo { get; set; }
+    /// <summary>Physical side of this page. Historical rows default to Front.</summary>
+    public string Side { get; set; } = "Front";
     public int Version { get; set; } = 1;
     /// <summary>Physical sheet size (A0–A4, Legal, Other); same options as the file.</summary>
     public string DocumentSize { get; set; } = "Other";
