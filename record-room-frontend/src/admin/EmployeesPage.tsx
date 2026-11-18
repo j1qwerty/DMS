@@ -228,6 +228,7 @@ export function EmployeesPage() {
 
       <Modal open={creating} onClose={() => setCreating(false)} title="Add employee">
         <EmployeeForm
+          departments={departments}
           onSubmit={async (value) => {
             const outcome = await service.employees.create(value);
             if (!outcome.ok) {
@@ -245,6 +246,7 @@ export function EmployeesPage() {
         {editing && (
           <EmployeeForm
             initial={editing}
+            departments={departments}
             onSubmit={async (value) => {
               const outcome = await service.employees.update(editing.id, value);
               if (!outcome.ok) {
@@ -283,9 +285,11 @@ const empty: FormValue = {
 
 function EmployeeForm({
   initial,
+  departments,
   onSubmit,
 }: {
   initial?: Employee;
+  departments: string[];
   onSubmit: (value: FormValue) => void;
 }) {
   const [value, setValue] = useState<FormValue>(initial ?? empty);
@@ -355,12 +359,17 @@ function EmployeeForm({
             onChange={(event) => set('dateOfBirth', event.target.value)}
           />
         </Field>
-        <Field label="Department" htmlFor="emp-dept">
-          <TextInput
+        <Field label="Department" htmlFor="emp-dept" required>
+          <SelectInput
             id="emp-dept"
             value={value.department}
             onChange={(event) => set('department', event.target.value)}
-          />
+          >
+            <option value="">Select department</option>
+            {[...new Set([...departments, ...(value.department ? [value.department] : [])])].map((department) => (
+              <option key={department} value={department}>{department}</option>
+            ))}
+          </SelectInput>
         </Field>
         <Field label="Designation" htmlFor="emp-designation">
           <TextInput

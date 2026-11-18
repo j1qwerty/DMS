@@ -61,6 +61,9 @@ const UsersPage = lazy(() => import('./admin/UsersPage').then((m) => ({ default:
 const EmployeesPage = lazy(() =>
   import('./admin/EmployeesPage').then((m) => ({ default: m.EmployeesPage })),
 );
+const DepartmentsPage = lazy(() =>
+  import('./admin/DepartmentsPage').then((m) => ({ default: m.DepartmentsPage })),
+);
 const LocationsPage = lazy(() =>
   import('./admin/LocationsPage').then((m) => ({ default: m.LocationsPage })),
 );
@@ -174,6 +177,7 @@ export function App() {
               <Route index element={guarded(UsersPage, 'users.view')} />
               <Route path="users" element={guarded(UsersPage, 'users.view')} />
               <Route path="employees" element={guarded(EmployeesPage, 'employees.view')} />
+              <Route path="departments" element={guarded(DepartmentsPage, 'departments.manage')} />
               <Route path="locations" element={<Navigate to="/admin/departments" replace />} />
               <Route
                 path="bulk-import"
@@ -183,7 +187,7 @@ export function App() {
                   </RequireFeature>
                 }
               />
-              <Route path="maps" element={guarded(MapsPage, 'files.view')} />
+              <Route path="maps" element={<Navigate to="/files" replace />} />
               <Route path="audit" element={guarded(AuditPage, 'audit.view')} />
             </Route>
 
