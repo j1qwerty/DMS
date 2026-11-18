@@ -58,6 +58,7 @@ jobs:
         ports:
           - 1433:1433
     env:
+      MSSQL_SA_PASSWORD: "${{ format('Dms_{0}_CiAa!', github.run_id) }}"
       ConnectionStrings__Default: "Server=127.0.0.1,1433;Database=DmsCi;User Id=sa;Password=${{ format('Dms_{0}_CiAa!', github.run_id) }};TrustServerCertificate=True;Encrypt=False"
       Jwt__SigningKey: "ZilaPanchayat-CI-Only-Signing-Key-At-Least-32-Characters"
       Database__MigrateOnStartup: "true"
@@ -105,25 +106,16 @@ jobs:
           fi
 
       - name: Create SQL Server test database
-        shell: pwsh
+        shell: bash
         run: |
-          $clientAssembly = Join-Path $PWD 'dotnet-api/src/RecordRoom.Api/bin/Release/net10.0/Microsoft.Data.SqlClient.dll'
-          if (-not (Test-Path -LiteralPath $clientAssembly)) {
-            throw "Microsoft.Data.SqlClient was not found in the API build output."
-          }
-          Add-Type -Path $clientAssembly
-          $builder = [Microsoft.Data.SqlClient.SqlConnectionStringBuilder]::new($env:ConnectionStrings__Default)
-          $builder.InitialCatalog = 'master'
-          $connection = [Microsoft.Data.SqlClient.SqlConnection]::new($builder.ConnectionString)
-          try {
-            $connection.Open()
-            $command = $connection.CreateCommand()
-            $command.CommandText = "IF DB_ID(N'DmsCi') IS NULL CREATE DATABASE [DmsCi];"
-            [void]$command.ExecuteNonQuery()
-          }
-          finally {
-            $connection.Dispose()
-          }
+          container_id="$(docker ps -q --filter ancestor=mcr.microsoft.com/mssql/server:2022-latest | head -n 1)"
+          if [ -z "$container_id" ]; then
+            echo "SQL Server service container was not found"
+            exit 1
+          fi
+          docker exec "$container_id" /opt/mssql-tools18/bin/sqlcmd \
+            -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -C -b \
+            -Q "IF DB_ID(N'DmsCi') IS NULL CREATE DATABASE [DmsCi];"
 
       - name: Test API logic
         run: dotnet test dotnet-api/tests/RecordRoom.Api.Tests/RecordRoom.Api.Tests.csproj --configuration Release
