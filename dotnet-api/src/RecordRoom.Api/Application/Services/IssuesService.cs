@@ -138,13 +138,25 @@ public sealed class IssuesService(AppDbContext db, IAuditWriter audit, ICurrentU
 
         var isEmployee = string.Equals(input.BorrowerType, "Employee", StringComparison.OrdinalIgnoreCase);
         var code = input.BorrowerEmployeeCode?.Trim() ?? string.Empty;
-        if (code.Length == 0)
+        var borrowerName = input.BorrowerName?.Trim() ?? string.Empty;
+        if (isEmployee && code.Length == 0)
         {
-            return Result<IssueDto>.Fail(
-                isEmployee
-                    ? "Select the employee receiving the files."
-                    : "Enter the depositor code for a walk-in borrower.",
-                "borrowerEmployeeCode");
+            if (borrowerName.Length == 0)
+                return Result<IssueDto>.Fail("Enter the employee name or select a registered employee.", "borrowerName");
+            if (string.IsNullOrWhiteSpace(input.Department))
+                return Result<IssueDto>.Fail("Choose a department for an unlisted employee.", "department");
+            // A walk-in employee is recorded on the receipt/ledger only. Do not
+            // silently create an employee master record or merge unknown people.
+            code = $"UNLISTED-{Guid.NewGuid():N}"[..21];
+        }
+        else if (!isEmployee && code.Length == 0)
+        {
+            return Result<IssueDto>.Fail("Enter the depositor code for a walk-in borrower.", "borrowerEmployeeCode");
+        }
+        else if (isEmployee && !code.StartsWith("UNLISTED-", StringComparison.OrdinalIgnoreCase)
+            && !await db.Employees.AnyAsync(employee => employee.EmployeeCode == code, ct))
+        {
+            return Result<IssueDto>.Fail("That employee is not registered. Clear the selection and enter their name as an unlisted borrower.", "borrowerEmployeeCode");
         }
         if (input.DueAt == default) return Result<IssueDto>.Fail("Set a due date for the receipt.", "dueAt");
 
@@ -164,7 +176,7 @@ public sealed class IssuesService(AppDbContext db, IAuditWriter audit, ICurrentU
         {
             ReceiptNumber = await NextReceiptNumberAsync(ct),
             BorrowerIsEmployee = isEmployee,
-            BorrowerName = string.IsNullOrWhiteSpace(input.BorrowerName) ? code : input.BorrowerName.Trim(),
+            BorrowerName = borrowerName.Length == 0 ? code : borrowerName,
             BorrowerEmployeeCode = code,
             Department = input.Department?.Trim() ?? string.Empty,
             Purpose = input.Purpose?.Trim() ?? string.Empty,

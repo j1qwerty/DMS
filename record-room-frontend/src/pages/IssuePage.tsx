@@ -47,6 +47,7 @@ export function IssuePage() {
   const [borrowerType, setBorrowerType] = useState<'Employee' | 'Depositor'>('Employee');
   const [employeeCode, setEmployeeCode] = useState('');
   const [depositorCode, setDepositorCode] = useState('');
+  const [borrowerDepartment, setBorrowerDepartment] = useState('');
   const [purpose, setPurpose] = useState('');
   const [dueAt, setDueAt] = useState(defaultDueDate());
   const [remark, setRemark] = useState('');
@@ -65,6 +66,10 @@ export function IssuePage() {
   );
   const employees = employeePage.items;
   const employee = employees.find((item) => item.employeeCode === employeeCode);
+  const { data: departments } = useQuery(() => service.employees.departments(), [], [] as string[]);
+  const borrowerReady = borrowerType === 'Employee'
+    ? Boolean(employeeCode || employeeSearch.trim())
+    : Boolean(depositorCode.trim());
   const { data: fileSearchPage } = useQuery(
     () =>
       fileSearch.trim().length >= 2
@@ -132,8 +137,8 @@ export function IssuePage() {
         borrowerType,
         borrowerEmployeeCode: borrowerType === 'Employee' ? employeeCode : depositorCode,
         borrowerName:
-          borrowerType === 'Employee' ? (employee?.name ?? '') : 'Court advocate (walk-in)',
-        department: borrowerType === 'Employee' ? (employee?.department ?? '') : 'Legal',
+          borrowerType === 'Employee' ? (employee?.name ?? employeeSearch.trim()) : 'Court advocate (walk-in)',
+        department: borrowerType === 'Employee' ? (employee?.department ?? borrowerDepartment) : 'Legal',
         purpose,
         fileIds: cart.map((file) => file.id),
         dueAt,
@@ -379,29 +384,73 @@ export function IssuePage() {
             </Field>
 
             {borrowerType === 'Employee' ? (
-              <div className="space-y-2">
-                <Field label="Find employee" htmlFor="issue-employee-search">
+              <div className="space-y-3">
+                <Field
+                  label="Find employee"
+                  htmlFor="issue-employee-search"
+                  required
+                  hint="Start typing a name, employee code or department. Select a result to link a registered employee."
+                >
                   <TextInput
                     id="issue-employee-search"
                     value={employeeSearch}
-                    onChange={(event) => setEmployeeSearch(event.target.value)}
-                    placeholder="Search by employee name, code or department"
+                    onChange={(event) => {
+                      setEmployeeSearch(event.target.value);
+                      setEmployeeCode('');
+                    }}
+                    placeholder="Type employee name or code"
+                    autoComplete="off"
                   />
                 </Field>
-                <Field label="Employee" htmlFor="issue-employee" required>
-                  <SelectInput
-                    id="issue-employee"
-                    value={employeeCode}
-                    onChange={(event) => setEmployeeCode(event.target.value)}
-                  >
-                    <option value="">Select an employee</option>
-                    {employees.map((item) => (
-                      <option key={item.id} value={item.employeeCode}>
-                        {item.employeeCode} · {item.name} · {item.department}
-                      </option>
+                {employeeSearch.trim().length >= 2 && !employeeCode && employees.length > 0 && (
+                  <div className="surface-flat max-h-52 overflow-y-auto rounded-lg p-1" role="listbox" aria-label="Employee search results">
+                    {employees.slice(0, 8).map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        role="option"
+                        aria-selected={false}
+                        onClick={() => {
+                          setEmployeeCode(item.employeeCode);
+                          setEmployeeSearch(item.name);
+                          setBorrowerDepartment(item.department);
+                        }}
+                        className="flex w-full flex-col rounded-md px-3 py-2 text-left hover:bg-[var(--rr-surface-2)]"
+                      >
+                        <span className="text-sm font-semibold">{item.name}</span>
+                        <span className="muted text-xs">{item.employeeCode} · {item.department}</span>
+                      </button>
                     ))}
-                  </SelectInput>
-                </Field>
+                  </div>
+                )}
+                {employeeCode && employee && (
+                  <div className="rounded-lg bg-accent-soft p-3 text-sm">
+                    <p className="font-semibold">{employee.name}</p>
+                    <p className="mt-1 text-xs">{employee.employeeCode} · {employee.department}</p>
+                    <button type="button" className="mt-2 text-xs font-semibold text-accent underline" onClick={() => setEmployeeCode('')}>Change employee</button>
+                  </div>
+                )}
+                {!employeeCode && employeeSearch.trim().length >= 2 && employees.length === 0 && (
+                  <div className="rounded-lg border border-dashed border-[var(--rr-border)] p-3 text-sm">
+                    <p className="font-semibold">Not listed in the employee database</p>
+                    <p className="muted mt-1 text-xs">The name will be saved on this issue receipt and marked as an unlisted borrower. No employee master record will be created.</p>
+                  </div>
+                )}
+                {!employeeCode && employeeSearch.trim().length >= 2 && employees.length > 0 && (
+                  <p className="muted text-xs">Select a matching employee above, or keep the typed name to record an unlisted borrower.</p>
+                )}
+                {!employeeCode && (
+                  <Field label="Department" htmlFor="issue-borrower-department" required>
+                    <SelectInput
+                      id="issue-borrower-department"
+                      value={borrowerDepartment}
+                      onChange={(event) => setBorrowerDepartment(event.target.value)}
+                    >
+                      <option value="">Select department</option>
+                      {departments.map((department) => <option key={department} value={department}>{department}</option>)}
+                    </SelectInput>
+                  </Field>
+                )}
               </div>
             ) : (
               <Field
@@ -457,7 +506,7 @@ export function IssuePage() {
             <div className="flex flex-wrap gap-2">
               <Button
                 className="flex-1"
-                disabled={!allowed('issue.issue') || cart.length === 0 || scanning || committing}
+                disabled={!allowed('issue.issue') || cart.length === 0 || !borrowerReady || (borrowerType === 'Employee' && !employee && !borrowerDepartment) || scanning || committing}
                 icon={<CheckCircle size={17} />}
                 onClick={() => void commit()}
               >
@@ -478,7 +527,7 @@ export function IssuePage() {
                 <li>
                   · The same {barcode ? 'barcode' : 'file'} cannot appear twice on one receipt.
                 </li>
-                <li>· Employee and depositor code are both mandatory.</li>
+                <li>· A registered employee is linked to the directory; an unknown name is saved as an unlisted borrower without creating an employee record.</li>
               </ul>
             </div>
           </div>
@@ -526,7 +575,7 @@ function BorrowerPanel({ rows }: { rows: BorrowerRow[] }) {
                 {rows.map((row) => (
                   <tr key={row.employeeCode} className="hover:bg-[var(--rr-bg)]">
                     <td className="px-5 py-4 font-semibold">{row.name}</td>
-                    <td className="px-5 py-4 font-mono text-xs">{row.employeeCode}</td>
+                    <td className="px-5 py-4 font-mono text-xs">{row.employeeCode.startsWith('UNLISTED-') ? 'Unlisted employee' : row.employeeCode}</td>
                     <td className="px-5 py-4">{row.department}</td>
                     <td className="px-5 py-4">{row.openFiles}</td>
                     <td className="px-5 py-4 text-xs muted">{row.oldestDue}</td>
@@ -548,7 +597,7 @@ function BorrowerPanel({ rows }: { rows: BorrowerRow[] }) {
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="truncate text-sm font-semibold">{row.name}</p>
-                    <p className="muted mt-0.5 font-mono text-xs">{row.employeeCode}</p>
+                    <p className="muted mt-0.5 font-mono text-xs">{row.employeeCode.startsWith('UNLISTED-') ? 'Unlisted employee' : row.employeeCode}</p>
                     <p className="muted mt-0.5 text-xs">{row.department}</p>
                   </div>
                   {row.overdue ? (

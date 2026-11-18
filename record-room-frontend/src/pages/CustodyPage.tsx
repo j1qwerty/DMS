@@ -77,6 +77,7 @@ export function CustodyPage() {
   const [signing, setSigning] = useState<CustodyEvent | null>(null);
 
   const mayWrite = allowed('custody.manage');
+  const { data: departments } = useQuery(() => service.employees.departments(), [], [] as string[]);
 
   const {
     data: register,
@@ -303,6 +304,7 @@ export function CustodyPage() {
         description="An intake starts the chain; a return closes it. The record cannot be edited afterwards."
       >
         <RecordForm
+          departments={departments}
           onDone={async (input) => {
             const saved = await apply(
               service.custody.record(input),
@@ -358,10 +360,10 @@ export function CustodyPage() {
 
 type RecordInput = Parameters<ReturnType<typeof useService>['custody']['record']>[0];
 
-function RecordForm({ onDone }: { onDone: (input: RecordInput) => Promise<void> }) {
+function RecordForm({ departments, onDone }: { departments: string[]; onDone: (input: RecordInput) => Promise<void> }) {
   const [direction, setDirection] = useState<CustodyDirection>('Intake');
   const [department, setDepartment] = useState('');
-  const [batchRef, setBatchRef] = useState('');
+  const [batchRef, setBatchRef] = useState(defaultBatchReference);
   const [vendor, setVendor] = useState('');
   const [fileCount, setFileCount] = useState('1');
   const [remarks, setRemarks] = useState('');
@@ -398,12 +400,14 @@ function RecordForm({ onDone }: { onDone: (input: RecordInput) => Promise<void> 
         </SelectInput>
       </Field>
       <Field label="Department" htmlFor="custody-department" required>
-        <TextInput
+        <SelectInput
           id="custody-department"
           value={department}
           onChange={(event) => setDepartment(event.target.value)}
-          placeholder="Establishment"
-        />
+        >
+          <option value="">Select department</option>
+          {departments.map((item) => <option key={item} value={item}>{item}</option>)}
+        </SelectInput>
       </Field>
       <Field
         label="Files in this handover"
@@ -548,6 +552,14 @@ function SignOffForm({
     </form>
   );
 }
+
+function makeBatchReference(): string {
+  const now = new Date();
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `DIG-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}-`;
+}
+
+const defaultBatchReference = makeBatchReference;
 
 function RowActions({
   event,
