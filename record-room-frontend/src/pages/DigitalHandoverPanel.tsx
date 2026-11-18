@@ -175,7 +175,7 @@ export function DigitalHandoverPanel() {
         <Card className="space-y-4">
           <div>
             <h3 className="text-sm font-semibold">Prepare a new handover batch</h3>
-            <p className="muted mt-1 text-xs">Every selected file must have a stored generated Final PDF. A batch can contain at most 100 files from one Department.</p>
+            <p className="muted mt-1 text-xs">Every selected file must have a stored generated Final PDF. A batch can contain at most 100 files from one Department and the combined PDF size must not exceed 256 MiB.</p>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Batch reference" htmlFor="digital-handover-ref" required>
