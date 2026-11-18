@@ -329,6 +329,28 @@ public sealed record ScanOcrDto(
     DateTime? UpdatedAt,
     string? UpdatedBy);
 
+/// <summary>OCR result supplied by a trusted worker or an approved manual import; extraction itself is external.</summary>
+public sealed record ScanOcrInput(
+    string Status,
+    string Text = "",
+    string? Language = null,
+    string? Engine = null,
+    string? Error = null);
+
+public sealed record ScanOcrDto(
+    long ScanId,
+    int FileId,
+    int PageNo,
+    string Side,
+    int Version,
+    string Status,
+    string Text,
+    string? Language,
+    string? Engine,
+    string? Error,
+    DateTime? UpdatedAt,
+    string? UpdatedBy);
+
 public sealed record ScanAddInput(string FileName, int PageNo, string? DocumentSize = null, string? Note = null, string? Side = null);
 public sealed record PageReviewInput(string Decision, string Note = "");
 
