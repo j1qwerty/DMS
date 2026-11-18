@@ -19,7 +19,7 @@ import { session } from './session';
 import { localDocumentBlob, saveLocalRowDocument } from './document-storage';
 import { validateDocumentFile } from '../../lib/document';
 
-const DOCUMENT_SIZES = ['A0', 'A1', 'A2', 'A3', 'A4', 'Other'];
+const DOCUMENT_SIZES = ['A0', 'A1', 'A2', 'A3', 'A4', 'Legal', 'Other'];
 
 function decorate(row: FileScan, fileId: string, fileNumber?: string): FileScan {
   return { ...row, fileId, fileNumber: fileNumber ?? row.fileNumber };
@@ -32,7 +32,7 @@ export const scansService: ScanApi = {
     return store
       .getState()
       .scanPages.filter((row) => row.fileBarcode === file.fileBarcode)
-      .sort((a, b) => a.pageNo - b.pageNo || a.version - b.version)
+      .sort((a, b) => a.pageNo - b.pageNo || (a.side ?? 'Front').localeCompare(b.side ?? 'Front') || a.version - b.version)
       .map((row) => decorate(row, file.id, file.fileNumber));
   },
 
@@ -43,13 +43,20 @@ export const scansService: ScanApi = {
 
     const size = input.documentSize.trim().toUpperCase() || file.documentSize || 'Other';
     if (!DOCUMENT_SIZES.includes(size)) {
-      return err('Choose one of A0, A1, A2, A3, A4 or Other.', 'documentSize');
+      return err('Choose one of A0, A1, A2, A3, A4, Legal or Other.', 'documentSize');
     }
 
+    const side = input.side ?? 'Front';
+    if (side !== 'Front' && side !== 'Back') {
+      return err('Choose Front or Back for the scanned page side.', 'side');
+    }
     const siblings = store
       .getState()
       .scanPages.filter(
-        (row) => row.fileBarcode === file.fileBarcode && row.pageNo === input.pageNo,
+        (row) =>
+          row.fileBarcode === file.fileBarcode &&
+          row.pageNo === input.pageNo &&
+          (row.side ?? 'Front') === side,
       );
     const nextVersion = siblings.reduce((max, row) => Math.max(max, row.version), 0) + 1;
 
@@ -62,6 +69,7 @@ export const scansService: ScanApi = {
         input.filename.trim() ||
         `${file.fileBarcode}-FILE-${input.pageNo}${nextVersion > 1 ? `-V${nextVersion}` : ''}.pdf`,
       pageNo: input.pageNo,
+      side,
       version: nextVersion,
       documentSize: size,
       status:
@@ -81,8 +89,8 @@ export const scansService: ScanApi = {
         entity: 'FileScanPage',
         entityId: page.id,
         before: '—',
-        after: `${page.filename} · v${page.version}`,
-        summary: `Page ${page.pageNo} of ${file.fileBarcode} added`,
+        after: `${page.filename} · ${page.side} · v${page.version}`,
+        summary: `${page.side} of page ${page.pageNo} of ${file.fileBarcode} added`,
       });
     });
     return ok(page);
