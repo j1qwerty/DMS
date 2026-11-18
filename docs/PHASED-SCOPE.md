@@ -1,3 +1,5 @@
+> **Superseded for final acceptance:** this phase sketch predates the final Zila Panchayat proposal. Use [`../ZILA_PANCHAYAT_CODEX.MD`](../ZILA_PANCHAYAT_CODEX.MD) for the binding 1.1–1.4 scope and implementation status. In particular, movement tracking, barcode center, support/inquiry, media manager and bulk import are retained but hidden by default. OCR, e-office transfer, scan-quality gates, PDF composition and digital handover are required pending work, not optional advanced-phase extras.
+
 # Phased frontend and product scope
 
 ## Phase 1. Core operational product
