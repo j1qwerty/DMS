@@ -28,8 +28,8 @@ public partial class AddDigitalHandovers : Migration
                 PreparedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
                 DeliveredBy = table.Column<string>(type: "nvarchar(64)", maxLength: 64, nullable: true),
                 DeliveredAt = table.Column<DateTime>(type: "datetime2", nullable: true),
-                AcceptedBy = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: true),
-                AcceptedAt = table.Column<DateTime>(type: "datetime2", nullable: true),
+                SignedOffBy = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: true),
+                SignedOffAt = table.Column<DateTime>(type: "datetime2", nullable: true),
                 DecisionNotes = table.Column<string>(type: "nvarchar(500)", maxLength: 500, nullable: false)
             },
             constraints: table => table.PrimaryKey("PK_DigitalHandoverBatches", x => x.Id));
