@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using RecordRoom.Api.Application;
 using RecordRoom.Api.Application.Contracts;
 using RecordRoom.Api.Application.Services;
+using RecordRoom.Api.Infrastructure.Auth;
 using RecordRoom.Api.Infrastructure.Features;
 
 namespace RecordRoom.Api.Api.Controllers;
@@ -10,6 +11,7 @@ namespace RecordRoom.Api.Api.Controllers;
 [ApiController]
 [Route("api/issues")]
 [Authorize]
+[RequirePermission("issue.issue")]
 [Produces("application/json")]
 [Tags("Issues")]
 public class IssuesController(IIssuesService issues) : ControllerBase
@@ -45,13 +47,12 @@ public class IssuesController(IIssuesService issues) : ControllerBase
     }
 
     /// <summary>Multi-file issue: several files against one receipt.</summary>
-    [Authorize(Roles = "Admin,Supervisor,Operator")]
     [HttpPost]
     public async Task<IResult> Issue(IssueInput input, CancellationToken ct) =>
         ApiResults.FromResult(await issues.IssueAsync(input, ct));
 
     /// <summary>Partial return: the receipt settles when every line is back.</summary>
-    [Authorize(Roles = "Admin,Supervisor,Operator")]
+    [RequirePermission("issue.return")]
     [HttpPost("{id:long}/return")]
     public async Task<IResult> Return(long id, ReturnInput input, CancellationToken ct) =>
         ApiResults.FromResult(await issues.ReturnAsync(id, input, ct));
@@ -61,6 +62,7 @@ public class IssuesController(IIssuesService issues) : ControllerBase
 [Route("api/movements")]
 [RequireOptionalFeature(OptionalProductFeature.Movement)]
 [Authorize]
+[RequirePermission("issue.issue")]
 [Produces("application/json")]
 [Tags("Movements")]
 public class MovementsController(IReadService read) : ControllerBase
@@ -81,6 +83,7 @@ public class MovementsController(IReadService read) : ControllerBase
 [ApiController]
 [Route("api/dashboard")]
 [Authorize]
+[RequirePermission("files.view")]
 [Produces("application/json")]
 [Tags("Dashboard")]
 public class DashboardController(IReadService read) : ControllerBase
@@ -101,7 +104,8 @@ public class DashboardController(IReadService read) : ControllerBase
 /// </summary>
 [ApiController]
 [Route("api/audit")]
-[Authorize(Roles = "Admin,Supervisor")]
+[Authorize]
+[RequirePermission("audit.view")]
 [Produces("application/json")]
 [Tags("Audit")]
 public class AuditController(IReadService read) : ControllerBase
