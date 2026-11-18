@@ -389,8 +389,8 @@ export function toDigitalHandoverBatch(dto: Record<string, unknown>): DigitalHan
     preparedAt: str(dto.preparedAt),
     deliveredBy: dto.deliveredBy ? str(dto.deliveredBy) : null,
     deliveredAt: dto.deliveredAt ? str(dto.deliveredAt) : null,
-    acceptedBy: dto.acceptedBy ? str(dto.acceptedBy) : null,
-    acceptedAt: dto.acceptedAt ? str(dto.acceptedAt) : null,
+    signedOffBy: dto.signedOffBy ? str(dto.signedOffBy) : null,
+    signedOffAt: dto.signedOffAt ? str(dto.signedOffAt) : null,
     decisionNotes: str(dto.decisionNotes),
     items: rows.map(toDigitalHandoverItem),
   };
