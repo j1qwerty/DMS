@@ -35,10 +35,33 @@ public sealed class DigitalHandoverService(
     ICurrentUserAccessor current) : IDigitalHandoverService
 {
     private const int MaxFilesPerBatch = 100;
+    private const long MaxPackageSizeBytes = 256L * 1024 * 1024;
 
     private static DigitalHandoverItemDto ToItemDto(DigitalHandoverItem item) => new(
         item.Id, item.RecordFileId, item.RecordFileDocumentId, item.FileNumber, item.Department,
         item.FileName, item.Version, item.ContentType, item.SizeBytes, item.PageCount, item.Sha256);
+
+    private async Task<bool> VerifyStoredDocumentAsync(RecordFileDocument document, CancellationToken ct)
+    {
+        await using var stream = await documentStore.OpenReadAsync(document.StorageKey, ct);
+        if (stream is null) return false;
+
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var buffer = new byte[81920];
+        long length = 0;
+        while (true)
+        {
+            var read = await stream.ReadAsync(buffer.AsMemory(0, buffer.Length), ct);
+            if (read == 0) break;
+            length += read;
+            if (length > document.SizeBytes) return false;
+            hash.AppendData(buffer, 0, read);
+        }
+
+        var actualHash = Convert.ToHexString(hash.GetHashAndReset());
+        return length == document.SizeBytes
+            && string.Equals(actualHash, document.Sha256, StringComparison.OrdinalIgnoreCase);
+    }
 
     private static DigitalHandoverBatchDto ToDto(DigitalHandoverBatch batch) => new(
         batch.Id, batch.BatchRef, batch.Department, batch.Notes, batch.Status,
@@ -112,10 +135,9 @@ public sealed class DigitalHandoverService(
                     $"File {file.FileNumber} does not have a generated final PDF. Generate and approve its final PDF before preparing handover.",
                     "fileIds");
 
-            await using var stored = await documentStore.OpenReadAsync(document.StorageKey, ct);
-            if (stored is null)
+            if (!await VerifyStoredDocumentAsync(document, ct))
                 return Result<DigitalHandoverBatchDto>.Fail(
-                    $"The final PDF for file {file.FileNumber} is missing from private storage.",
+                    $"The final PDF for file {file.FileNumber} is missing or failed its SHA-256 integrity check.",
                     "fileIds");
 
             preparedItems.Add(new DigitalHandoverItem
@@ -209,10 +231,9 @@ public sealed class DigitalHandoverService(
                 return Result<DigitalHandoverBatchDto>.Fail(
                     $"The final PDF for file {item.FileNumber} no longer matches the prepared manifest.",
                     "manifest");
-            await using var stored = await documentStore.OpenReadAsync(document.StorageKey, ct);
-            if (stored is null)
+            if (!await VerifyStoredDocumentAsync(document, ct))
                 return Result<DigitalHandoverBatchDto>.Fail(
-                    $"The final PDF for file {item.FileNumber} is missing from private storage.",
+                    $"The final PDF for file {item.FileNumber} is missing or failed its SHA-256 integrity check.",
                     "manifest");
         }
 
@@ -274,6 +295,12 @@ public sealed class DigitalHandoverService(
         if (batch.Status is not ("Delivered" or "Accepted" or "Rejected"))
             return Result<DigitalHandoverPackage>.Fail("Only a delivered handover can be downloaded.", "status");
 
+        var totalBytes = batch.Items.Sum(item => item.SizeBytes);
+        if (totalBytes > MaxPackageSizeBytes)
+            return Result<DigitalHandoverPackage>.Fail(
+                $"The package exceeds the {MaxPackageSizeBytes / (1024 * 1024)} MiB single-download limit. Split the files into smaller handover batches.",
+                "fileIds");
+
         var output = new MemoryStream();
         try
         {
@@ -283,6 +310,28 @@ public sealed class DigitalHandoverService(
                 await using (var stream = manifest.Open())
                 await using (var writer = new StreamWriter(stream, new UTF8Encoding(false), 1024, true))
                     await writer.WriteAsync(batch.ManifestJson);
+
+                var receiptJson = JsonSerializer.Serialize(new
+                {
+                    schemaVersion = 1,
+                    batch.Id,
+                    batch.BatchRef,
+                    batch.Department,
+                    batch.Status,
+                    batch.ManifestSha256,
+                    batch.PreparedBy,
+                    batch.PreparedAt,
+                    batch.DeliveredBy,
+                    batch.DeliveredAt,
+                    batch.SignedOffBy,
+                    batch.SignedOffAt,
+                    batch.DecisionNotes,
+                    itemCount = batch.Items.Count,
+                }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+                var receipt = archive.CreateEntry("handover-receipt.json", CompressionLevel.Optimal);
+                await using (var stream = receipt.Open())
+                await using (var writer = new StreamWriter(stream, new UTF8Encoding(false), 1024, true))
+                    await writer.WriteAsync(receiptJson);
 
                 var csv = new StringBuilder();
                 csv.AppendLine("File ID,File Number,Department,File Name,Version,Page Count,Size Bytes,SHA256,Document ID");
@@ -323,6 +372,7 @@ public sealed class DigitalHandoverService(
                     var entryName = $"documents/{SafePart(item.FileNumber)}-{item.Id}.pdf";
                     var entry = archive.CreateEntry(entryName, CompressionLevel.NoCompression);
                     using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+                    long copiedBytes = 0;
                     await using (var destination = entry.Open())
                     {
                         var buffer = new byte[81920];
@@ -330,12 +380,18 @@ public sealed class DigitalHandoverService(
                         {
                             var read = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), ct);
                             if (read == 0) break;
+                            copiedBytes += read;
+                            if (copiedBytes > item.SizeBytes)
+                                return Result<DigitalHandoverPackage>.Fail(
+                                    $"The source PDF for file {item.FileNumber} exceeds its manifest size.",
+                                    "manifest");
                             hash.AppendData(buffer, 0, read);
                             await destination.WriteAsync(buffer.AsMemory(0, read), ct);
                         }
                     }
                     var actualHash = Convert.ToHexString(hash.GetHashAndReset());
-                    if (!string.Equals(actualHash, item.Sha256, StringComparison.OrdinalIgnoreCase))
+                    if (copiedBytes != item.SizeBytes
+                        || !string.Equals(actualHash, item.Sha256, StringComparison.OrdinalIgnoreCase))
                         return Result<DigitalHandoverPackage>.Fail(
                             $"The source PDF for file {item.FileNumber} failed its SHA-256 check.",
                             "manifest");
