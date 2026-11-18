@@ -246,6 +246,11 @@ public sealed class FileScansService(
             .FirstOrDefaultAsync(ct);
         if (row is null) return null;
 
+        await audit.LogAsync(db, AuditAction.Access, "FileScanPageOcr", row.Id.ToString(),
+            "not accessed", $"viewed OCR result; status={row.OcrStatus}; chars={row.OcrText?.Length ?? 0}",
+            $"Viewed OCR text for file {row.Barcode} page {row.PageNo} {row.Side} v{row.Version}.", ct);
+        await db.SaveChangesAsync(ct);
+
         var fileId = await db.Files.AsNoTracking()
             .Where(file => file.Barcode == row.Barcode)
             .Select(file => (int?)file.Id)
@@ -293,7 +298,10 @@ public sealed class FileScansService(
 
         var previous = page.OcrStatus + "; chars=" + (page.OcrText?.Length ?? 0);
         page.OcrStatus = completed ? "Completed" : "Failed";
-        page.OcrText = completed ? text : null;
+        // A failed retry must not destroy the last successful extraction text.
+        // Search excludes it while status is Failed; a later successful retry
+        // replaces it and restores Completed status.
+        if (completed) page.OcrText = text;
         page.OcrLanguage = string.IsNullOrWhiteSpace(language) ? null : language;
         page.OcrEngine = string.IsNullOrWhiteSpace(engine) ? null : engine;
         page.OcrError = failed ? error : null;
