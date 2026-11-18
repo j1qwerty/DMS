@@ -1,3 +1,5 @@
+> **Final scope security notice:** current role-attribute authorization is not yet a fully enforced editable capability matrix. The required permission-policy work, document access audit and security test matrix are tracked in [`../ZILA_PANCHAYAT_CODEX.MD`](../ZILA_PANCHAYAT_CODEX.MD).
+
 # Security requirements
 
 ## Browser-side rules
