@@ -46,10 +46,11 @@ export const scansService: ScanApi = {
       return err('Choose one of A0, A1, A2, A3, A4, Legal or Other.', 'documentSize');
     }
 
-    const side = input.side ?? 'Front';
-    if (side !== 'Front' && side !== 'Back') {
+    const requestedSide = input.side ?? 'Front';
+    if (!['Front', 'Back'].includes(requestedSide)) {
       return err('Choose Front or Back for the scanned page side.', 'side');
     }
+    const side = requestedSide;
     const siblings = store
       .getState()
       .scanPages.filter(
@@ -128,7 +129,7 @@ export const scansService: ScanApi = {
           entityId: scanId,
           before: row.filename,
           after: `${file.name}; bytes=${info.sizeBytes}`,
-          summary: `Attached scan for page ${row.pageNo} of ${row.fileBarcode}`,
+          summary: `Attached scan for the ${row.side ?? 'Front'} of page ${row.pageNo} of ${row.fileBarcode}`,
         });
       });
       return ok(updated);
@@ -137,7 +138,10 @@ export const scansService: ScanApi = {
     const siblings = store
       .getState()
       .scanPages.filter(
-        (item) => item.fileBarcode === row.fileBarcode && item.pageNo === row.pageNo,
+        (item) =>
+          item.fileBarcode === row.fileBarcode &&
+          item.pageNo === row.pageNo &&
+          (item.side ?? 'Front') === (row.side ?? 'Front'),
       );
     const version = siblings.reduce((max, item) => Math.max(max, item.version), 0) + 1;
 
@@ -150,7 +154,7 @@ export const scansService: ScanApi = {
         version > 1 && siblings.some((item) => item.status === 'Active')
           ? 'Duplicate'
           : 'Pending review',
-      note: `Uploaded document version ${version} for page ${row.pageNo}.`,
+      note: `Uploaded document version ${version} for the ${row.side ?? 'Front'} of page ${row.pageNo}.`,
       uploadedAt: timestamp(),
       uploadedBy: session.userName(),
       hasDocument: true,
