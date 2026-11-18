@@ -30,6 +30,16 @@ public class FileScanPage
     /// <summary>1-based page within a multi-page PDF that this row represents.</summary>
     public int? PageIndex { get; set; }
 
+    /// <summary>OCR extraction state; the engine is selected and operated separately.</summary>
+    public string OcrStatus { get; set; } = "NotProcessed";
+    /// <summary>Plain text extracted from this scan page; never used as an OCR confidence claim.</summary>
+    public string? OcrText { get; set; }
+    public string? OcrLanguage { get; set; }
+    public string? OcrEngine { get; set; }
+    public string? OcrError { get; set; }
+    public DateTime? OcrUpdatedAt { get; set; }
+    public string? OcrUpdatedBy { get; set; }
+
     public RecordFile? RecordFile { get; set; }
 }
 
