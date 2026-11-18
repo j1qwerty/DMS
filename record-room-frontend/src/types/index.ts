@@ -348,6 +348,41 @@ export interface CustodyEvent {
   remarks: string;
 }
 
+/** Immutable manifest row included in a delivered digital handover package. */
+export interface DigitalHandoverItem {
+  id: string;
+  fileId: string;
+  documentId: string;
+  fileNumber: string;
+  department: string;
+  filename: string;
+  version: number;
+  contentType: string;
+  sizeBytes: number;
+  pageCount?: number | null;
+  sha256: string;
+}
+
+export type DigitalHandoverStatus = 'Prepared' | 'Delivered' | 'Accepted' | 'Rejected';
+
+export interface DigitalHandoverBatch {
+  id: string;
+  batchRef: string;
+  department: string;
+  notes: string;
+  status: DigitalHandoverStatus;
+  manifestSha256: string;
+  itemCount: number;
+  preparedBy: string;
+  preparedAt: string;
+  deliveredBy?: string | null;
+  deliveredAt?: string | null;
+  acceptedBy?: string | null;
+  acceptedAt?: string | null;
+  decisionNotes: string;
+  items: DigitalHandoverItem[];
+}
+
 /** `upload_map` — scanned room/area maps attached to a file. */
 export interface MapUpload {
   /** Id of the file this page belongs to; lets screens link to it without a barcode lookup. */
