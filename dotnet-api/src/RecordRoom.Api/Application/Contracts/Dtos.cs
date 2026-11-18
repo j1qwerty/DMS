@@ -300,7 +300,33 @@ public sealed record FileScanPageDto(
     int? PageCount = null,
     int? PageIndex = null,
     string? FileNumber = null,
-    string Side = "Front");
+    string Side = "Front",
+    string OcrStatus = "NotProcessed",
+    string? OcrLanguage = null,
+    string? OcrEngine = null,
+    DateTime? OcrUpdatedAt = null,
+    string? OcrUpdatedBy = null);
+
+public sealed record ScanOcrInput(
+    string Status,
+    string Text = "",
+    string? Language = null,
+    string? Engine = null,
+    string? Error = null);
+
+public sealed record ScanOcrDto(
+    long ScanId,
+    int FileId,
+    int PageNo,
+    string Side,
+    int Version,
+    string Status,
+    string Text,
+    string? Language,
+    string? Engine,
+    string? Error,
+    DateTime? UpdatedAt,
+    string? UpdatedBy);
 
 public sealed record ScanAddInput(string FileName, int PageNo, string? DocumentSize = null, string? Note = null, string? Side = null);
 public sealed record PageReviewInput(string Decision, string Note = "");
