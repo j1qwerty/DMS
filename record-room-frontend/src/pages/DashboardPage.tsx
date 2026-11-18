@@ -33,6 +33,8 @@ const EMPTY_STATS: DashboardStats = {
   roomCount: 0,
   activeBorrowers: 0,
   pendingApprovals: 0,
+  mappedBaselineConfigured: false,
+  digitizationBaselineConfigured: false,
 };
 const EMPTY_TIMELINE: TimelineEvent[] = [];
 const EMPTY_ISSUES: IssueRecord[] = [];
@@ -162,7 +164,7 @@ export function DashboardPage() {
           icon={Files}
           label="Files in registry"
           value={formatNumber(registry.collectionTotal ?? registry.total ?? stats.totalRecords)}
-          note="All physical records"
+          note={stats.mappedBaselineConfigured ? "Approved registry volume" : "Current records loaded"}
           to="/files"
         />
         <Stat
@@ -176,7 +178,9 @@ export function DashboardPage() {
           icon={MapPin}
           label="Placed on a shelf"
           value={`${stats.mappedPercent}%`}
-          note={`${stats.roomCount} room${stats.roomCount === 1 ? '' : 's'}`}
+          note={stats.mappedBaselineConfigured
+            ? `${stats.roomCount} room${stats.roomCount === 1 ? '' : 's'}`
+            : 'Awaiting approved file-volume baseline'}
           to="/rooms"
         />
         <Stat
@@ -190,7 +194,9 @@ export function DashboardPage() {
           icon={Archive}
           label="Digitization progress"
           value={`${stats.digitizationPercent}%`}
-          note="Approved pages against the agreed page volume"
+          note={stats.digitizationBaselineConfigured
+            ? "Approved pages against the agreed page volume"
+            : "Awaiting approved page-volume baseline"}
           to="/digitization"
         />
       </div>
