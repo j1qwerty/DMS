@@ -34,7 +34,8 @@ A route, button, database field, or mock adapter alone is not evidence that an e
 | Document-open audit events | DONE / TEST NOT RUN | Opening file attachments, digitisation scan content and map scan content writes an `Access` audit event. New enum value `Access = 11` is appended without renumbering existing values. |
 | Intake reconciliation before sign-off | DONE / TEST NOT RUN | An inbound custody event cannot be signed off until a reconciliation count exists. |
 | Legal document-size option | DONE / TEST NOT RUN | Legal added alongside A0/A1/A2/A3/A4/Other in the file and scan size validation/UI. |
-| Dashboard metric corrections | PARTIAL / TEST ADDED | Mapped percentage counts files with a shelf placement; due counts count outstanding file-lines, not receipts; digitisation percentage counts approved PDF pages against an agreed expected-page baseline. The denominator remains to be finalized and configured. |\n| Metadata full-text search | PARTIAL / TEST ADDED | Added a SQL Server Full-Text catalog/index migration for registry metadata; API uses `CONTAINS` when the index is active and falls back to the existing search if Full-Text Search is unavailable. |
+| Dashboard metric corrections | PARTIAL / TEST ADDED | Mapped percentage counts files with a shelf placement; due counts count outstanding file-lines, not receipts; digitisation percentage counts approved PDF pages against an agreed expected-page baseline. The denominator remains to be finalized and configured. |
+| Metadata full-text search | PARTIAL / TEST ADDED | Added a SQL Server Full-Text catalog/index migration for registry metadata; API uses `CONTAINS` when the index is active and falls back to the existing search if Full-Text Search is unavailable. |
 | Automated and live verification | PARTIAL | GitHub Actions verifies the frontend lint/typecheck/tests/build and .NET build/unit tests. The API smoke harness has additional direct-permission, feature-switch, access-audit, custody, page-side and dashboard assertions, but it still needs a live SQL Server run. The live `api-contract.test.ts` has not been run in this session. |
 
 ## 3. Final proposal 1.1 — DMS software
@@ -152,7 +153,7 @@ Implementation rules:
 | Private storage | PARTIAL | Verify encryption, file type/size validation, malware scanning, backup/restore and DB/blob consistency. |
 | Search scale | PARTIAL | Metadata SQL Server FTS index/query path implemented with fallback; OCR-text indexing, ranking/query-plan review and realistic load test remain. |
 | OCR | PENDING | POC on real representative scans, on-prem deployment and permission-filtered indexing. |
-| PDF generation | PARTIAL / TEST ADDED | API composition for approved page-side scans creates a versioned private final-PDF derivative with page count, SHA-256 and source manifest. Live image/PDF rendering acceptance remains pending. |
+| PDF generation | PARTIAL / TEST ADDED | API composition for approved page-side scans creates a versioned private final-PDF derivative with page count, SHA-256 and source manifest. The frontend offers the action to reviewers on API mode. Live image/PDF rendering acceptance remains pending. |
 | Image quality | PENDING | DPI, skew, contrast, blur, blank-page, crop and orientation checks. |
 | e-office | BLOCKED | Integration only after approved interface details. |
 | Digital handover | PENDING | Package manifest, checksums, immutable handover record and acceptance sign-off. |
@@ -169,12 +170,18 @@ Implementation rules:
 | Disabled optional feature filter returns 404; enabled one passes | `FeatureSwitchTests.cs` | TEST ADDED / NOT RUN |
 | Access audit action appended without changing existing enum values | `FeatureSwitchTests.cs` | TEST ADDED / NOT RUN |
 | Opening a digitisation scan writes an Access audit event | `scripts/test-api.ps1` | TEST ADDED / NOT RUN |
-| Opening a file attachment writes an Access audit event | `scripts/test-api.ps1` | TEST ADDED / NOT RUN |\n| Plain user input is safely tokenized into bounded SQL Server full-text prefix terms | `dotnet-api/tests/RecordRoom.Api.Tests/FullTextSearchConditionTests.cs` | TEST ADDED / NOT RUN |
+| Opening a file attachment writes an Access audit event | `scripts/test-api.ps1` | TEST ADDED / NOT RUN |
+| Approved Front/Back scan images compose into a `FinalPdf` document version, retain both sources, return a two-page PDF and store SHA-256 | `dotnet-api/scripts/test-api.ps1` | TEST ADDED / NOT RUN |
+| Plain user input is safely tokenized into bounded SQL Server full-text prefix terms | `dotnet-api/tests/RecordRoom.Api.Tests/FullTextSearchConditionTests.cs` | TEST ADDED / NOT RUN |
 | Intake sign-off before reconciliation is rejected | `scripts/test-api.ps1` | TEST ADDED / NOT RUN |
-| Legal-size scan page accepted and size retained | `scripts/test-api.ps1` | TEST ADDED / NOT RUN |\n| Front and Back sides accepted independently at the same page number; invalid sides rejected; version numbers are independent | `scripts/test-api.ps1`, `record-room-frontend/tests/features-and-rooms.test.ts` | TEST ADDED / NOT RUN |
+| Legal-size scan page accepted and size retained | `scripts/test-api.ps1` | TEST ADDED / NOT RUN |
+| Front and Back sides accepted independently at the same page number; invalid sides rejected; version numbers are independent | `scripts/test-api.ps1`, `record-room-frontend/tests/features-and-rooms.test.ts` | TEST ADDED / NOT RUN |
 | E-office-linked file can be found via link filter and reference search | `scripts/test-api.ps1` | TEST ADDED / NOT RUN |
 | Multiple outstanding files in one receipt count as multiple due files | `scripts/test-api.ps1` | TEST ADDED / NOT RUN |
-| Frontend optional features default off, can be independently enabled, and API config overrides build values | `record-room-frontend/tests/features-and-rooms.test.ts` | TEST ADDED / NOT RUN |\n| Frontend four-role capability matrix covers Admin/Supervisor/Operator/Employee grants and denials | `record-room-frontend/tests/permissions.test.ts` | TEST ADDED / NOT RUN |\n| Server permission filter returns 401/403 and enforces the role grants including custody and document deletion | `dotnet-api/tests/RecordRoom.Api.Tests/FeatureSwitchTests.cs` | TEST ADDED / NOT RUN |\n| Live HTTP harness checks supervisor users.view/users.edit, employee issue denial, operator custody view/manage and direct API role boundaries | `dotnet-api/scripts/test-api.ps1` | TEST ADDED / NOT RUN |
+| Frontend optional features default off, can be independently enabled, and API config overrides build values | `record-room-frontend/tests/features-and-rooms.test.ts` | TEST ADDED / NOT RUN |
+| Frontend four-role capability matrix covers Admin/Supervisor/Operator/Employee grants and denials | `record-room-frontend/tests/permissions.test.ts` | TEST ADDED / NOT RUN |
+| Server permission filter returns 401/403 and enforces the role grants including custody and document deletion | `dotnet-api/tests/RecordRoom.Api.Tests/FeatureSwitchTests.cs` | TEST ADDED / NOT RUN |
+| Live HTTP harness checks supervisor users.view/users.edit, employee issue denial, operator custody view/manage and direct API role boundaries | `dotnet-api/scripts/test-api.ps1` | TEST ADDED / NOT RUN |
 
 ### 9.2 Required tests still missing
 
