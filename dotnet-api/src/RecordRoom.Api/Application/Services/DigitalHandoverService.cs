@@ -227,7 +227,8 @@ public sealed class DigitalHandoverService(
         {
             var document = await db.FileDocuments.AsNoTracking()
                 .FirstOrDefaultAsync(row => row.Id == item.RecordFileDocumentId, ct);
-            if (document is null || document.Sha256 != item.Sha256 || document.SizeBytes != item.SizeBytes)
+            if (document is null || document.DocumentKind != "FinalPdf"
+                || document.Sha256 != item.Sha256 || document.SizeBytes != item.SizeBytes)
                 return Result<DigitalHandoverBatchDto>.Fail(
                     $"The final PDF for file {item.FileNumber} no longer matches the prepared manifest.",
                     "manifest");
@@ -302,6 +303,7 @@ public sealed class DigitalHandoverService(
                 "fileIds");
 
         var output = new MemoryStream();
+        string? packageError = null;
         try
         {
             using (var archive = new ZipArchive(output, ZipArchiveMode.Create, true, Encoding.UTF8))
@@ -360,14 +362,16 @@ public sealed class DigitalHandoverService(
                         .FirstOrDefaultAsync(row => row.Id == item.RecordFileDocumentId, ct);
                     if (document is null || document.DocumentKind != "FinalPdf"
                         || document.Sha256 != item.Sha256 || document.SizeBytes != item.SizeBytes)
-                        return Result<DigitalHandoverPackage>.Fail(
-                            $"The source PDF for file {item.FileNumber} no longer matches the manifest.",
-                            "manifest");
+                    {
+                        packageError = $"The source PDF for file {item.FileNumber} no longer matches the manifest.";
+                        break;
+                    }
                     await using var source = await documentStore.OpenReadAsync(document.StorageKey, ct);
                     if (source is null)
-                        return Result<DigitalHandoverPackage>.Fail(
-                            $"The source PDF for file {item.FileNumber} is missing from private storage.",
-                            "manifest");
+                    {
+                        packageError = $"The source PDF for file {item.FileNumber} is missing from private storage.";
+                        break;
+                    }
 
                     var entryName = $"documents/{SafePart(item.FileNumber)}-{item.Id}.pdf";
                     var entry = archive.CreateEntry(entryName, CompressionLevel.NoCompression);
@@ -382,20 +386,29 @@ public sealed class DigitalHandoverService(
                             if (read == 0) break;
                             copiedBytes += read;
                             if (copiedBytes > item.SizeBytes)
-                                return Result<DigitalHandoverPackage>.Fail(
-                                    $"The source PDF for file {item.FileNumber} exceeds its manifest size.",
-                                    "manifest");
+                            {
+                                packageError = $"The source PDF for file {item.FileNumber} exceeds its manifest size.";
+                                break;
+                            }
                             hash.AppendData(buffer, 0, read);
                             await destination.WriteAsync(buffer.AsMemory(0, read), ct);
                         }
                     }
                     var actualHash = Convert.ToHexString(hash.GetHashAndReset());
+                    if (packageError is not null) break;
                     if (copiedBytes != item.SizeBytes
                         || !string.Equals(actualHash, item.Sha256, StringComparison.OrdinalIgnoreCase))
-                        return Result<DigitalHandoverPackage>.Fail(
-                            $"The source PDF for file {item.FileNumber} failed its SHA-256 check.",
-                            "manifest");
+                    {
+                        packageError = $"The source PDF for file {item.FileNumber} failed its SHA-256 check.";
+                        break;
+                    }
                 }
+            }
+
+            if (packageError is not null)
+            {
+                await output.DisposeAsync();
+                return Result<DigitalHandoverPackage>.Fail(packageError, "manifest");
             }
 
             output.Position = 0;
