@@ -63,6 +63,12 @@ public sealed class DigitalHandoverService(
             && string.Equals(actualHash, document.Sha256, StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool ManifestMatchesStoredHash(DigitalHandoverBatch batch)
+    {
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(batch.ManifestJson)));
+        return string.Equals(hash, batch.ManifestSha256, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static DigitalHandoverBatchDto ToDto(DigitalHandoverBatch batch) => new(
         batch.Id, batch.BatchRef, batch.Department, batch.Notes, batch.Status,
         batch.ManifestSha256, batch.Items.Count, batch.PreparedBy, batch.PreparedAt,
@@ -222,6 +228,8 @@ public sealed class DigitalHandoverService(
         if (batch is null) return Result<DigitalHandoverBatchDto>.Fail("Digital handover batch not found.");
         if (batch.Status != "Prepared")
             return Result<DigitalHandoverBatchDto>.Fail("Only a prepared handover can be marked delivered.", "status");
+        if (!ManifestMatchesStoredHash(batch))
+            return Result<DigitalHandoverBatchDto>.Fail("The stored handover manifest failed its SHA-256 integrity check.", "manifest");
 
         foreach (var item in batch.Items)
         {
@@ -295,6 +303,8 @@ public sealed class DigitalHandoverService(
         if (batch is null) return Result<DigitalHandoverPackage>.Fail("Digital handover batch not found.");
         if (batch.Status is not ("Delivered" or "Accepted" or "Rejected"))
             return Result<DigitalHandoverPackage>.Fail("Only a delivered handover can be downloaded.", "status");
+        if (!ManifestMatchesStoredHash(batch))
+            return Result<DigitalHandoverPackage>.Fail("The stored handover manifest failed its SHA-256 integrity check.", "manifest");
 
         var totalBytes = batch.Items.Sum(item => item.SizeBytes);
         if (totalBytes > MaxPackageSizeBytes)
