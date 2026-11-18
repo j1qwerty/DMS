@@ -37,7 +37,6 @@ A route, button, database field, or mock adapter alone is not evidence that an e
 | Legal document-size option | DONE / TEST ADDED | Legal added alongside A0/A1/A2/A3/A4/Other in file and scan size validation/UI; harness registers and composes a Legal-size scan. |
 | Dashboard metric corrections | PARTIAL / TEST ADDED | Mapped percentage counts files with a shelf placement against `Scope:ExpectedFileCount`; digitisation percentage counts approved PDF pages against `Scope:ExpectedPageCount`; both remain 0 until a positive department-approved denominator is set. Registry `collectionTotal` uses the approved file count or actual loaded DB count—no hard-coded district total. Due counts count outstanding file-lines, not receipts. |
 | Metadata full-text search | PARTIAL / TEST ADDED | `20261118000400_AddFilesFullTextIndex` conditionally creates a SQL Server Full-Text catalog/index for registry metadata when the component is installed; API uses safe `CONTAINS` terms when active and falls back otherwise. The migration and SQL condition tests are added; OCR extraction/indexing is not present. |
-| Digital handover workflow | PARTIAL / TEST ADDED | SQL-backed API, migration, immutable manifest, PDF SHA-256 verification, metadata CSV, handover receipt JSON, ZIP export, size cap, delivery state and Department accept/reject sign-off are implemented. UI is integrated beside physical custody; local demo explicitly does not fabricate official receipts. |
 
 ## 3. Final proposal 1.1 — DMS software
 
