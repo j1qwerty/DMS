@@ -808,8 +808,8 @@ if (-not $SkipDestructive) {
     }
     Assert-Equal 200 $acceptedHandover.Status 'the Department representative can accept the delivered package'
     Assert-Equal 'Accepted' $acceptedHandover.Data.data.status 'the digital handover is recorded as Accepted'
-    Assert-Equal 'Department Nodal Officer' $acceptedHandover.Data.data.acceptedBy 'the named receiver is persisted'
-    Assert-True ($null -ne $acceptedHandover.Data.data.acceptedAt) 'the Department acceptance is timestamped'
+    Assert-Equal 'Department Nodal Officer' $acceptedHandover.Data.data.signedOffBy 'the named receiver is persisted'
+    Assert-True ($null -ne $acceptedHandover.Data.data.signedOffAt) 'the Department acceptance is timestamped'
     $duplicateHandoverSignOff = Invoke-Api -Method POST -Path "/api/digital-handovers/$($handover.Data.data.id)/sign-off" -Token $admin -Body @{
         decision = 'Accepted'; signedOffBy = 'Department Nodal Officer'; notes = ''
     }
