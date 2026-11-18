@@ -302,6 +302,7 @@ public sealed record FileScanPageDto(
     string? FileNumber = null,
     string Side = "Front",
     string OcrStatus = "NotProcessed",
+    bool HasOcrText = false,
     string? OcrLanguage = null,
     string? OcrEngine = null,
     DateTime? OcrUpdatedAt = null,
