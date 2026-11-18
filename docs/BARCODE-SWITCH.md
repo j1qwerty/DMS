@@ -1,8 +1,7 @@
 # Barcode switch
 
-**What:** one setting turns barcode features on or off. Default **on**.
-**Scope:** Record Room section only. The document register, maps, digitization, reports and the rest of the
-record room (issue, return, movement, rooms) are always available.
+**What:** one setting turns barcode features on or off. Default **off** for the current Zila Panchayat proposal delivery.
+**Scope:** Record Room section only. The core document register, maps, digitization, reports, custody, issue/return, rooms and audit remain available. Standalone movement is a separate retained optional module and is also off by default.
 
 | Where | Setting |
 |---|---|
@@ -32,3 +31,6 @@ sentences and bulk-import messages stop mentioning barcodes. Details: `dotnet-ap
 ## Testing both states
 `pwsh dotnet-api/scripts/test-api.ps1` reads `/api/config` and checks the gating that matches the current state.
 Run it once with the switch on and once with it off.
+
+
+The final contract and all other scope statuses are tracked in `../ZILA_PANCHAYAT_CODEX.MD`. Barcode is retained for later use; do not delete its routes, services or migrations.
