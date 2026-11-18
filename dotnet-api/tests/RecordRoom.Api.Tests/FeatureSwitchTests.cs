@@ -121,6 +121,59 @@ public class FeatureSwitchTests
         Assert.True(dto.BulkImport);
     }
 
+
+    private static ActionExecutingContext ContextWithOptionalFeatures(bool movement, bool support, bool bulkImport)
+    {
+        var services = new ServiceCollection()
+            .AddSingleton<IFeatureFlags>(new Flags(false, movement, support, bulkImport))
+            .BuildServiceProvider();
+        var http = new DefaultHttpContext { RequestServices = services };
+        return new ActionExecutingContext(
+            new ActionContext(http, new RouteData(), new ActionDescriptor()),
+            new List<IFilterMetadata>(),
+            new Dictionary<string, object?>(),
+            controller: new object());
+    }
+
+    [Fact]
+    public void Disabled_optional_modules_are_hidden_with_not_found()
+    {
+        foreach (var feature in new[]
+        {
+            OptionalProductFeature.Movement,
+            OptionalProductFeature.Support,
+            OptionalProductFeature.BulkImport,
+        })
+        {
+            var context = ContextWithOptionalFeatures(movement: false, support: false, bulkImport: false);
+            new RequireOptionalFeatureAttribute(feature).OnActionExecuting(context);
+            var result = Assert.IsType<ObjectResult>(context.Result);
+            Assert.Equal(StatusCodes.Status404NotFound, result.StatusCode);
+        }
+    }
+
+    [Fact]
+    public void Enabled_optional_modules_pass_the_feature_filter()
+    {
+        foreach (var (feature, context) in new[]
+        {
+            (OptionalProductFeature.Movement, ContextWithOptionalFeatures(true, false, false)),
+            (OptionalProductFeature.Support, ContextWithOptionalFeatures(false, true, false)),
+            (OptionalProductFeature.BulkImport, ContextWithOptionalFeatures(false, false, true)),
+        })
+        {
+            new RequireOptionalFeatureAttribute(feature).OnActionExecuting(context);
+            Assert.Null(context.Result);
+        }
+    }
+
+    [Fact]
+    public void Access_is_a_distinct_append_only_audit_action()
+    {
+        Assert.Equal(11, (int)RecordRoom.Api.Domain.AuditAction.Access);
+        Assert.Equal(10, (int)RecordRoom.Api.Domain.AuditAction.Export);
+    }
+
     [Fact]
     public void Barcode_endpoints_answer_404_while_the_switch_is_off()
     {
