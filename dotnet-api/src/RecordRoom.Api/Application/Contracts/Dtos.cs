@@ -380,8 +380,8 @@ public sealed record DigitalHandoverBatchDto(
     DateTime PreparedAt,
     string? DeliveredBy,
     DateTime? DeliveredAt,
-    string? AcceptedBy,
-    DateTime? AcceptedAt,
+    string? SignedOffBy,
+    DateTime? SignedOffAt,
     string DecisionNotes,
     DigitalHandoverItemDto[] Items);
 
