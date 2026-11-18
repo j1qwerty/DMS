@@ -50,7 +50,8 @@
 .EXAMPLE
     .\deploy-recordroom.ps1
     .\deploy-recordroom.ps1 -Target both -SkipConfirm
-    .\deploy-recordroom.ps1 -Target api -SkipProvision -SkipConfirm
+    .\deploy-recordroom.ps1 -Target both -BarcodeEnabled true -SkipConfirm
+    .\deploy-recordroom.ps1 -Target api -ExpectedPageCount 8500000 -SkipProvision -SkipConfirm
 #>
 [CmdletBinding()]
 param(
@@ -61,7 +62,12 @@ param(
     [string] $Host_ = 'contabo',
     [string] $ServerIp = '147.93.155.185',
     [int] $WebPort = 8083,
-    [int] $ApiPort = 5006
+    [int] $ApiPort = 5006,
+    [ValidateSet('true', 'false')] [string] $BarcodeEnabled = 'false',
+    [ValidateSet('true', 'false')] [string] $MovementEnabled = 'false',
+    [ValidateSet('true', 'false')] [string] $SupportEnabled = 'false',
+    [ValidateSet('true', 'false')] [string] $BulkImportEnabled = 'false',
+    [ValidateRange(0, 2147483647)] [int] $ExpectedPageCount = 0
 )
 
 $ErrorActionPreference = 'Stop'
@@ -248,6 +254,11 @@ WEBPORT="$2"
 APIPORT="$3"
 SERVER_IP="$4"
 PROVISION="$5"
+BARCODE_ENABLED="$6"
+MOVEMENT_ENABLED="$7"
+SUPPORT_ENABLED="$8"
+BULK_IMPORT_ENABLED="$9"
+EXPECTED_PAGE_COUNT="${10}"
 api_archive=/tmp/recordroom-api-deploy.tar.gz
 web_archive=/tmp/recordroom-web-deploy.tar.gz
 approot=/var/www/recordroom/app
@@ -361,23 +372,15 @@ upsert_env FileStorage__MaxUploadBytes "50331648"
 # whether a Redis that is down at boot is retried in the background (good) or
 # demotes the process to the in-memory cache until the next restart (bad).
 upsert_env Redis__ConnectionString "127.0.0.1:6379,abortConnect=false"
-# Retained out-of-scope modules. Add missing keys with safe defaults, but never
-# overwrite an operator's explicit choice on an existing deployment.
-for feature in Barcode Movement Support BulkImport; do
-  key="Features__${feature}Enabled"
-  case "$feature" in
-    Barcode) value="${BARCODE_ENABLED:-false}" ;;
-    Movement) value="${MOVEMENT_ENABLED:-false}" ;;
-    Support) value="${SUPPORT_ENABLED:-false}" ;;
-    BulkImport) value="${BULK_IMPORT_ENABLED:-false}" ;;
-  esac
-  if ! grep -q "^${key}=" "$envfile"; then
-    printf '%s=%s\n' "$key" "$value" >> "$envfile"
-  fi
-done
-if ! grep -q "^Scope__ExpectedPageCount=" "$envfile"; then
-  printf '%s=%s\n' Scope__ExpectedPageCount "${EXPECTED_PAGE_COUNT:-0}" >> "$envfile"
-fi
+# Apply the requested Zila Panchayat product profile on every deployment.
+# Defaults deliberately hide retained non-scope modules, including on servers
+# whose older env files had BarcodeEnabled=true. Re-enable only by passing an
+# explicit *Enabled parameter to this deployment script.
+upsert_env Features__BarcodeEnabled "$BARCODE_ENABLED"
+upsert_env Features__MovementEnabled "$MOVEMENT_ENABLED"
+upsert_env Features__SupportEnabled "$SUPPORT_ENABLED"
+upsert_env Features__BulkImportEnabled "$BULK_IMPORT_ENABLED"
+upsert_env Scope__ExpectedPageCount "$EXPECTED_PAGE_COUNT"
 
 # Hangfire in SQL Server rather than memory. In-memory storage loses every job on
 # restart, and with two API nodes each would run the overdue sweep on its own
@@ -614,7 +617,7 @@ echo "recordroom $MODE deployed"
     $previousEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        $remoteScript | ssh -o BatchMode=yes $Host_ 'bash -s' -- "$Target" "$WebPort" "$ApiPort" "$ServerIp" "$provisionFlag"
+        $remoteScript | ssh -o BatchMode=yes $Host_ 'bash -s' -- "$Target" "$WebPort" "$ApiPort" "$ServerIp" "$provisionFlag" "$BarcodeEnabled" "$MovementEnabled" "$SupportEnabled" "$BulkImportEnabled" "$ExpectedPageCount"
         $deployCode = $LASTEXITCODE
     } finally {
         $ErrorActionPreference = $previousEap
