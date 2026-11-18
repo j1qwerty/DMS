@@ -41,8 +41,11 @@ export const scansService: ScanApi = {
     if (!file) return err('File not found.', 'fileId');
     if (input.pageNo < 1) return err('Page number starts at 1.', 'pageNo');
 
-    const size = input.documentSize.trim().toUpperCase() || file.documentSize || 'Other';
-    if (!DOCUMENT_SIZES.includes(size)) {
+    const requestedSize = input.documentSize.trim() || file.documentSize || 'Other';
+    const size = DOCUMENT_SIZES.find(
+      (candidate) => candidate.toLowerCase() === requestedSize.toLowerCase(),
+    );
+    if (!size) {
       return err('Choose one of A0, A1, A2, A3, A4, Legal or Other.', 'documentSize');
     }
 
