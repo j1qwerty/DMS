@@ -21,6 +21,7 @@
 - [ ] Return flow confirms destination.
 - [ ] Barcode page previews label concept when the optional barcode feature is deliberately enabled; by default, the non-scope module is hidden.
 - [ ] Digitization batch detail opens.
+- [ ] OCR status is visible per scanned page; completed OCR text can be searched and read only with permission.
 - [ ] Reports open.
 - [ ] Complete `DEPARTMENT-APPLICATION-HANDOVER.md`: clean build, deployment, database migrations, backup/restore, security, UAT, training and signed operational takeover.
 - [ ] Administration routes open.
