@@ -57,8 +57,11 @@ public sealed class ReportsService(AppDbContext db, IFeatureFlags flags) : IRepo
             "Employee_reports.php borrow_list"),
     ];
 
-    public ReportDefinitionDto[] Definitions() =>
-        flags.BarcodeEnabled ? Defs : Defs.Select(d => BarcodeColumns.Strip(d)).ToArray();
+    public ReportDefinitionDto[] Definitions()
+    {
+        var available = flags.MovementEnabled ? Defs : Defs.Where(d => d.Key != "movement-log").ToArray();
+        return flags.BarcodeEnabled ? available : available.Select(BarcodeColumns.Strip).ToArray();
+    }
 
     /// <summary>
     /// With barcodes off, barcode columns (and the wording that mentions them) are left
@@ -172,6 +175,9 @@ public sealed class ReportsService(AppDbContext db, IFeatureFlags flags) : IRepo
 
     public ReportResultDto Build(string key)
     {
+        if (key == "movement-log" && !flags.MovementEnabled)
+            throw new ArgumentException("Movement history is not enabled.", nameof(key));
+
         var definition = Defs.FirstOrDefault(d => d.Key == key)
             ?? throw new ArgumentException($"Unknown report '{key}'.", nameof(key));
         var rows = Rows(key, db);
