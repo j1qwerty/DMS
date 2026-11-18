@@ -828,6 +828,7 @@ if (-not $SkipDestructive) {
         $entryNames = @($zip.Entries | ForEach-Object { $_.FullName })
         Assert-True ($entryNames -contains 'manifest.json') 'the ZIP contains the immutable JSON manifest'
         Assert-True ($entryNames -contains 'metadata.csv') 'the ZIP contains the supporting metadata CSV'
+        Assert-True ($entryNames -contains 'handover-receipt.json') 'the ZIP contains the delivered receiver sign-off receipt'
         $pdfEntries = @($entryNames | Where-Object { $_ -like 'documents/*.pdf' })
         Assert-Equal 1 $pdfEntries.Count 'the ZIP contains the generated PDF deliverable'
         $manifestStream = $zip.GetEntry('manifest.json').Open()
@@ -1032,6 +1033,17 @@ $operatorCustodyWrite = Invoke-Api -Method POST -Path '/api/custody' -Token $ope
     direction = 'Intake'; department = 'Audit'; fileCount = 1
 }
 Assert-Equal 403 $operatorCustodyWrite.Status 'custody.manage is required to write a custody event'
+
+$employeeHandovers = Invoke-Api -Path '/api/digital-handovers' -Token $employeeToken
+Assert-Equal 200 $employeeHandovers.Status 'an employee with custody.view can read digital handover records'
+$employeePrepareHandover = Invoke-Api -Method POST -Path '/api/digital-handovers' -Token $employeeToken -Body @{
+    batchRef = 'DENIED-EMPLOYEE'; department = 'Audit'; fileIds = @(1)
+}
+Assert-Equal 403 $employeePrepareHandover.Status 'an employee cannot prepare a digital handover without custody.manage'
+$operatorPrepareHandover = Invoke-Api -Method POST -Path '/api/digital-handovers' -Token $operatorToken -Body @{
+    batchRef = 'DENIED-OPERATOR'; department = 'Audit'; fileIds = @(1)
+}
+Assert-Equal 403 $operatorPrepareHandover.Status 'an operator cannot prepare a digital handover without custody.manage'
 
 $empFiles = Invoke-Api -Path '/api/files' -Token $employeeToken
 Assert-Equal 200 $empFiles.Status 'an employee can still read the registry'
