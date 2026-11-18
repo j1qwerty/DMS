@@ -198,7 +198,13 @@ public sealed class FileScansService(
         var page = await db.ScanPages.AsNoTracking().FirstOrDefaultAsync(p => p.Id == scanId, ct);
         if (page?.StorageKey is null || page.ContentType is null || page.Sha256 is null) return null;
         var stream = await documentStore.OpenReadAsync(page.StorageKey, ct);
-        return stream is null ? null : new PrivateDocumentContent(page.FileName, page.ContentType, page.SizeBytes ?? 0, page.Sha256, stream);
+        if (stream is null) return null;
+
+        await audit.LogAsync(db, AuditAction.Access, "FileScanPage", page.Id.ToString(),
+            "not accessed", $"opened version {page.Version}",
+            $"Viewed scan {page.FileName} v{page.Version} for {page.Barcode}", ct);
+        await db.SaveChangesAsync(ct);
+        return new PrivateDocumentContent(page.FileName, page.ContentType, page.SizeBytes ?? 0, page.Sha256, stream);
     }
 
     private async Task TryDeleteAsync(string storageKey)
