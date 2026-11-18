@@ -3,7 +3,7 @@ using RecordRoom.Api.Application;
 using RecordRoom.Api.Application.Contracts;
 using RecordRoom.Api.Domain;
 using RecordRoom.Api.Infrastructure.Data;
-using RecordRoom.Api.Infrastructure.Realtime;
+using RecordRoom.Api.Infrastructure.Auth;
 
 namespace RecordRoom.Api.Application.Services;
 

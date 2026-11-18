@@ -982,9 +982,54 @@ Assert-Equal 403 $operatorCustodyWrite.Status 'custody.manage is required to wri
 $empFiles = Invoke-Api -Path '/api/files' -Token $employeeToken
 Assert-Equal 200 $empFiles.Status 'an employee can still read the registry'
 
+$adminMe = Invoke-Api -Path '/api/auth/me' -Token $admin
+Assert-True ($adminMe.Data.data.permissions -contains 'departments.manage') 'the admin is granted department management'
+
+$supervisorDepartmentWrite = Invoke-Api -Method POST -Path '/api/departments' -Token $supervisorToken -Body @{
+    code = 'NO-ACCESS'; name = 'No access department'; active = $true
+}
+Assert-Equal 403 $supervisorDepartmentWrite.Status 'only an account with departments.manage can create departments'
+
+$deptCode = "QA-$([guid]::NewGuid().ToString('N').Substring(0,8))".ToUpperInvariant()
+$deptName = "QA Department $deptCode"
+$departmentCreated = Invoke-Api -Method POST -Path '/api/departments' -Token $admin -Body @{
+    code = $deptCode; name = $deptName; active = $true
+}
+Assert-Equal 200 $departmentCreated.Status 'an admin can create a department master record'
+$departmentId = $departmentCreated.Data.data.id
+Assert-Equal $deptCode $departmentCreated.Data.data.code 'department code is normalised and stored'
+$departmentRenamed = Invoke-Api -Method PUT -Path "/api/departments/$departmentId" -Token $admin -Body @{
+    code = $deptCode; name = "$deptName Updated"; active = $false
+}
+Assert-Equal 200 $departmentRenamed.Status 'an admin can rename and deactivate a department'
+$activeDepartments = Invoke-Api -Path '/api/departments?includeInactive=false' -Token $admin
+Assert-Equal 0 @($activeDepartments.Data.data | Where-Object { $_.code -eq $deptCode }).Count 'inactive departments are omitted from active picklists'
+$allDepartments = Invoke-Api -Path '/api/departments?includeInactive=true' -Token $admin
+$inactiveDepartment = @($allDepartments.Data.data | Where-Object { $_.code -eq $deptCode })
+Assert-Equal 1 $inactiveDepartment.Count 'inactive departments remain available in the administration directory'
+Assert-Equal $false $inactiveDepartment[0].active 'department deactivation is persisted'
+
 $opMe = Invoke-Api -Path '/api/auth/me' -Token $operatorToken
 Assert-True ($opMe.Data.data.permissions -contains 'issue.issue') 'the operator is granted issue.issue'
 Assert-True (-not ($opMe.Data.data.permissions -contains 'users.edit')) 'the operator is not granted users.edit'
+
+# ============================================================ unlisted employee borrower
+Write-Step 'Unlisted employee borrower'
+
+$unlisted = Invoke-Api -Method POST -Path '/api/issues' -Token $admin -Body @{
+    borrowerType = 'Employee'; borrowerEmployeeCode = ''; borrowerName = 'Zila Unlisted Smoke Borrower'
+    department = 'Audit'; purpose = 'Smoke test unlisted employee'
+    fileIds = @($targets[0].id); dueAt = (Get-Date).AddDays(7).ToString('yyyy-MM-ddTHH:mm:ss'); remark = 'Not in employee directory'
+}
+Assert-Equal 200 $unlisted.Status 'an unlisted employee name can be saved without an employee master record'
+Assert-True ($unlisted.Data.data.borrowerEmployeeCode.StartsWith('UNLISTED-')) 'an unlisted borrower gets an explicit UNLISTED reference'
+Assert-Equal 'Zila Unlisted Smoke Borrower' $unlisted.Data.data.borrowerName 'the typed unlisted borrower name is retained'
+$unlistedEmployeeSearch = Invoke-Api -Path '/api/employees?search=Zila%20Unlisted%20Smoke%20Borrower' -Token $admin
+Assert-Equal 0 $unlistedEmployeeSearch.Data.data.total 'an unlisted borrower does not create an employee master record'
+$unlistedReturn = Invoke-Api -Method POST -Path "/api/issues/$($unlisted.Data.data.id)/return" -Token $admin -Body @{
+    fileIds = @($targets[0].id); condition = 'Good'
+}
+Assert-Equal 200 $unlistedReturn.Status 'the file issued to an unlisted borrower can be returned'
 
 # ============================================================ file scan versions
 Write-Step 'File scan versions (upload + admin delete)'
@@ -1113,6 +1158,31 @@ Assert-Equal 400 $earlyIntakeSign.Status 'an intake cannot be signed off before 
 $intakeSign = Invoke-Api -Method POST -Path "/api/custody/$custodyId/sign-off" -Token $admin -Body @{ }
 Assert-Equal 200 $intakeSign.Status 'a reconciled intake can be signed off'
 Assert-Equal 'Farida Begum' $intakeSign.Data.data.signedOffBy 'a blank sign-off defaults to the current user'
+
+$partialBatchReturn = Invoke-Api -Method POST -Path "/api/custody/$custodyId/return" -Token $admin -Body @{
+    fileCount = 2; signedOffBy = 'Department Officer'; remarks = 'First partial return.'
+}
+Assert-Equal 200 $partialBatchReturn.Status 'a partial return can be recorded against the original intake'
+Assert-Equal $custodyId $partialBatchReturn.Data.data.parentEventId 'the return is linked to its original intake'
+Assert-Equal 'Department Officer' $partialBatchReturn.Data.data.signedOffBy 'the return records the departmental sign-off identity'
+Assert-True ($null -ne $partialBatchReturn.Data.data.signedOffAt) 'the partial return records a sign-off timestamp'
+
+$tooManyBatchReturn = Invoke-Api -Method POST -Path "/api/custody/$custodyId/return" -Token $admin -Body @{
+    fileCount = 3; signedOffBy = 'Department Officer'
+}
+Assert-Equal 400 $tooManyBatchReturn.Status 'a return cannot exceed the outstanding intake count'
+
+$finalBatchReturn = Invoke-Api -Method POST -Path "/api/custody/$custodyId/return" -Token $admin -Body @{
+    fileCount = 2; signedOffBy = 'Department Officer'; remarks = 'Remaining files returned.'
+}
+Assert-Equal 200 $finalBatchReturn.Status 'the remaining files can be returned in a second transaction'
+
+$linkedIntakeList = Invoke-Api -Path '/api/custody?direction=Intake&search=DIG-SMOKE' -Token $admin
+$linkedIntake = @($linkedIntakeList.Data.data.items | Where-Object { $_.id -eq $custodyId })[0]
+Assert-Equal 4 $linkedIntake.returnedCount 'the intake shows the total files returned across linked events'
+Assert-Equal 0 $linkedIntake.remainingCount 'the intake shows no files remaining after the two partial returns'
+Assert-Equal 'Farida Begum' $linkedIntake.reconciledBy 'the intake records who counted the files'
+Assert-True ($null -ne $linkedIntake.reconciledAt) 'the intake records when it was counted'
 
 $reCount = Invoke-Api -Method POST -Path "/api/custody/$custodyId/reconcile" -Token $admin -Body @{
     reconciledCount = 5
