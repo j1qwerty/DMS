@@ -11,7 +11,6 @@ import { store } from '../store';
 import type { DashboardStats, TimelineEvent } from '../../types';
 import { issuesService } from './issues';
 
-const TOTAL_RECORDS_HISTORICAL = 2_478_450;
 
 export const dashboardService: DashboardApi = {
   async stats(): Promise<DashboardStats> {
@@ -26,25 +25,27 @@ export const dashboardService: DashboardApi = {
     const pages = state.scanPages;
     const approvedPages = pages.filter((page) => page.status === 'Approved').length;
 
-    // `Showing 1-6 of 2,478,450` honesty: the registry total is the legacy
-    // collection size, the loaded page is what the browser actually holds.
-    const registered = TOTAL_RECORDS_HISTORICAL;
-    const withShelf = registered - state.files.filter((file) => !file.shelfId).length;
+    // Local mode uses only the complete in-memory sample. It must never
+    // advertise a historical district volume that was not loaded here.
+    const registered = state.files.length;
+    const withShelf = state.files.filter((file) => !!file.shelfId).length;
 
     return {
       totalRecords: registered,
       mappedPercent: Number(((withShelf / registered) * 100).toFixed(1)),
       issuedNow: state.files.filter((file) => file.status === 'Issued').length,
       dueToday,
-      digitizationPercent: pages.length
-        ? Number(((approvedPages / pages.length) * 100).toFixed(1))
-        : 0,
+      // The sample's page rows are not the Department's agreed total page
+      // volume, so keep the production digitization percentage unavailable.
+      digitizationPercent: 0,
       overdueCount: overdue.length,
       roomCount: state.rooms.length,
       activeBorrowers: (await issuesService.borrowers()).length,
       pendingApprovals: store
         .getState()
         .scanPages.filter((page) => page.status === 'Pending review').length,
+      mappedBaselineConfigured: registered > 0,
+      digitizationBaselineConfigured: false,
     };
   },
 
