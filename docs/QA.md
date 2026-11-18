@@ -1,3 +1,5 @@
+> **Final proposal QA source:** use [`../ZILA_PANCHAYAT_CODEX.MD`](../ZILA_PANCHAYAT_CODEX.MD) for the required role, custody, scan, OCR, e-office, quality, PDF and digital-handover regression matrix. A green frontend check alone is not production acceptance.
+
 # QA checklist
 
 ## Frontend checks
