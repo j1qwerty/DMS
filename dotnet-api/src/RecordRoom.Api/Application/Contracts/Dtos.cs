@@ -369,51 +369,6 @@ public sealed record CustodyRecordInput(
 public sealed record CustodyReconcileInput(int ReconciledCount, string Remarks = "");
 public sealed record CustodySignOffInput(string SignedOffBy = "");
 
-// Digital deliverables handover ----------------------------------------------
-
-public sealed record DigitalHandoverPrepareInput(
-    string BatchRef,
-    string Department,
-    int[] FileIds,
-    string Notes = "");
-
-public sealed record DigitalHandoverSignOffInput(
-    string Decision,
-    string SignedOffBy,
-    string Notes = "");
-
-public sealed record DigitalHandoverItemDto(
-    long Id,
-    int FileId,
-    long DocumentId,
-    string FileNumber,
-    string Department,
-    string FileName,
-    int Version,
-    string ContentType,
-    long SizeBytes,
-    int? PageCount,
-    string Sha256);
-
-public sealed record DigitalHandoverBatchDto(
-    long Id,
-    string BatchRef,
-    string Department,
-    string Notes,
-    string Status,
-    string ManifestSha256,
-    int ItemCount,
-    string PreparedBy,
-    DateTime PreparedAt,
-    string? DeliveredBy,
-    DateTime? DeliveredAt,
-    string? SignedOffBy,
-    DateTime? SignedOffAt,
-    string DecisionNotes,
-    DigitalHandoverItemDto[] Items);
-
-public sealed record DigitalHandoverPackage(Stream Content, string FileName, string Sha256);
-
 // Uploads ---------------------------------------------------------------------
 
 public sealed record MapUploadDto(
