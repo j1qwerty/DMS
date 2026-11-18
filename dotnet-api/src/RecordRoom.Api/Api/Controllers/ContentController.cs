@@ -77,7 +77,7 @@ public class ScansController(IFileScansService scans) : ControllerBase
     }
 
     /// <summary>Stores a completed/failed OCR result from an approved extraction worker or verified import.</summary>
-    [RequirePermission("digitization.upload")]
+    [RequirePermission("digitization.review")]
     [HttpPut("{scanId:long}/ocr")]
     public async Task<IResult> UpdateOcr(long scanId, ScanOcrInput input, CancellationToken ct) =>
         ApiResults.FromResult(await scans.UpdateOcrAsync(scanId, input, ct));
