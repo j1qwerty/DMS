@@ -829,6 +829,27 @@ Assert-Equal 403 $empUsers.Status 'an employee cannot manage logins'
 $empAudit = Invoke-Api -Path '/api/audit' -Token $employeeToken
 Assert-Equal 403 $empAudit.Status 'an employee cannot read the audit trail'
 
+$empEmployees = Invoke-Api -Path '/api/employees' -Token $employeeToken
+Assert-Equal 403 $empEmployees.Status 'an employee cannot read the employee directory without employees.view'
+
+$opEmployees = Invoke-Api -Path '/api/employees' -Token $operatorToken
+Assert-Equal 200 $opEmployees.Status 'an operator with employees.view can read the employee directory'
+
+$empIssue = Invoke-Api -Method POST -Path '/api/issues' -Token $employeeToken -Body @{}
+Assert-Equal 403 $empIssue.Status 'an employee cannot bypass issue.issue with a direct API call'
+
+$supervisorUsers = Invoke-Api -Path '/api/users' -Token $supervisorToken
+Assert-Equal 200 $supervisorUsers.Status 'a supervisor with users.view can read the user directory'
+$supervisorCreateUser = Invoke-Api -Method POST -Path '/api/users' -Token $supervisorToken -Body @{}
+Assert-Equal 403 $supervisorCreateUser.Status 'a supervisor without users.edit cannot create users'
+
+$operatorCustody = Invoke-Api -Path '/api/custody' -Token $operatorToken
+Assert-Equal 200 $operatorCustody.Status 'an operator with custody.view can read custody events'
+$operatorCustodyWrite = Invoke-Api -Method POST -Path '/api/custody' -Token $operatorToken -Body @{
+    direction = 'Intake'; department = 'Audit'; fileCount = 1
+}
+Assert-Equal 403 $operatorCustodyWrite.Status 'custody.manage is required to write a custody event'
+
 $empFiles = Invoke-Api -Path '/api/files' -Token $employeeToken
 Assert-Equal 200 $empFiles.Status 'an employee can still read the registry'
 
