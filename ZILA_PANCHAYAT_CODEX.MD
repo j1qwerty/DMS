@@ -9,7 +9,7 @@
 **Isolation rule:** all work is committed directly to `zila_codex`; no later `v2` changes are merged, cherry-picked or rebased into this branch. Draft PR #1 targeting `zila_codex` from `v2` was closed without merge.  
 **Tracking rule:** every subsequent implementation PR/commit must update the status, evidence, tests and open acceptance criteria in this file.
 
-> **Current overall status: PARTIAL — not yet proposal-complete.** The core DMS register, four-role authentication, issue/return, in-app document storage, digitisation review and physical custody register exist. This branch now also contains a separate digital handover workflow: immutable final-PDF manifest, SHA-256 checks, supporting metadata CSV, signed-off receipt, ZIP package and receiver accept/reject record. It remains **TEST ADDED / NOT RUN** pending a live SQL Server run and Department-approved output/acceptance format. E-office transfer, OCR extraction/search, technical image-quality gates, full Scan Studio and PDF/A certification remain open. Do not describe the product as proposal-complete until all acceptance conditions pass.
+> **Current overall status: PARTIAL — not yet proposal-complete.** The core DMS register, four-role authentication, issue/return, in-app document storage, digitisation review and physical custody register exist. The final software handover to the Department is a project delivery and acceptance activity, not an application feature. A department-ready handover pack, production deployment verification, backup/restore evidence, user/admin documentation, training, UAT sign-off and support transition are still to be completed. E-office transfer, OCR extraction/search, technical image-quality gates, full Scan Studio and PDF/A certification remain open. Do not describe the product as proposal-complete until all acceptance conditions pass.
 
 ## 1. Status definitions
 
@@ -45,7 +45,7 @@ A route, button, database field, or mock adapter alone is not evidence that an e
 |---|---|---|---|---|
 | 1.1.1 | Web login for authorized users | ASP.NET authentication and React session flow. Four role names exist: Admin, Supervisor, Operator and Employee. | DONE | Run the full role login and access test matrix on SQL Server. Verify inactive account, failed password and logout behavior. |
 | 1.1.2 | Capability matrix for each role | The API enforces a server-owned Admin/Supervisor/Operator/Employee capability matrix with `RequirePermission` policies; the frontend mirrors the same permission names for UX. File, issue/return, locations, digitisation, reports, custody, document and audit operations are gated server-side. | DONE / TEST ADDED | Run the complete live HTTP role/action matrix against SQL Server and inspect every endpoint for bypasses. The final proposal does not require an Admin-editable permission editor; DB-editable grants remain an optional enhancement, not a delivery blocker. |
-| 1.1.3 | Audit stamps | Write services use `IAuditWriter`; entries contain actor, role, timestamp, IP, before/after values and summary. File/scan/map content opens and digital handover prepare/deliver/sign-off/package-export are audit-written. | PARTIAL / TEST ADDED | Verify all remaining document read/download/export, upload, deletion, metadata and permission events. Run the handover export-audit assertion and verify ordinary users cannot alter/delete audit rows. |
+| 1.1.3 | Audit stamps | Write services use `IAuditWriter`; entries contain actor, role, timestamp, IP, before/after values and summary. File/scan/map content opens are audit-written. | PARTIAL / TEST ADDED | Verify all remaining document read/download/export, upload, deletion, metadata and permission events. Run the handover export-audit assertion and verify ordinary users cannot alter/delete audit rows. |
 | 1.1.4 | Login history | Success/failure/sign-out history, login channel, IP/client and Admin/Supervisor audit view exist. | DONE | Re-run positive, negative, deactivated-user, OTP/PIN and sign-out tests. Confirm user-facing privacy policy for stored IP/client data. |
 | 1.1.5 | Account controls | Admin user create/update/deactivate/delete and role assignment exist. | DONE | Verify password reset, account lock/deactivation, last-admin safety and all four role cases. |
 | 1.1.6 | Dashboard — registry size | `Scope:ExpectedFileCount` is the department-approved registry baseline; when it is unset, the registry/dashboard report the actual loaded database count. | PARTIAL | Department must reconcile and configure the final inventory. No hard-coded historical collection total is used. |
@@ -73,8 +73,8 @@ A route, button, database field, or mock adapter alone is not evidence that an e
 | 1.2.6 | Quality verification, correction or rescanning | Scan review queue supports Pending/Approved/Rejected, rejection reason, rescan versioning and file-level review-all. | PARTIAL | Add measurable image-quality gates (minimum DPI, blur/contrast/blank-page/rotation/deskew/crop checks), per-page issue flags and rescanning workflow. Supervisor review must not replace technical acceptance checks. |
 | 1.2.7 | Metadata creation/indexing (file number, date, subject, department) | Registry stores file number, subject, department and year; related fields can be searched. No explicit document date field or department-approved configurable schema was confirmed. | PARTIAL | Agree metadata dictionary with Department, add document/date fields where required, validation, mandatory-field rules, bulk reconciliation and full-text index integration. |
 | 1.2.8 | Upload to e-office; retain reference copy in app | App-side copy/versioning and e-office reference text field exist; external transfer does not. | PARTIAL / BLOCKED | Implement only after written interface specification and credentials/test access. Keep transfer state and e-office receipt/reference tied to immutable app copy/hash. |
-| 1.2.9 | Digital deliverables and supporting data handover in approved format | `DigitalHandoverService` creates an immutable batch manifest from selected files' latest generated `FinalPdf` versions; stores file/document IDs, version, page count, content type, byte size and SHA-256; prepares a ZIP containing `manifest.json`, `metadata.csv`, `handover-receipt.json` and the PDFs; revalidates source content hashes and logs package export. | PARTIAL / TEST ADDED | Run the live SQL Server smoke path. Confirm the Department's approved archive/package structure, naming, metadata fields, checksum rules and exception report. The current ZIP is a baseline package profile, not yet Department-approved. |
-| 1.2.10 | Department sign-off on digital handover | Separate digital workflow now moves `Prepared → Delivered → Accepted/Rejected`; a named receiving representative and timestamp are stored; rejection requires a reason; duplicate delivery/sign-off is refused; the ZIP includes a receipt snapshot. | PARTIAL / TEST ADDED | Run live API tests and confirm the approved Department signer identity, acceptance wording, evidence retention and whether a formal digital/e-signature is required. Current UI captures the receiver's name; it is not a cryptographic signature. |
+| 1.2.9 | Complete application, source code and technical documentation handover to the Department | The repository contains the React frontend, .NET API, SQL Server EF migrations, deployment scripts and engineering documentation. A dedicated Department handover checklist/runbook is being prepared. | PENDING | Freeze a tested release tag; provide source code and build/publish artefacts; transfer repository ownership/access; hand over database schema/migrations, environment/configuration inventory, architecture/data dictionary, deployment and rollback runbook, security/access matrix, backup/restore evidence, known-issues register and third-party licence inventory. Never put secrets in Git; transfer them through an approved secure channel. |
+| 1.2.10 | Department acceptance, training and operational takeover | No verified Department UAT certificate, training completion record, production operations transfer or support acceptance is present in the repository evidence reviewed. | PENDING | Deploy to Department-approved infrastructure; complete role-based UAT and defect closure; reconcile migrated registry counts; demonstrate monitoring and backup/restore; train Admin/Supervisor/Operator/Employee users and IT support; hand over runbooks and escalation contacts; obtain signed UAT, production go-live and operational takeover certificates. Agree warranty/support period and SLA before sign-off. |
 
 ### Scanning and archival acceptance checks
 
@@ -100,7 +100,7 @@ These are external prerequisites, not capabilities the application can independe
 | 1.3.6 | Provide resources for metadata finalization, classification and verification | EXTERNAL | Named reviewers, expected daily review rate, escalation path and approval SLA. |
 | 1.3.7 | Review digitized batches and communicate corrections in agreed period | EXTERNAL / PARTIAL | Agree SLA and expose batch review/return-for-correction workflow in application. |
 | 1.3.8 | Provide interface specs/access/approvals for existing departmental system integration | BLOCKED | e-office/DMS API/interface documentation, credentials, network/firewall approvals, test tenant and security approvals. |
-| 1.3.9 | Approve pilot, quality, reports and final handover arrangements | BLOCKED | Signed pilot acceptance, DPI/quality thresholds, sample PDF, reports, delivery format and sign-off form. |
+| 1.3.9 | Approve pilot, quality, reports and final application handover arrangements | BLOCKED | Signed pilot/UAT acceptance, DPI/quality thresholds, sample PDF, reports, Department infrastructure, backup/restore responsibility, training schedule, support SLA and application handover/sign-off form. |
 
 ## 6. Final proposal 1.4 — assumptions and scope finalization gate
 
@@ -118,7 +118,7 @@ These are external prerequisites, not capabilities the application can independe
 | Quality acceptance procedure | PENDING | Signed DPI/legibility/crop/alignment/rotation/blank-page/approval thresholds and sample acceptance. |
 | Infrastructure responsibilities | PENDING | Server, database, storage, backup, network, scanning workstation and security responsibility matrix. |
 | e-office integration | BLOCKED | API/interface specification, access, credentials, test environment and approval. |
-| Data handover | PENDING | Approved package structure, metadata format, checksum requirement, media and sign-off form. |
+| Application/source handover | PENDING | Release/tag, source and build artefacts, SQL schema/migrations, configuration inventory, technical/user/admin documentation, backup/restore evidence, licence inventory, secure credential transfer and signed acceptance checklist. |
 | Special-handling records | PENDING | Pre-processing list for fragile, bound, oversized, damaged, confidential or restricted records. |
 | Out-of-scope records | PENDING | Assessment and change-control process for exceptional records. |
 
@@ -157,7 +157,7 @@ Implementation rules:
 | PDF generation | PARTIAL / TEST ADDED | API composition for approved page-side scans creates a versioned private final-PDF derivative with page count, SHA-256 and source manifest. The frontend offers the action to reviewers on API mode. Live image/PDF rendering acceptance remains pending. |
 | Image quality | PENDING | DPI, skew, contrast, blur, blank-page, crop and orientation checks. |
 | e-office | BLOCKED | Integration only after approved interface details. |
-| Digital handover | PARTIAL / TEST ADDED | Separate API/UI workflow, immutable manifest, metadata CSV, receipt JSON, ZIP/PDFs, source and package checksum checks, delivery state and receiver accept/reject sign-off. Live SQL Server tests and Department format approval remain. |
+| Application handover | PENDING | Department release package, production deployment, source repository ownership/access, database and backup/restore, configuration/secrets transfer, documentation, training, UAT/go-live acceptance and operational support transition. This is a project delivery activity, not an app feature. |
 | Deployment | PARTIAL | Validate environment defaults, SQL Server connection, persistent documents directory, TLS, backup and restore on target server. |
 
 ## 9. Test plan and missing-feature regression matrix
@@ -166,8 +166,6 @@ Implementation rules:
 
 | Test | Location | Status |
 |---|---|---|
-| Digital handover role gates, immutable manifest, delivery/sign-off state machine, ZIP members and hashes, receipt, and Export audit | `DigitalHandoverService.cs`, `DigitalHandoverController.cs`, `scripts/test-api.ps1`, `tests/digital-handover.test.ts` | TEST ADDED / NOT RUN |
-| Frontend digital handover mapping and local demo safety (no fabricated receipts) | `record-room-frontend/tests/digital-handover.test.ts` | TEST ADDED / NOT RUN |
 | SQL Server migration installs metadata Full-Text index when the Full-Text component exists; fallback remains available otherwise | `20261118000400_AddFilesFullTextIndex.cs`, `FilesService.cs` | MIGRATION ADDED / CI RUN REQUIRED |
 | A metadata-only scan cannot be approved; bulk approval fails atomically when any pending page lacks an uploaded document | `FileScansService.cs`, `scripts/test-api.ps1` | TEST ADDED / NOT RUN |
 | API config returns optional feature flags | `dotnet-api/tests/RecordRoom.Api.Tests/FeatureSwitchTests.cs`, `scripts/test-api.ps1` | TEST ADDED / NOT RUN |
@@ -186,7 +184,7 @@ Implementation rules:
 | Frontend optional features default off, can be independently enabled, and API config overrides build values | `record-room-frontend/tests/features-and-rooms.test.ts` | TEST ADDED / NOT RUN |
 | Frontend four-role capability matrix covers Admin/Supervisor/Operator/Employee grants and denials | `record-room-frontend/tests/permissions.test.ts` | TEST ADDED / NOT RUN |
 | Server permission filter returns 401/403 and enforces the role grants including custody and document deletion | `dotnet-api/tests/RecordRoom.Api.Tests/FeatureSwitchTests.cs` | TEST ADDED / NOT RUN |
-| Live HTTP harness checks supervisor users.view/users.edit, employee issue denial, operator custody view/manage, digital handover view/manage and direct API role boundaries | `dotnet-api/scripts/test-api.ps1` | TEST ADDED / NOT RUN |
+| Live HTTP harness checks supervisor users.view/users.edit, employee issue denial, operator custody view/manage and direct API role boundaries | `dotnet-api/scripts/test-api.ps1` | TEST ADDED / NOT RUN |
 
 ### 9.2 Required tests still missing
 
@@ -200,7 +198,7 @@ Implementation rules:
 | Quality | Low DPI, blur, blank page, poor contrast, skew, wrong orientation, crop loss; failed page cannot be marked quality-approved without override and reason. |
 | OCR | Representative Hindi/English, degraded scans, confidence, text persistence, page offsets, search hit links to exact source page, no cross-user leakage. |
 | Custody | Intake manifest vs counted quantity, mismatch, recount, damaged/missing exception, outbound return, signed-off immutability, unauthorized write. |
-| Digital handover | Confirm the 256 MiB package limit is suitable, add retry/re-delivery policy if required, run manifest/source/package hash and ZIP receipt tests on SQL Server, test unauthorized download/sign-off, and obtain Department-approved package format and sign-off wording. |
+| Application handover | Freeze a verified release; stage production; reconcile data; complete UAT/security/performance acceptance; prove backup/restore; transfer source, build artefacts, configuration and runbooks securely; train users/IT; sign production and operational takeover; agree warranty and support SLA. |
 | Dashboard | Reconcile approved file-count/page-count baselines, placed count, issued files, due file-lines, overdue files and approved PDF page volume against source registers; verify unset-baseline UI messaging. |
 | Deployment/storage | SQL migration on clean DB, upgrade from existing v2 DB, private file persistence across deploy, backup/restore, large upload and API restart. |
 
@@ -244,7 +242,7 @@ pnpm vitest run tests/api-contract.test.ts
 | P0 | Core workflow audit | Four roles, metadata, issue/return, uploads, scan review, custody, dashboard | Live API and frontend checks green; role/action matrix agreed. |
 | P0 | Server capability permissions | Static four-role matrix is enforced by `RequirePermission` across the reviewed controllers; direct-call HTTP tests cover representative allowed/denied actions. | Full role/action matrix passes against live SQL Server; editable DB-driven management is optional unless the Department explicitly requires it. |
 | P1 | Custody manifest and scanning evidence | Front/back page-side identity is implemented; add item-level receipt manifest, scanner DPI/color/orientation and physical exceptions. | Page manifest reconciles with intake file count and page-side counts. |
-| P1 | Digital handover | API/UI workflow is implemented; verify ZIP manifest/receipt/CSV/PDF contents and hashes on SQL Server, then align package profile and receiver sign-off policy with Department | Signed end-to-end acceptance on a Department-approved sample batch. |
+| P1 | Department application handover | Prepare the final software release, source/build/database/configuration package, deployment and rollback runbook, backup/restore evidence, security/admin guide, user guides, training, UAT defect closure and support transition. | Department-signed UAT, production go-live and operational takeover; source and access transfer recorded. |
 | P1 | e-office integration | External transfer, acknowledgement and retries | Interface access/approval supplied; successful and failure-path integration tests. |
 | P1 | Complete metadata search acceptance | Confirm metadata dictionary/date fields, SQL FTS active on target SQL Server, relevance and 25-lakh-row performance | Search acceptance on agreed dataset and query performance. |
 | P2 | OCR POC and production pipeline | On-prem OCR, representative sample, searchable text | Department-approved POC and OCR accuracy threshold. |
@@ -267,7 +265,7 @@ Do not guess these values or silently choose vendors/standards.
 - [ ] Pilot sample batch and formal pilot approval.
 - [ ] e-office interface specification, credentials, network path, test environment and integration approval.
 - [ ] Required final PDF and archival/PDF-A level.
-- [ ] Approved metadata and handover package format.
+- [ ] Approved application handover checklist, production environment, backup/restore responsibility, training plan, support SLA and sign-off format.
 - [ ] Department review period and correction/acceptance process.
 - [ ] Special-handling list and out-of-scope change-control process.
 - [ ] Server, storage, backup, network, workspace and scanning infrastructure responsibility matrix.
@@ -279,4 +277,4 @@ Do not guess these values or silently choose vendors/standards.
 3. No unrelated new feature work. Implement only the final proposal, its necessary operational controls, and tests.
 4. Every requirement change must update this tracker, tests and API/web documentation in the same PR.
 5. Keep physical service-provider activities separate from app functionality, while capturing digital evidence when the Department requires it.
-6. Never mark e-office, OCR, PDF generation, quality gates, FTS or digital handover complete until their explicit acceptance conditions pass.
+6. Never mark e-office, OCR, PDF generation, quality gates, FTS or Department application handover complete until their explicit acceptance conditions pass.
