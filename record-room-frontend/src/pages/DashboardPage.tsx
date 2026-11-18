@@ -124,7 +124,7 @@ export function DashboardPage() {
       key: 'due',
       icon: Clock,
       tone: 'text-[var(--rr-warning)]',
-      text: `${stats.dueToday} ${stats.dueToday === 1 ? 'receipt' : 'receipts'} due today or earlier`,
+      text: `${stats.dueToday} ${stats.dueToday === 1 ? 'file' : 'files'} due today or earlier`,
       to: '/return',
     });
   if (stats.pendingApprovals > 0 && allowed('digitization.review'))
@@ -157,7 +157,7 @@ export function DashboardPage() {
         }
       />
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <Stat
           icon={Files}
           label="Files in registry"
@@ -180,10 +180,17 @@ export function DashboardPage() {
           to="/rooms"
         />
         <Stat
+          icon={Clock}
+          label="Files due"
+          value={formatNumber(stats.dueToday)}
+          note="Unreturned files due today or earlier"
+          to="/return"
+        />
+        <Stat
           icon={Archive}
-          label="Scans approved"
+          label="Digitization progress"
           value={`${stats.digitizationPercent}%`}
-          note={`${stats.pendingApprovals} waiting for review`}
+          note="Approved pages against the agreed page volume"
           to="/digitization"
         />
       </div>
