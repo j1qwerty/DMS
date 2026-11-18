@@ -1,3 +1,5 @@
+> **Final scope authority:** UI inventory does not imply acceptance. Optional retained modules must be hidden by default; the final visible workflow and missing acceptance criteria are tracked in [`../ZILA_PANCHAYAT_CODEX.MD`](../ZILA_PANCHAYAT_CODEX.MD).
+
 # Frontend implementation specification
 
 ## Data access rule
