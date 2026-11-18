@@ -463,6 +463,11 @@ namespace RecordRoom.Api.Migrations
                     b.Property<int>("PageNo")
                         .HasColumnType("int");
 
+                    b.Property<string>("Side")
+                        .IsRequired()
+                        .HasMaxLength(8)
+                        .HasColumnType("nvarchar(8)");
+
                     b.Property<string>("Sha256")
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
@@ -491,7 +496,7 @@ namespace RecordRoom.Api.Migrations
 
                     b.HasIndex("Status");
 
-                    b.HasIndex("Barcode", "PageNo", "Version")
+                    b.HasIndex("Barcode", "PageNo", "Side", "Version")
                         .IsUnique();
 
                     b.ToTable("FileScanPages", (string)null);
