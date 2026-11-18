@@ -270,11 +270,11 @@ public sealed class DigitalHandoverService(
         var output = new MemoryStream();
         try
         {
-            using (var archive = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: true, Encoding.UTF8))
+            using (var archive = new ZipArchive(output, ZipArchiveMode.Create, true, Encoding.UTF8))
             {
                 var manifest = archive.CreateEntry("manifest.json", CompressionLevel.Optimal);
                 await using (var stream = manifest.Open())
-                await using (var writer = new StreamWriter(stream, new UTF8Encoding(false), leaveOpen: true))
+                await using (var writer = new StreamWriter(stream, new UTF8Encoding(false), 1024, true))
                     await writer.WriteAsync(batch.ManifestJson);
 
                 var csv = new StringBuilder();
@@ -363,9 +363,8 @@ public sealed class DigitalHandoverService(
 
     private static string Csv(string value)
     {
-        var safe = value.Replace("", " ").Replace("
-", " ");
-        return $"\"{safe.Replace("\"", "\"\"")}\"";
+        var safe = value.Replace("\r", " ").Replace("\n", " ");
+        return $"\\\"{safe.Replace("\\\"", "\\\"\\\"")}\\\"";
     }
 
     private static string SafePart(string value)
