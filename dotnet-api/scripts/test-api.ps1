@@ -883,7 +883,9 @@ Assert-Equal 200 $dashboardDue.Status 'a due-file metric test receipt is created
 
 $stats = Invoke-Api -Path '/api/dashboard/stats' -Token $admin
 Assert-Equal 200 $stats.Status 'GET /api/dashboard/stats responds'
-Assert-Equal 2478450 $stats.Data.data.totalRecords 'the dashboard reports the registry size'
+Assert-Equal 100 $stats.Data.data.totalRecords 'the dashboard uses the configured department-approved registry volume'
+Assert-True $stats.Data.data.mappedBaselineConfigured 'the dashboard reports whether the file-volume baseline is configured'
+Assert-True $stats.Data.data.digitizationBaselineConfigured 'the dashboard reports whether the page-volume baseline is configured'
 Assert-True ($stats.Data.data.mappedPercent -ge 0 -and $stats.Data.data.mappedPercent -le 100) 'mapped percent is a real percentage'
 Assert-True ($stats.Data.data.dueToday -ge 2) 'two outstanding files on one receipt count as two due files'
 Assert-True ($stats.Data.data.digitizationPercent -ge 0 -and $stats.Data.data.digitizationPercent -le 100) 'digitization percent uses a bounded agreed-volume metric'
