@@ -160,12 +160,12 @@ public sealed class FilesService(
             var scanOcrFullTextReady = fullTextCondition is not null
                 && await IsScanOcrFullTextIndexReadyAsync(ct);
 
-            IQueryable<string> ocrBarcodes = db.ScanPages.AsNoTracking()
+            var completedOcrPages = db.ScanPages.AsNoTracking()
                 .Where(page => page.OcrStatus == "Completed" && page.OcrText != null);
-            ocrBarcodes = scanOcrFullTextReady
-                ? ocrBarcodes.Where(page => EF.Functions.Contains(page.OcrText!, fullTextCondition!))
+            IQueryable<string> ocrBarcodes = scanOcrFullTextReady
+                ? completedOcrPages.Where(page => EF.Functions.Contains(page.OcrText!, fullTextCondition!))
                     .Select(page => page.Barcode)
-                : ocrBarcodes.Where(page => page.OcrText!.Contains(needle))
+                : completedOcrPages.Where(page => page.OcrText!.Contains(needle))
                     .Select(page => page.Barcode);
 
             if (fullTextReady)
