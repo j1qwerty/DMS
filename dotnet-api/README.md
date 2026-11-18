@@ -192,8 +192,7 @@ file deliberately rather than relying on a routine deploy.
 The `AddFilesFullTextIndex` migration installs a SQL Server Full-Text catalog
 and index over metadata fields when the SQL Server instance has the Full-Text
 component installed. On instances without it, search safely falls back to the
-existing metadata query. OCR extraction/text indexing remains a separately
-blocked POC; metadata FTS is not evidence that OCR has been implemented.
+existing metadata query. The per-page OCR-text index is created separately when SQL Server Full-Text Search is available; otherwise completed OCR text is searched through the fallback predicate. OCR recognition remains a separately blocked POC: the API stores and searches supplied text but does not extract text from PDF/image pixels.
 
 When barcode is **off**:
 
