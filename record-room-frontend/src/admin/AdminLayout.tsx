@@ -17,7 +17,9 @@ export function AdminLayout() {
   const { user } = useSession();
   const features = useFeatures();
   const { pathname } = useLocation();
-  const visible = adminNav.filter((item) => (item.to !== '/admin/bulk-import' || features.bulkImport) && can(user?.role, item.permission));
+  const visible = adminNav.filter(
+    (item) => (item.to !== '/admin/bulk-import' || features.bulkImport) && can(user?.role, item.permission),
+  );
 
   // /admin on its own lands on the first section this role may open.
   if (pathname === '/admin' && visible[0]) return <Navigate to={visible[0].to} replace />;
