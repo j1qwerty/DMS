@@ -61,6 +61,7 @@ export function FileDetailPage() {
   const [pageNoDraft, setPageNoDraft] = useState('1');
   const [sideDraft, setSideDraft] = useState<'Front' | 'Back'>('Front');
   const [sizeDraft, setSizeDraft] = useState('');
+  const [generatingFinalPdf, setGeneratingFinalPdf] = useState(false);
 
   // One file id drives every read on this page. `rooms` comes back whole because
   // the location breadcrumb, the shelf picker and the shelf diagram all derive
@@ -195,6 +196,21 @@ export function FileDetailPage() {
       reloadFile();
     } finally {
       setSavingEOffice(false);
+    }
+  };
+
+  const generateFinalPdf = async () => {
+    setGeneratingFinalPdf(true);
+    try {
+      const result = await service.files.generateFinalPdf(file.id);
+      if (!result.ok) {
+        danger(result.error);
+        return;
+      }
+      success(`Generated ${result.value.filename} from approved scan pages.`);
+      reloadDocuments();
+    } finally {
+      setGeneratingFinalPdf(false);
     }
   };
 
@@ -343,9 +359,20 @@ export function FileDetailPage() {
               </Badge>
             </div>
             <p className="muted mt-2 text-xs leading-5">
-              Add a full-PDF scan for the record, or page-by-page scans with a page number and sheet
-              size. Rescans become new versions; page scans await review in the Digitization queue.
+              Upload source PDFs or scan individual page sides. After the pages have been approved,
+              an authorised reviewer can compose a separate final PDF; original uploads are retained.
             </p>
+            {dataSource === 'api' && allowed('digitization.review') && (
+              <div className="mt-3 flex justify-end">
+                <Button
+                  variant="secondary"
+                  onClick={() => void generateFinalPdf()}
+                  disabled={generatingFinalPdf || scans.length === 0}
+                >
+                  {generatingFinalPdf ? 'Composing PDF…' : 'Generate final PDF from approved scans'}
+                </Button>
+              </div>
+            )}
             {allowed('digitization.upload') && (
               <div className="mt-4 rounded-xl border border-base p-4">
                 <div className="flex flex-wrap items-center gap-2">
@@ -457,7 +484,12 @@ export function FileDetailPage() {
                     <div key={document.id} className="rounded-xl border border-base p-3">
                       <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
                         <div className="min-w-0">
-                          <p className="break-all text-xs font-semibold">{document.filename}</p>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="break-all text-xs font-semibold">{document.filename}</p>
+                            <Badge tone={document.documentKind === 'FinalPdf' ? 'success' : 'neutral'}>
+                              {document.documentKind === 'FinalPdf' ? 'Generated final PDF' : 'Source attachment'}
+                            </Badge>
+                          </div>
                           <p className="muted mt-1 text-[11px]">
                             Version {document.version} ·{' '}
                             {new Date(document.uploadedAt).toLocaleString()} · {document.uploadedBy}
@@ -472,7 +504,11 @@ export function FileDetailPage() {
                         contentType={document.contentType}
                         sizeBytes={document.sizeBytes}
                         pageCount={document.pageCount}
-                        canUpload={index === 0 && allowed('files.edit')}
+                        canUpload={
+                          index === 0 &&
+                          document.documentKind !== 'FinalPdf' &&
+                          allowed('files.edit')
+                        }
                         onUpload={(upload) => service.files.uploadDocument(file.id, upload)}
                         getBlob={() => service.files.documentBlob(file.id, document.id)}
                         onUploaded={() => reloadDocuments()}
