@@ -21,9 +21,8 @@
 - [ ] Return flow confirms destination.
 - [ ] Barcode page previews label concept when the optional barcode feature is deliberately enabled; by default, the non-scope module is hidden.
 - [ ] Digitization batch detail opens.
-- [ ] In API mode, prepare a digital handover from generated Final PDFs, mark it delivered, download the ZIP and verify manifest/checksums.
-- [ ] Record Department accept/reject with receiver name and confirm the state is immutable after sign-off.
 - [ ] Reports open.
+- [ ] Complete `DEPARTMENT-APPLICATION-HANDOVER.md`: clean build, deployment, database migrations, backup/restore, security, UAT, training and signed operational takeover.
 - [ ] Administration routes open.
 - [ ] Media page rejects a broken image URL and accepts a loaded image.
 - [ ] Support inquiry stays hidden under the approved scope profile; verify it remains available only when the optional support feature is explicitly enabled.
