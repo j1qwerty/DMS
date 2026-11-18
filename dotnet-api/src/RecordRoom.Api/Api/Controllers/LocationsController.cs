@@ -34,12 +34,12 @@ public class LocationsController(ILocationsService locations) : ControllerBase
     public async Task<IResult> AddRoom(RoomInput input, CancellationToken ct) =>
         ApiResults.FromResult(await locations.AddRoomAsync(input, ct));
 
-    [Authorize(Roles = "Admin,Supervisor")]
+    [RequirePermission("locations.edit")]
     [HttpPut("rooms/{id:int}")]
     public async Task<IResult> UpdateRoom(int id, RoomInput input, CancellationToken ct) =>
         ApiResults.FromResult(await locations.UpdateRoomAsync(id, input, ct));
 
-    [Authorize(Roles = "Admin,Supervisor")]
+    [RequirePermission("locations.edit")]
     [HttpDelete("rooms/{id:int}")]
     public async Task<IResult> DeleteRoom(int id, CancellationToken ct) =>
         ApiResults.FromResult(await locations.DeleteRoomAsync(id, ct));
@@ -52,52 +52,52 @@ public class LocationsController(ILocationsService locations) : ControllerBase
     public async Task<IResult> Revisions(int roomId, CancellationToken ct) =>
         Results.Ok(ApiResponse<LayoutRevisionDto[]>.Ok(await locations.LayoutRevisionsAsync(roomId, ct)));
 
-    [Authorize(Roles = "Admin,Supervisor")]
+    [RequirePermission("locations.edit")]
     [HttpPost("rooms/{roomId:int}/layout")]
     public async Task<IResult> SaveLayout(int roomId, LayoutSaveInput input, CancellationToken ct) =>
         ApiResults.FromResult(await locations.SaveLayoutAsync(roomId, input, ct));
 
-    [Authorize(Roles = "Admin,Supervisor")]
+    [RequirePermission("locations.edit")]
     [HttpPost("rooms/{roomId:int}/sections")]
     public async Task<IResult> AddSection(int roomId, SectionInput input, CancellationToken ct) =>
         ApiResults.FromResult(await locations.AddSectionAsync(roomId, input, ct));
 
-    [Authorize(Roles = "Admin,Supervisor")]
+    [RequirePermission("locations.edit")]
     [HttpPut("sections/{id:int}")]
     public async Task<IResult> UpdateSection(int id, SectionInput input, CancellationToken ct) =>
         ApiResults.FromResult(await locations.UpdateSectionAsync(id, input, ct));
 
-    [Authorize(Roles = "Admin,Supervisor")]
+    [RequirePermission("locations.edit")]
     [HttpDelete("sections/{id:int}")]
     public async Task<IResult> DeleteSection(int id, CancellationToken ct) =>
         ApiResults.FromResult(await locations.DeleteSectionAsync(id, ct));
 
-    [Authorize(Roles = "Admin,Supervisor")]
+    [RequirePermission("locations.edit")]
     [HttpPost("sections/{sectionId:int}/almirahs")]
     public async Task<IResult> AddAlmirah(int sectionId, AlmirahInput input, CancellationToken ct) =>
         ApiResults.FromResult(await locations.AddAlmirahAsync(sectionId, input, ct));
 
-    [Authorize(Roles = "Admin,Supervisor")]
+    [RequirePermission("locations.edit")]
     [HttpPut("almirahs/{id:int}")]
     public async Task<IResult> UpdateAlmirah(int id, AlmirahInput input, CancellationToken ct) =>
         ApiResults.FromResult(await locations.UpdateAlmirahAsync(id, input, ct));
 
-    [Authorize(Roles = "Admin,Supervisor")]
+    [RequirePermission("locations.edit")]
     [HttpDelete("almirahs/{id:int}")]
     public async Task<IResult> DeleteAlmirah(int id, CancellationToken ct) =>
         ApiResults.FromResult(await locations.DeleteAlmirahAsync(id, ct));
 
-    [Authorize(Roles = "Admin,Supervisor")]
+    [RequirePermission("locations.edit")]
     [HttpPost("almirahs/{almirahId:int}/shelves")]
     public async Task<IResult> AddShelf(int almirahId, ShelfInput input, CancellationToken ct) =>
         ApiResults.FromResult(await locations.AddShelfAsync(almirahId, input, ct));
 
-    [Authorize(Roles = "Admin,Supervisor")]
+    [RequirePermission("locations.edit")]
     [HttpPut("shelves/{id:int}")]
     public async Task<IResult> UpdateShelf(int id, ShelfInput input, CancellationToken ct) =>
         ApiResults.FromResult(await locations.UpdateShelfAsync(id, input, ct));
 
-    [Authorize(Roles = "Admin,Supervisor")]
+    [RequirePermission("locations.edit")]
     [HttpDelete("shelves/{id:int}")]
     public async Task<IResult> DeleteShelf(int id, CancellationToken ct) =>
         ApiResults.FromResult(await locations.DeleteShelfAsync(id, ct));
