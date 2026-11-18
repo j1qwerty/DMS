@@ -28,6 +28,7 @@ const ACTION_TONE: Record<AuditAction, 'success' | 'warning' | 'danger' | 'info'
   Approve: 'success',
   Reject: 'danger',
   Export: 'neutral',
+  Access: 'info',
 };
 
 /**
