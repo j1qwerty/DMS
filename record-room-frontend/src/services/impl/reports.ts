@@ -141,6 +141,9 @@ function daysLate(dueAt: string): number {
 const isBarcodeColumn = (name: string) => /barcode/i.test(name);
 
 function forFeatures(definition: ReportDefinition): ReportDefinition {
+  if (definition.key === 'movement-log' && !getFeatures().movement) {
+    return { ...definition, title: '', description: '', columns: [] };
+  }
   if (getFeatures().barcode) return definition;
   return {
     ...definition,
@@ -151,12 +154,17 @@ function forFeatures(definition: ReportDefinition): ReportDefinition {
 
 export const reportsService: ReportsApi = {
   async definitions() {
-    // The module-level `definitions` const is still reachable by name here:
-    // an object method name is not a binding inside its own body.
-    return definitions.map(forFeatures);
+    // Standalone movement history is a retained optional module, not a core
+    // proposal feature. Do not expose its report in local or HTTP-backed UI.
+    return definitions
+      .filter((definition) => definition.key !== 'movement-log' || getFeatures().movement)
+      .map(forFeatures);
   },
 
   async build(key: ReportKey) {
+    if (key === 'movement-log' && !getFeatures().movement) {
+      throw new Error('Movement history is not enabled.');
+    }
     const definition = definitions.find((item) => item.key === key);
     if (!definition) throw new Error(`Unknown report "${key}".`);
     const state = store.getState();
