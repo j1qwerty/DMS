@@ -1,7 +1,9 @@
+> **Current status override (2026-11-18):** This checklist contains historic verification claims and must not be used as the current project sign-off. The binding scope/status is [`../ZILA_PANCHAYAT_CODEX.MD`](../ZILA_PANCHAYAT_CODEX.MD). Optional feature defaults have changed to OFF, and proposal items previously called “not planned” are now in scope.
+
 # TODO: Document Management System + Record Room
 
 Legend: `[x]` done and tested, `[ ]` not done.
-**Phase 1 (frontend) and Phase 2 (API) are code complete. Phase 3 is what still needs checking on a machine with NuGet and SQL Server.**
+**Historical checklist only.** This document predates the final Zila Panchayat proposal. Use `../ZILA_PANCHAYAT_CODEX.MD` for actual proposal coverage, status, missing features and acceptance tests. A completed screen or code path is not proof of contractual completion.
 
 ## Phase 1: Frontend (done)
 - [x] Light sidebar that follows the theme
@@ -9,7 +11,7 @@ Legend: `[x]` done and tested, `[ ]` not done.
 - [x] Menu regrouped: Document management / Record room / Manage; related screens as page tabs
 - [x] Documents (file table) is the home page; old dashboard is Overview
 - [x] Full-page file and map viewer; Maps page; Rooms add / edit / delete UI
-- [x] `VITE_ENABLE_BARCODE` switch (default on) + page-by-page list in `.env.example`
+- [x] `VITE_ENABLE_BARCODE` switch (default off for current delivery) + page-by-page list in `.env.example`
 - [x] Runtime override from `GET /api/config` (frontend side ready; falls back to the env value if the API lacks it)
 - [x] Barcode hidden/replaced on: menu, mobile bar, Documents table + CSV, row menu, file detail, file viewer,
       Register file, Maps, Issue (works by file number), Return, Movement, Search, Rooms detail, Room layout,
@@ -18,7 +20,7 @@ Legend: `[x]` done and tested, `[ ]` not done.
 - [x] Tests: switch parsing and override, file lookup by number, room rules, report columns (118 passing)
 - [x] Browser check with the switch on and off, desktop and phone width
 
-## Phase 2: API (`dotnet-api/`): code complete
+## Phase 2: API (`dotnet-api/`): historical code inventory — final scope still requires acceptance testing and additional implementation
 Verified here by compiling the whole API against stand-in packages and executing 59 unit/behaviour checks
 (see "How this was verified"). **Not** yet run against the real NuGet packages or SQL Server: see Phase 3.
 
@@ -64,8 +66,8 @@ Verified here by compiling the whole API against stand-in packages and executing
   (room add / edit / delete and their guards, code numbering, shelf id derivation, file lookup by number or id,
   DTO enrichment). Those 13 are not shipped, because they need the EF in-memory provider.
 
-## Not planned (from the proposal, only if asked)
-OCR search, PDF/A output, configurable metadata fields, backup sets, e-office integration beyond the stored reference.
+## Final proposal scope corrections
+OCR text search, e-office transfer, approved metadata indexing, composed PDF output, scan quality gates, backup/restore, and digital handover are requirements of the final proposal. They remain open until recorded as accepted in `../ZILA_PANCHAYAT_CODEX.MD`.
 
 ## Waiting on you
 - [ ] Command palette: send the files and instructions; it was not in this repo and was not touched.
