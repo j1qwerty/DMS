@@ -131,7 +131,13 @@ Assert-Equal 200 $config.Status 'GET /api/config is public'
 Assert-Equal 'Document Management System' $config.Data.appName 'the product is named Document Management System'
 Assert-True ($config.Data.features.barcode -is [bool]) 'config reports the barcode feature as true/false'
 $barcodeOn = [bool]$config.Data.features.barcode
-Write-Host "  (barcode features are $(if ($barcodeOn) { 'ON' } else { 'OFF' }); set Features__BarcodeEnabled to test the other state)"
+$movementOn = [bool]$config.Data.features.movement
+$supportOn = [bool]$config.Data.features.support
+$bulkImportOn = [bool]$config.Data.features.bulkImport
+Assert-True ($config.Data.features.movement -is [bool]) 'config reports the movement feature as true/false'
+Assert-True ($config.Data.features.support -is [bool]) 'config reports the support feature as true/false'
+Assert-True ($config.Data.features.bulkImport -is [bool]) 'config reports the bulk-import feature as true/false'
+Write-Host "  (optional features: barcode=$barcodeOn movement=$movementOn support=$supportOn bulkImport=$bulkImportOn)"
 
 # ============================================================ auth
 Write-Step 'Authentication'
@@ -507,9 +513,14 @@ Assert-True ($null -ne $rest.Data.data.returnedAt) 'the settlement timestamp is 
 
 # ============================================================ movements + audit
 Write-Step 'Movement log and audit trail'
-$movements = Invoke-Api -Path "/api/movements?fileId=$newFileId" -Token $admin
-Assert-Equal 200 $movements.Status 'GET /api/movements responds'
-Assert-True (@($movements.Data.data).Count -ge 2) 'create + relocate events were recorded'
+if ($movementOn) {
+    $movements = Invoke-Api -Path "/api/movements?fileId=$newFileId" -Token $admin
+    Assert-Equal 200 $movements.Status 'GET /api/movements responds while enabled'
+    Assert-True (@($movements.Data.data).Count -ge 2) 'create + relocate events were recorded'
+} else {
+    $hiddenMovement = Invoke-Api -Path '/api/movements' -Token $admin
+    Assert-Equal 404 $hiddenMovement.Status 'movement history is hidden when disabled'
+}
 
 $audit = Invoke-Api -Path '/api/audit?limit=50' -Token $admin
 Assert-Equal 200 $audit.Status 'GET /api/audit responds'
@@ -628,6 +639,7 @@ if (-not $SkipDestructive) {
 }
 
 # ============================================================ barcodes
+if ($barcodeOn) {
 Write-Step 'Barcode payloads and validation'
 $payload = Invoke-Api -Path "/api/barcodes/payload/File/$newFileId" -Token $admin
 Assert-Equal 200 $payload.Status 'a file payload can be built'
@@ -661,7 +673,14 @@ $tooMany = Invoke-Api -Method POST -Path '/api/barcodes/jobs' -Token $admin -Bod
 }
 Assert-Equal 400 $tooMany.Status 'an absurd print quantity is refused'
 
+
+} else {
+    $hiddenBarcode = Invoke-Api -Path "/api/barcodes/payload/File/$newFileId" -Token $admin
+    Assert-Equal 404 $hiddenBarcode.Status 'barcode endpoints are hidden when disabled'
+}
+
 # ============================================================ bulk
+if ($bulkImportOn) {
 Write-Step 'Bulk import classification'
 $bulkCsv = @"
 barcode,subject,shelf
@@ -686,6 +705,12 @@ if (-not $SkipDestructive) {
     $committedBarcode = "RF-BULK-$([guid]::NewGuid().ToString('N').Substring(0,8))"
     $reCommit = Invoke-Api -Method POST -Path "/api/bulk/jobs/$($bulk.Data.data.id)/commit" -Token $admin
     Assert-Equal 400 $reCommit.Status 'a committed job cannot be committed twice'
+}
+
+
+} else {
+    $hiddenBulk = Invoke-Api -Path '/api/bulk/jobs' -Token $admin
+    Assert-Equal 404 $hiddenBulk.Status 'bulk import endpoints are hidden when disabled'
 }
 
 # ============================================================ maps
@@ -713,7 +738,7 @@ if (-not $SkipDestructive) {
 Write-Step 'Reports'
 $defs = Invoke-Api -Path '/api/reports' -Token $admin
 Assert-Equal 200 $defs.Status 'GET /api/reports responds'
-Assert-True (@($defs.Data.data).Count -ge 8) 'the report catalogue is populated'
+Assert-True (@($defs.Data.data).Count -ge $(if ($movementOn) { 8 } else { 7 })) 'the report catalogue contains the in-scope reports'
 
 $issueReport = Invoke-Api -Path '/api/reports/issue-register' -Token $admin
 Assert-Equal 200 $issueReport.Status 'a report builds'
@@ -721,6 +746,10 @@ Assert-Equal $issueReport.Data.data.columns.Count @($issueReport.Data.data.rows[
 
 $overdue = Invoke-Api -Path '/api/reports/overdue-files' -Token $admin
 Assert-Equal 200 $overdue.Status 'the overdue report builds'
+if (-not $movementOn) {
+    $hiddenMovementReport = Invoke-Api -Path '/api/reports/movement-log' -Token $admin
+    Assert-Equal 400 $hiddenMovementReport.Status 'the standalone movement report is hidden when disabled'
+}
 
 $export = Invoke-Api -Path '/api/reports/file-registry/export' -Token $admin -Raw
 Assert-Equal 200 $export.Status 'a report exports as CSV'
@@ -792,6 +821,7 @@ if (-not $SkipDestructive) {
 }
 
 # ============================================================ inquiry + media
+if ($supportOn) {
 Write-Step 'Inquiry and media links'
 $inq = Invoke-Api -Method POST -Path '/api/inquiries' -Token $employeeToken -Body @{
     name = 'Smoke Tester'; email = 'tester@example.invalid'; department = 'Audit'
@@ -811,6 +841,12 @@ $unsafe = Invoke-Api -Method POST -Path '/api/media-links' -Token $employeeToken
     title = 'Unsafe'; url = 'javascript:alert(1)'; alt = 'nope'
 }
 Assert-Equal 400 $unsafe.Status 'a non-http(s) media URL is refused'
+
+
+} else {
+    $hiddenInquiry = Invoke-Api -Path '/api/inquiries' -Token $employeeToken
+    Assert-Equal 404 $hiddenInquiry.Status 'support and inquiry endpoints are hidden when disabled'
+}
 
 # ============================================================ custody chain
 Write-Step 'Custody chain — intake register and return sign-off'
@@ -868,6 +904,9 @@ Assert-True ($null -ne $signOff.Data.data.signedOffAt) 'the sign-off stamps a ti
 
 $reSign = Invoke-Api -Method POST -Path "/api/custody/$returnId/sign-off" -Token $admin -Body @{ }
 Assert-Equal 400 $reSign.Status 'a signed-off event cannot be signed off twice'
+
+$earlyIntakeSign = Invoke-Api -Method POST -Path "/api/custody/$custodyId/sign-off" -Token $admin -Body @{ }
+Assert-Equal 400 $earlyIntakeSign.Status 'an intake cannot be signed off before reconciliation'
 
 $intakeSign = Invoke-Api -Method POST -Path "/api/custody/$custodyId/sign-off" -Token $admin -Body @{ }
 Assert-Equal 200 $intakeSign.Status 'a reconciled intake can be signed off'
