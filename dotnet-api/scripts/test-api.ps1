@@ -668,10 +668,21 @@ if (-not $SkipDestructive) {
         decision = 'Approved'; note = ''
     }
     Assert-Equal 403 $opReview.Status 'an operator cannot review scan pages'
+
+    $missingPageApproval = Invoke-Api -Method POST -Path "/api/scans/$($page2.Data.data.id)/review" -Token $admin -Body @{
+        decision = 'Approved'; note = ''
+    }
+    Assert-Equal 400 $missingPageApproval.Status 'a metadata-only scan cannot be approved before its document is uploaded'
     $supRemove = Invoke-Api -Method DELETE -Path "/api/scans/$($page1.Data.data.id)" -Token $supervisorToken
     Assert-Equal 200 $supRemove.Status 'a supervisor can remove a pending scan page'
     $supRemoveAgain = Invoke-Api -Method DELETE -Path "/api/scans/$($page1.Data.data.id)" -Token $supervisorToken
     Assert-Equal 400 $supRemoveAgain.Status 'removing an already removed scan page is refused'
+
+    $scanPng = Join-Path ([System.IO.Path]::GetTempPath()) 'rr-smoke-scan.png'
+    [IO.File]::WriteAllBytes($scanPng, [Convert]::FromBase64String(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADUlEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC'))
+    $page2Image = Invoke-MultipartUpload -Path "/api/scans/$($page2.Data.data.id)/document" -Token $admin -FilePath $scanPng -ContentType 'image/png'
+    Assert-True ([bool]$page2Image.success) 'the Front scan image is stored before review'
 
     $noReason = Invoke-Api -Method POST -Path "/api/scans/$($page2.Data.data.id)/review" -Token $admin -Body @{
         decision = 'Rejected'; note = '  '
@@ -696,33 +707,34 @@ if (-not $SkipDestructive) {
     Assert-Equal 200 $queue.Status 'the pending-review queue responds'
     Assert-True ($null -ne $queue.Data.data) 'the queue returns rows'
 
+    $bulkMissingContent = Invoke-Api -Method POST -Path "/api/files/$newFileId/scans/review-all" -Token $admin -Body @{
+        decision = 'Approved'; note = ''
+    }
+    Assert-Equal 400 $bulkMissingContent.Status 'bulk approval refuses to approve metadata-only page records'
+
+    $backImage = Invoke-MultipartUpload -Path "/api/scans/$($backPage1.Data.data.id)/document" -Token $admin -FilePath $scanPng -ContentType 'image/png'
+    Assert-True ([bool]$backImage.success) 'the Back scan image is stored before review'
+    $legalImage = Invoke-MultipartUpload -Path "/api/scans/$($legalPage.Data.data.id)/document" -Token $admin -FilePath $scanPng -ContentType 'image/png'
+    Assert-True ([bool]$legalImage.success) 'the Legal-size scan image is stored before review'
+    $thirdImage = Invoke-MultipartUpload -Path "/api/scans/$($page3.Data.data.id)/document" -Token $admin -FilePath $scanPng -ContentType 'image/png'
+    Assert-True ([bool]$thirdImage.success) 'the third-page scan image is stored before review'
+
     $reviewAll = Invoke-Api -Method POST -Path "/api/files/$newFileId/scans/review-all" -Token $admin -Body @{
         decision = 'Approved'; note = ''
     }
-    Assert-Equal 200 $reviewAll.Status 'every pending page of a file can be approved at once'
-    Assert-Equal 3 $reviewAll.Data.data 'the bulk review reports pending front, back and Legal-size page records'
+    Assert-Equal 200 $reviewAll.Status 'every pending page with an uploaded scan can be approved at once'
+    Assert-Equal 3 $reviewAll.Data.data 'the bulk review reports the pending Back, Legal-size and third-page records'
     $reviewAllAgain = Invoke-Api -Method POST -Path "/api/files/$newFileId/scans/review-all" -Token $admin -Body @{
         decision = 'Approved'; note = ''
     }
     Assert-Equal 400 $reviewAllAgain.Status 'a bulk review with nothing pending is refused'
 
-    # The final-PDF pipeline must use source images, retain the originals, and
-    # produce a new versioned derivative. Attach the same tiny PNG to the latest
-    # approved Front and Back sides to exercise page-side ordering and PDF output.
-    $scanPng = Join-Path ([System.IO.Path]::GetTempPath()) 'rr-smoke-scan.png'
-    [IO.File]::WriteAllBytes($scanPng, [Convert]::FromBase64String(
-        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADUlEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC'))
-
-    $frontImage = Invoke-MultipartUpload -Path "/api/scans/$($page2.Data.data.id)/document" -Token $admin -FilePath $scanPng -ContentType 'image/png'
-    Assert-True ([bool]$frontImage.success) 'an approved Front-side scan image can be attached'
-
-    $backImage = Invoke-MultipartUpload -Path "/api/scans/$($backPage1.Data.data.id)/document" -Token $admin -FilePath $scanPng -ContentType 'image/png'
-    Assert-True ([bool]$backImage.success) 'an approved Back-side scan image can be attached'
-
+    # The final-PDF pipeline composes approved page images, preserves every
+    # source upload and produces a new versioned derivative.
     $finalPdf = Invoke-Api -Method POST -Path "/api/files/$newFileId/digitization/final-pdf" -Token $admin -Body @{}
     Assert-Equal 200 $finalPdf.Status 'approved page-side images can be composed into a final PDF'
     Assert-Equal 'FinalPdf' $finalPdf.Data.data.documentKind 'the derivative is identified separately from source attachments'
-    Assert-Equal 2 $finalPdf.Data.data.pageCount 'the final PDF contains the approved Front and Back sides'
+    Assert-Equal 4 $finalPdf.Data.data.pageCount 'the final PDF contains the approved Front, Back, Legal and third page scans'
     Assert-True ($finalPdf.Data.data.sha256 -match '^[A-Fa-f0-9]{64}$') 'the final PDF stores a SHA-256 checksum'
 
     $finalContent = Invoke-Api -Path "/api/files/$newFileId/documents/$($finalPdf.Data.data.id)/content" -Token $admin -Raw
