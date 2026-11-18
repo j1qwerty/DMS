@@ -236,7 +236,7 @@ export function DigitalHandoverPanel() {
               <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs">
                 <span><span className="muted">Manifest SHA-256:</span> <code>{batch.manifestSha256}</code></span>
                 {batch.deliveredAt && <span><span className="muted">Delivered:</span> {batch.deliveredAt} by {batch.deliveredBy}</span>}
-                {batch.acceptedAt && <span><span className="muted">Department sign-off:</span> {batch.acceptedAt} by {batch.acceptedBy}</span>}
+                {batch.signedOffAt && <span><span className="muted">Department sign-off:</span> {batch.signedOffAt} by {batch.signedOffBy}</span>}
               </div>
               <div className="divide-y divide-[var(--rr-border)] rounded-lg border border-base">
                 {batch.items.map((item) => (
@@ -284,7 +284,7 @@ export function DigitalHandoverPanel() {
                 </div>
               )}
               {(batch.status === 'Accepted' || batch.status === 'Rejected') && (
-                <p className="muted text-xs">{batch.status} by {batch.acceptedBy}. {batch.decisionNotes}</p>
+                <p className="muted text-xs">{batch.status} by {batch.signedOffBy}. {batch.decisionNotes}</p>
               )}
               {(batch.status === 'Delivered' || batch.status === 'Accepted' || batch.status === 'Rejected') && (
                 <div className="flex justify-end">
