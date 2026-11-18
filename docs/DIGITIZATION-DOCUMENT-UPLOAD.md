@@ -1,3 +1,5 @@
+> **Final scope alignment:** this upload design is one component of the final proposal. In-app file upload/storage alone does not complete e-office transfer, OCR search, final PDF generation, image-quality acceptance or digital handover. Track those separately in [`../ZILA_PANCHAYAT_CODEX.MD`](../ZILA_PANCHAYAT_CODEX.MD).
+
 # Digitization document upload — PDF and images
 
 Status: **Implemented in [PR #2 — Add secure, versioned scanned document uploads](https://github.com/j1qwerty/recordroom/pull/2).** The latest API and frontend CI checks passed on the current implementation.
