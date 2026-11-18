@@ -65,6 +65,23 @@ public class ScansController(IFileScansService scans) : ControllerBase
     public async Task<IResult> UploadDocument(long scanId, [FromForm] IFormFile? document, CancellationToken ct) =>
         ApiResults.FromResult(await scans.AddDocumentAsync(scanId, document, ct));
 
+    /// <summary>Returns OCR text and provenance for an uploaded scan page.</summary>
+    [RequirePermission("digitization.view")]
+    [HttpGet("{scanId:long}/ocr")]
+    public async Task<IResult> Ocr(long scanId, CancellationToken ct)
+    {
+        var result = await scans.GetOcrAsync(scanId, ct);
+        return result is null
+            ? Results.NotFound(ApiResponse<ScanOcrDto>.Fail([new FieldError("Scan page not found.")]))
+            : Results.Ok(ApiResponse<ScanOcrDto>.Ok(result));
+    }
+
+    /// <summary>Stores a completed/failed OCR result from an approved extraction worker or verified import.</summary>
+    [RequirePermission("digitization.upload")]
+    [HttpPut("{scanId:long}/ocr")]
+    public async Task<IResult> UpdateOcr(long scanId, ScanOcrInput input, CancellationToken ct) =>
+        ApiResults.FromResult(await scans.UpdateOcrAsync(scanId, input, ct));
+
     [RequirePermission("digitization.view")]
     [HttpGet("{scanId:long}/content")]
     public async Task<IActionResult> Content(long scanId, [FromQuery] bool download = false, CancellationToken ct = default)
