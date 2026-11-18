@@ -152,7 +152,12 @@ public sealed class ReadService(AppDbContext db, ICacheService cache, IFileRefs 
                 .Select(i => i.BorrowerEmployeeCode).Distinct().CountAsync(ct);
             var pending = await db.ScanPages.CountAsync(p => p.Status == PageStatus.PendingReview, ct);
             var rooms = await db.Rooms.CountAsync(ct);
-            var approved = await db.ScanPages.CountAsync(p => p.Status == PageStatus.Approved, ct);
+            // A single uploaded PDF can contain many physical pages. Count its
+            // parsed page count (or one for a single-image/unknown page record),
+            // not merely the number of upload rows.
+            var approved = await db.ScanPages
+                .Where(p => p.Status == PageStatus.Approved)
+                .SumAsync(p => (int?)(p.PageCount ?? 1), ct) ?? 0;
 
             // Mapping is physical placement on an identified shelf, not merely
             // existence in SQL. The denominator remains the agreed legacy registry.
