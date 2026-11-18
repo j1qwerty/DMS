@@ -12,6 +12,7 @@ import { useFlash, useQuery, useService, useSession } from '../hooks/useService'
 import { downloadCsv, toCsv } from '../lib/csv';
 import type { CustodyDirection, CustodyEvent } from '../types';
 import type { Page } from '../services/contracts';
+import { DigitalHandoverPanel } from './DigitalHandoverPanel';
 
 const EMPTY_PAGE: Page<CustodyEvent> = { items: [], total: 0, page: 1, pageSize: 50 };
 const DIRECTIONS = ['All', 'Intake', 'Return'] as const;
@@ -295,6 +296,8 @@ export function CustodyPage() {
           </>
         )}
       </Card>
+
+      <DigitalHandoverPanel />
 
       <Modal
         open={recording}
