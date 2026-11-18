@@ -247,9 +247,19 @@ public sealed class FileScansService(
         var page = await db.ScanPages.FirstOrDefaultAsync(p => p.Id == scanId, ct);
         if (page is null) return Result<FileScanPageDto>.Fail("Scan page not found.", "scanId");
 
-        var approve = string.Equals(input.Decision, "Approved", StringComparison.OrdinalIgnoreCase);
-        if (!approve && string.IsNullOrWhiteSpace(input.Note))
+        var decision = input.Decision?.Trim();
+        var approve = string.Equals(decision, "Approved", StringComparison.OrdinalIgnoreCase);
+        var reject = string.Equals(decision, "Rejected", StringComparison.OrdinalIgnoreCase);
+        if (!approve && !reject)
+            return Result<FileScanPageDto>.Fail("Choose Approved or Rejected.", "decision");
+        if (reject && string.IsNullOrWhiteSpace(input.Note))
             return Result<FileScanPageDto>.Fail("A rejection reason is required.", "note");
+        if (approve && (string.IsNullOrWhiteSpace(page.StorageKey)
+            || string.IsNullOrWhiteSpace(page.ContentType)
+            || string.IsNullOrWhiteSpace(page.Sha256)))
+            return Result<FileScanPageDto>.Fail(
+                "Upload the scanned PDF or image before approving this page.",
+                "document");
 
         var before = Display.Page(page.Status);
         page.Status = approve ? PageStatus.Approved : PageStatus.Rejected;
@@ -272,8 +282,12 @@ public sealed class FileScansService(
         var file = await db.Files.FirstOrDefaultAsync(f => f.Id == fileId, ct);
         if (file is null) return Result<int>.Fail("File not found.", "fileId");
 
-        var approve = string.Equals(input.Decision, "Approved", StringComparison.OrdinalIgnoreCase);
-        if (!approve && string.IsNullOrWhiteSpace(input.Note))
+        var decision = input.Decision?.Trim();
+        var approve = string.Equals(decision, "Approved", StringComparison.OrdinalIgnoreCase);
+        var reject = string.Equals(decision, "Rejected", StringComparison.OrdinalIgnoreCase);
+        if (!approve && !reject)
+            return Result<int>.Fail("Choose Approved or Rejected.", "decision");
+        if (reject && string.IsNullOrWhiteSpace(input.Note))
             return Result<int>.Fail("A rejection reason is required.", "note");
 
         var pending = await db.ScanPages
@@ -281,6 +295,16 @@ public sealed class FileScansService(
             .ToListAsync(ct);
         if (pending.Count == 0)
             return Result<int>.Fail("No pages are awaiting review.", "fileId");
+
+        // Bulk approval is atomic at the application level: never approve a
+        // queue containing metadata-only rows whose scan bytes were not uploaded.
+        if (approve && pending.Any(page =>
+            string.IsNullOrWhiteSpace(page.StorageKey)
+            || string.IsNullOrWhiteSpace(page.ContentType)
+            || string.IsNullOrWhiteSpace(page.Sha256)))
+            return Result<int>.Fail(
+                "Upload the scanned PDF or image for every pending page before bulk approval.",
+                "document");
 
         foreach (var page in pending)
         {
