@@ -24,7 +24,7 @@ import type {
 import type { Page, RecordRoomService } from '../services/contracts';
 
 const FILE_TYPES: FileType[] = ['Letter', 'File', 'Register', 'Map', 'Drawing', 'Report'];
-const DOCUMENT_SIZES: DocumentSize[] = ['A0', 'A1', 'A2', 'A3', 'A4', 'Other'];
+const DOCUMENT_SIZES: DocumentSize[] = ['A0', 'A1', 'A2', 'A3', 'A4', 'Legal', 'Other'];
 const COAL_LIVES = [
   '10 years',
   '15 years',
