@@ -2,6 +2,7 @@ import { NavLink, Navigate, Outlet, useLocation } from 'react-router-dom';
 import { cn } from '../lib/utils';
 import { useSession } from '../hooks/useService';
 import { can, type Permission } from '../services/permissions';
+import { useFeatures } from '../lib/features';
 
 const adminNav: Array<{ to: string; label: string; permission: Permission }> = [
   { to: '/admin/users', label: 'Users & roles', permission: 'users.view' },
@@ -14,8 +15,9 @@ const adminNav: Array<{ to: string; label: string; permission: Permission }> = [
 /** Administration is one sidebar entry; its sections are tabs along the top. */
 export function AdminLayout() {
   const { user } = useSession();
+  const features = useFeatures();
   const { pathname } = useLocation();
-  const visible = adminNav.filter((item) => can(user?.role, item.permission));
+  const visible = adminNav.filter((item) => (item.to !== '/admin/bulk-import' || features.bulkImport) && can(user?.role, item.permission));
 
   // /admin on its own lands on the first section this role may open.
   if (pathname === '/admin' && visible[0]) return <Navigate to={visible[0].to} replace />;
