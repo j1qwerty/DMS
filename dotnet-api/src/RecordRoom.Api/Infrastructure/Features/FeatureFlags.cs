@@ -4,39 +4,40 @@ using Microsoft.AspNetCore.Mvc.Filters;
 namespace RecordRoom.Api.Infrastructure.Features;
 
 /// <summary>
-/// Optional product features.
-///
-/// The product is a Document Management System. The record room (physical file
-/// tracking, rooms and shelves) is an additional section of it, and barcodes belong to
-/// that section only. <see cref="BarcodeEnabled"/> turns the barcode part on or off; it
-/// is ON by default. When off, files are identified by file number: the barcode
-/// endpoints are blocked, new files and shelves get an internal id without asking for
-/// one, and reports and permissions stop mentioning barcodes. The stored internal id
-/// itself is kept, because maps, scans and history are linked through it.
-///
-/// Set it with <c>Features:BarcodeEnabled</c> in <c>appsettings.json</c> or the
-/// environment variable <c>Features__BarcodeEnabled</c>. The frontend reads it from
-/// <c>GET /api/config</c>, so it needs no rebuild.
+/// Optional features retained in the codebase but not exposed in the current
+/// Zila Panchayat delivery. Core proposal workflows must not depend on these.
 /// </summary>
+public enum OptionalProductFeature
+{
+    Movement,
+    Support,
+    BulkImport,
+}
+
 public interface IFeatureFlags
 {
     bool BarcodeEnabled { get; }
+    bool MovementEnabled { get; }
+    bool SupportEnabled { get; }
+    bool BulkImportEnabled { get; }
 }
 
 public sealed class FeatureFlags(IConfiguration configuration) : IFeatureFlags
 {
     public const string BarcodeKey = "Features:BarcodeEnabled";
+    public const string MovementKey = "Features:MovementEnabled";
+    public const string SupportKey = "Features:SupportEnabled";
+    public const string BulkImportKey = "Features:BulkImportEnabled";
 
-    /// <summary>Read on every call so a changed setting is picked up without a restart.</summary>
-    public bool BarcodeEnabled => Parse(configuration[BarcodeKey], fallback: true);
+    // Barcode, standalone movement history, support/inquiries and bulk import
+    // are retained but hidden by default because they are not in the approved SoW.
+    public bool BarcodeEnabled => Parse(configuration[BarcodeKey], fallback: false);
+    public bool MovementEnabled => Parse(configuration[MovementKey], fallback: false);
+    public bool SupportEnabled => Parse(configuration[SupportKey], fallback: false);
+    public bool BulkImportEnabled => Parse(configuration[BulkImportKey], fallback: false);
 
     private static readonly string[] OffValues = ["false", "0", "off", "no", "disabled"];
 
-    /// <summary>
-    /// Lenient on purpose. Configuration binding would crash startup on "off" or "0";
-    /// an operator editing an env file should not be able to take the API down with
-    /// a spelling choice. Blank or unrecognised text keeps the fallback (on).
-    /// </summary>
     public static bool Parse(string? value, bool fallback)
     {
         if (string.IsNullOrWhiteSpace(value)) return fallback;
@@ -52,9 +53,36 @@ public sealed class FeatureFlags(IConfiguration configuration) : IFeatureFlags
     }
 }
 
+/// <summary>Returns 404 when a retained optional feature is disabled.</summary>
+[AttributeUsage(AttributeTargets.Class | AttributeTargets.Method)]
+public sealed class RequireOptionalFeatureAttribute(OptionalProductFeature feature) : ActionFilterAttribute
+{
+    public override void OnActionExecuting(ActionExecutingContext context)
+    {
+        var flags = context.HttpContext.RequestServices.GetService<IFeatureFlags>();
+        if (flags is null) return;
+
+        var enabled = feature switch
+        {
+            OptionalProductFeature.Movement => flags.MovementEnabled,
+            OptionalProductFeature.Support => flags.SupportEnabled,
+            OptionalProductFeature.BulkImport => flags.BulkImportEnabled,
+            _ => false,
+        };
+        if (enabled) return;
+
+        context.Result = new ObjectResult(
+            Application.ApiResponse<bool>.Fail([
+                new Application.FieldError($"The optional {feature} feature is not enabled.")
+            ]))
+        {
+            StatusCode = StatusCodes.Status404NotFound,
+        };
+    }
+}
+
 /// <summary>
-/// Blocks an action with 404 while barcode features are switched off. 404 rather than
-/// 403: from the client's point of view the capability does not exist.
+/// Blocks barcode actions with 404 while barcode features are switched off.
 /// </summary>
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method)]
 public sealed class RequireBarcodeFeatureAttribute : ActionFilterAttribute
