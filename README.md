@@ -9,8 +9,11 @@ for ~25 lakh files.
 The final Zila Panchayat proposal is the acceptance authority for this branch.
 The clause-by-clause work plan, implemented gaps, pending integrations, department
 inputs and tests are tracked in `ZILA_PANCHAYAT_CODEX.MD`. Current scope is not
-complete: e-office transfer, OCR search, scan PDF composition, quality gates,
-server permission-matrix enforcement and digital handover remain open.
+complete: e-office transfer, OCR extraction/search, automated image-quality
+gates, full Scan Studio editing, PDF/A certification and editable permission
+management remain open. Metadata Full-Text setup, approved-page PDF composition
+and a checksum-backed digital handover workflow are implemented but still need
+live SQL Server verification and Department acceptance.
 
 Barcode and other retained non-scope modules are hidden by default, not deleted.
 See `docs/BARCODE-SWITCH.md` and the final-scope tracker.
@@ -44,10 +47,10 @@ See `docs/BARCODE-SWITCH.md` and the final-scope tracker.
   interfaces mirror the future API. Pages never import the seed data directly.
   The in-memory adapter persists to `localStorage` and publishes to React on
   every write, so a change on the issue desk appears on the movement log, the
-  audit trail and the dashboard in the same tick.
+  audit trail and the dashboard in the same tick. In API mode the custody area also contains the digital deliverables handover workflow; the local demo intentionally does not fake official Department receipts.
 - Routes: `/login`, `/`, `/search`, `/rooms`, `/rooms/:roomId`, `/files`,
   `/files/new`, `/files/:fileId`, `/issue`, `/return`, `/movement`,
-  `/barcodes`, `/scan`, `/digitization`, `/digitization/:batchId`, `/reports`,
+  `/barcodes`, `/scan`, `/digitization`, `/custody` (including digital deliverables handover), `/reports`,
   `/support`, `/settings`, and `/admin/{users,employees,locations,bulk-import,maps,media,audit}`
   under their own administration layout.
 - Setup: Node 22 + pnpm 10.15.0 — `corepack enable && corepack prepare
