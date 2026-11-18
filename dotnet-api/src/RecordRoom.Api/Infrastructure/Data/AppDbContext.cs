@@ -207,6 +207,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.StorageKey).HasMaxLength(80);
             e.Property(x => x.ContentType).HasMaxLength(100);
             e.Property(x => x.Sha256).HasMaxLength(64);
+            e.Property(x => x.DocumentKind).HasMaxLength(24);
             e.Property(x => x.UploadedBy).HasMaxLength(256);
             e.HasIndex(x => new { x.RecordFileId, x.Version }).IsUnique();
             e.HasOne(x => x.RecordFile).WithMany(x => x.Documents)
