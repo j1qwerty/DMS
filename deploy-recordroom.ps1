@@ -295,7 +295,7 @@ if [ ! -f "$envfile" ]; then
     echo "Redis__ConnectionString="
     # Barcode features of the record-room section. true (default) or false; edit the
     # env file later to change it, the deploy never overwrites an existing value.
-    echo "Features__BarcodeEnabled=${BARCODE_ENABLED:-true}"
+    echo "Features__BarcodeEnabled=${BARCODE_ENABLED:-false}"
     echo "Hangfire__Storage=InMemory"
     echo "Hangfire__EnableScheduling=true"
     echo "Swagger__Enabled=true"
@@ -360,7 +360,7 @@ upsert_env Redis__ConnectionString "127.0.0.1:6379,abortConnect=false"
 # Barcode switch: add it (default true) on servers deployed before it existed, but never
 # overwrite a value an operator already chose.
 if ! grep -q "^Features__BarcodeEnabled=" "$envfile"; then
-  printf '%s=%s\n' Features__BarcodeEnabled "${BARCODE_ENABLED:-true}" >> "$envfile"
+  printf '%s=%s\n' Features__BarcodeEnabled "${BARCODE_ENABLED:-false}" >> "$envfile"
 fi
 
 # Hangfire in SQL Server rather than memory. In-memory storage loses every job on
