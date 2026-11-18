@@ -668,6 +668,7 @@ export const httpDigitizationService: ScanApi = {
       fileName: input.filename,
       pageNo: input.pageNo,
       documentSize: input.documentSize,
+      side: input.side ?? 'Front',
     });
     return result.ok ? ok(toFileScan(result.value)) : result;
   },
