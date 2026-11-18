@@ -48,7 +48,8 @@ public sealed class FilesService(
     IPrivateDocumentStore documentStore,
     IFeatureFlags flags,
     ICacheService cache,
-    ILogger<FilesService> logger) : IFilesService
+    ILogger<FilesService> logger,
+    IConfiguration configuration) : IFilesService
 {
     private const int MaxPosition = 100;
     private static readonly Regex SearchTokenPattern = new(@"[\p{L}\p{M}\p{Nd}]+", RegexOptions.Compiled | RegexOptions.CultureInvariant);
@@ -94,13 +95,6 @@ public sealed class FilesService(
 
     private static string Stamp(DateTime value) =>
         value.ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture);
-
-    /// <summary>
-    /// The legacy collection size. The API never pretends to hold it; this is
-    /// only reported as <c>collectionTotal</c> so the UI can say
-    /// "1-10 of 2,478,450" honestly.
-    /// </summary>
-    private const long RegistryTotal = 2_478_450;
 
     private static FileKind ParseKind(string? value) =>
         Enum.TryParse<FileKind>(value, true, out var kind) ? kind : FileKind.File;
@@ -235,7 +229,16 @@ public sealed class FilesService(
             })
             .ToArray();
 
-        return new PagedResult<FileDto>(items, total, page, pageSize, RegistryTotal);
+        var expectedFileCount = long.TryParse(configuration["Scope:ExpectedFileCount"], out var configuredCount)
+            ? Math.Max(configuredCount, 0)
+            : 0;
+        // Until the Department signs off the total file volume, report the
+        // number actually in this database rather than a guessed legacy total.
+        var collectionTotal = expectedFileCount > 0
+            ? expectedFileCount
+            : await db.Files.LongCountAsync(ct);
+
+        return new PagedResult<FileDto>(items, total, page, pageSize, collectionTotal);
     }
 
     public async Task<FileDto?> GetAsync(int id, CancellationToken ct = default)
