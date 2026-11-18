@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { DownloadSimple, FileArrowDown, Package, SealCheck, XCircle } from '@phosphor-icons/react';
+import { DownloadSimple, Package, SealCheck, XCircle } from '@phosphor-icons/react';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
@@ -40,9 +40,13 @@ export function DigitalHandoverPanel() {
     EMPTY_HANDOVERS,
     ['digitization'],
   );
-  const { data: registry } = useQuery(
-    () => service.files.list({ page: 1, pageSize: 100 }),
-    [],
+  const { data: registry, loading: filesLoading } = useQuery(
+    () => service.files.list({
+      page: 1,
+      pageSize: 100,
+      search: fileSearch.trim() || undefined,
+    }),
+    [fileSearch],
     EMPTY_FILES,
     ['files'],
   );
@@ -50,6 +54,7 @@ export function DigitalHandoverPanel() {
   const [batchRef, setBatchRef] = useState('');
   const [department, setDepartment] = useState('');
   const [notes, setNotes] = useState('');
+  const [fileSearch, setFileSearch] = useState('');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [receiverByBatch, setReceiverByBatch] = useState<Record<string, string>>({});
   const [notesByBatch, setNotesByBatch] = useState<Record<string, string>>({});
@@ -138,7 +143,7 @@ export function DigitalHandoverPanel() {
       document.body.append(link);
       link.click();
       link.remove();
-      URL.revokeObjectURL(url);
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
       success(`Downloaded package for ${batch.batchRef}.`);
     } catch (error) {
       danger(error instanceof Error ? error.message : 'The package could not be downloaded.');
@@ -185,13 +190,24 @@ export function DigitalHandoverPanel() {
           </Field>
           <div>
             <div className="mb-2 flex items-center justify-between">
-              <p className="text-sm font-semibold">Select files</p>
+                <p className="text-sm font-semibold">Select files</p>
               <Badge tone={selectedIds.length > 0 ? 'info' : 'neutral'}>{selectedIds.length} selected</Badge>
             </div>
-            {registry.items.length === 0 ? (
+            <Field label="Search by file number, subject or department" htmlFor="digital-handover-file-search">
+              <TextInput
+                id="digital-handover-file-search"
+                value={fileSearch}
+                onChange={(event) => setFileSearch(event.target.value)}
+                placeholder="Search the registry"
+              />
+            </Field>
+            {filesLoading ? (
+              <p className="muted py-3 text-sm">Searching the registry…</p>
+            ) : registry.items.length === 0 ? (
               <p className="muted text-sm">No file records are available in the current registry page.</p>
             ) : (
-              <div className="max-h-64 overflow-y-auto rounded-lg border border-base">
+              <>
+                <div className="max-h-64 overflow-y-auto rounded-lg border border-base">
                 {registry.items.map((file) => (
                   <label key={file.id} className="flex cursor-pointer items-start gap-3 border-b border-base px-3 py-2.5 last:border-b-0 hover:bg-[var(--rr-bg)]">
                     <input
@@ -207,7 +223,13 @@ export function DigitalHandoverPanel() {
                     </span>
                   </label>
                 ))}
-              </div>
+                </div>
+                {registry.total > registry.items.length && (
+                  <p className="muted mt-1 text-xs">
+                    Showing the first {registry.items.length} matching record(s). Refine the search to locate other files.
+                  </p>
+                )}
+              </>
             )}
           </div>
           <div className="flex justify-end">
@@ -251,7 +273,7 @@ export function DigitalHandoverPanel() {
               </div>
               {batch.status === 'Prepared' && mayManage && (
                 <div className="flex justify-end">
-                  <Button size="sm" onClick={() => void markDelivered(batch)} disabled={busyId === batch.id} icon={<FileArrowDown size={16} />}>
+                  <Button size="sm" onClick={() => void markDelivered(batch)} disabled={busyId === batch.id} icon={<Package size={16} />}>
                     {busyId === batch.id ? 'Recording…' : 'Mark package delivered'}
                   </Button>
                 </div>
