@@ -436,6 +436,10 @@ export const filesService: FilesApi = {
     return listLocalRecordDocuments(fileId);
   },
 
+  async generateFinalPdf() {
+    return err('Final PDF composition is available when connected to the DMS API.', 'fileId');
+  },
+
   async uploadDocument(fileId, file) {
     const record = await filesService.get(fileId);
     if (!record) return err('File not found.', 'fileId');
