@@ -428,6 +428,78 @@ describe('digitization (scan pages)', () => {
   });
 });
 
+describe('custody chain (intake register + return sign-off)', () => {
+  it('refuses an intake without a department, count or known direction', async () => {
+    const noDept = await service.custody.record({
+      direction: 'Intake',
+      department: '   ',
+      fileCount: 5,
+    });
+    expect(noDept.ok).toBe(false);
+    const noCount = await service.custody.record({
+      direction: 'Intake',
+      department: 'Audit',
+      fileCount: 0,
+    });
+    expect(noCount.ok).toBe(false);
+    const badDirection = await service.custody.record({
+      direction: 'Sideways' as 'Intake',
+      department: 'Audit',
+      fileCount: 5,
+    });
+    expect(badDirection.ok).toBe(false);
+  });
+
+  it('records an intake, reconciles it and shows the variance in the register', async () => {
+    const intake = await service.custody.record({
+      direction: 'Intake',
+      department: 'Smoke Dept',
+      fileCount: 10,
+      batchRef: 'DIG-TEST',
+      vendor: 'ScanServe',
+    });
+    if (!intake.ok) throw new Error('intake failed');
+    expect(intake.value.reconciledCount ?? null).toBeNull();
+
+    const reconciled = await service.custody.reconcile(intake.value.id, 9, 'One torn cover');
+    if (!reconciled.ok) throw new Error('reconcile failed');
+    expect(reconciled.value.reconciledCount).toBe(9);
+    expect(reconciled.value.remarks).toBe('One torn cover');
+
+    const register = await service.custody.list({ search: 'DIG-TEST' });
+    const row = register.items.find((event) => event.id === intake.value.id);
+    expect(row?.reconciledCount).toBe(9);
+    expect(row?.recordedBy.length).toBeGreaterThan(0);
+  });
+
+  it('refuses to count a return and closes events with sign-off', async () => {
+    const returned = await service.custody.record({
+      direction: 'Return',
+      department: 'Smoke Dept',
+      fileCount: 4,
+    });
+    if (!returned.ok) throw new Error('return failed');
+    expect((await service.custody.reconcile(returned.value.id, 4)).ok).toBe(false);
+
+    const unsigned = (await service.custody.list({})).items.find((event) => !event.signedOffAt);
+    if (!unsigned) throw new Error('register seed has no open event');
+    expect((await service.custody.signOff(unsigned.id, 'Audit Officer')).ok).toBe(true);
+    expect((await service.custody.signOff(unsigned.id, '')).ok).toBe(false);
+    // A signed-off intake can no longer be counted either.
+    if (unsigned.direction === 'Intake') {
+      expect((await service.custody.reconcile(unsigned.id, 1)).ok).toBe(false);
+    }
+  });
+
+  it('filters the register by direction', async () => {
+    const intakes = await service.custody.list({ direction: 'Intake' });
+    expect(intakes.items.every((event) => event.direction === 'Intake')).toBe(true);
+    const returns = await service.custody.list({ direction: 'Return' });
+    expect(returns.items.length).toBeGreaterThan(0);
+    expect(returns.items.every((event) => event.direction === 'Return')).toBe(true);
+  });
+});
+
 describe('bulk import', () => {
   const csvFor = async () =>
     [

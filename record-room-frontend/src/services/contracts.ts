@@ -21,6 +21,7 @@ import type {
   BarcodePayload,
   BarcodeSubject,
   BulkImportJob,
+  CustodyEvent,
   DashboardStats,
   Employee,
   FileCreateInput,
@@ -341,6 +342,36 @@ export interface ScanApi {
   pendingReviewCount(): Promise<number>;
 }
 
+// ------------------------------------------------------------- custody chain
+
+/**
+ * The digitization custody chain (work plan §3.8): the intake register and the
+ * return / handover sign-off. Rows are immutable — corrections are new events,
+ * never edits — and every write is audit-logged server-side.
+ */
+export interface CustodyApi {
+  /** The register, newest first. */
+  list(query?: {
+    direction?: string;
+    search?: string;
+    page?: number;
+    pageSize?: number;
+  }): Promise<Page<CustodyEvent>>;
+  /** Records an intake ("Intake") or a return ("Return") handover. */
+  record(input: {
+    direction: 'Intake' | 'Return';
+    department: string;
+    fileCount: number;
+    batchRef?: string;
+    vendor?: string;
+    remarks?: string;
+  }): Promise<Result<CustodyEvent>>;
+  /** Sets the counted file total on an intake (the reconciliation step). */
+  reconcile(id: string, reconciledCount: number, remarks?: string): Promise<Result<CustodyEvent>>;
+  /** Closes an event with a sign-off; closed events become read-only. */
+  signOff(id: string, signedOffBy?: string): Promise<Result<CustodyEvent>>;
+}
+
 // ----------------------------------------------------------------- upload map
 
 export interface UploadsApi {
@@ -462,6 +493,7 @@ export interface RecordRoomService {
   movements: MovementApi;
   employees: EmployeesApi;
   digitization: ScanApi;
+  custody: CustodyApi;
   uploads: UploadsApi;
   bulk: BulkApi;
   audit: AuditApi;

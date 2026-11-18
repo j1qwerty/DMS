@@ -12,6 +12,7 @@ import type {
   AuditEntry,
   BarcodeJob,
   BulkImportJob,
+  CustodyEvent,
   Employee,
   FileScan,
   GalleryItem,
@@ -1286,6 +1287,40 @@ export const fileScans: FileScan[] = [
   // RF-0000123144: freshly scanned, waiting for review.
   page('RF-0000123144', 1, 1, 'Pending review', 1),
   page('RF-0000123144', 2, 1, 'Pending review', 1),
+];
+
+// ------------------------------------------------------------- custody chain
+
+/**
+ * The digitization custody register (§3.8): one reconciled intake with a
+ * variance and one signed-off return, so both directions have an example.
+ */
+export const custodyEvents: CustodyEvent[] = [
+  {
+    id: 'custody-001',
+    direction: 'Intake',
+    batchRef: 'DIG-2026-04',
+    department: 'Establishment',
+    vendor: 'ScanServe',
+    fileCount: 40,
+    reconciledCount: 39,
+    recordedBy: 'Farida Begum',
+    recordedAt: iso(5, 9, 15).slice(0, 16).replace('T', ' '),
+    remarks: 'One file held back: cover page torn, sent for repair.',
+  },
+  {
+    id: 'custody-002',
+    direction: 'Return',
+    batchRef: 'DIG-2026-03',
+    department: 'Engineering',
+    vendor: 'ScanServe',
+    fileCount: 22,
+    recordedBy: 'Sneha Verma',
+    recordedAt: iso(2, 14, 40).slice(0, 16).replace('T', ' '),
+    signedOffBy: 'Seed Supervisor',
+    signedOffAt: iso(1, 11, 5).slice(0, 16).replace('T', ' '),
+    remarks: 'Digital copies handed over with the physical files.',
+  },
 ];
 
 // ------------------------------------------------------------ map uploads

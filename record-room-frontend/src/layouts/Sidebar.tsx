@@ -6,6 +6,7 @@ import {
   Files,
   Gauge,
   Gear,
+  Handshake,
   MapTrifold,
   Question,
   ShieldCheck,
@@ -41,7 +42,8 @@ const groups: Array<{ title: string; items: NavItem[] }> = [
     items: [
       { label: 'Documents', to: '/files', icon: Files, also: ['/search'] },
       { label: 'Maps', to: '/maps', icon: MapTrifold, permission: 'files.view' },
-      { label: 'Scan review', to: '/digitization', icon: Archive },
+      { label: 'Scan review', to: '/digitization', icon: Archive, also: ['/custody'] },
+      { label: 'Custody register', to: '/custody', icon: Handshake },
       { label: 'Reports', to: '/reports', icon: ChartBar, permission: 'reports.view' },
     ],
   },

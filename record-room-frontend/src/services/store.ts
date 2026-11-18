@@ -21,6 +21,7 @@ import {
   rooms,
   users,
   fileScans,
+  custodyEvents,
 } from '../data/mock';
 import type {
   AppUser,
@@ -28,6 +29,7 @@ import type {
   AuditEntry,
   BarcodeJob,
   BulkImportJob,
+  CustodyEvent,
   Employee,
   FileScan,
   IssueRecord,
@@ -61,6 +63,7 @@ export interface DbShape {
   audit: AuditEntry[];
   scanPages: FileScan[];
   maps: MapUpload[];
+  custodyEvents: CustodyEvent[];
   barcodeJobs: BarcodeJob[];
   bulkJobs: BulkImportJob[];
   inquiries: InquiryRecord[];
@@ -83,6 +86,7 @@ export function createSeed(): DbShape {
     audit: structuredClone(auditLog),
     scanPages: structuredClone(fileScans),
     maps: structuredClone(mapUploads),
+    custodyEvents: structuredClone(custodyEvents),
     barcodeJobs: structuredClone(barcodeJobs),
     bulkJobs: structuredClone(bulkImportJobs),
     inquiries: [],

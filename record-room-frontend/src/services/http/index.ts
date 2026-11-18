@@ -12,6 +12,7 @@ import type {
   AuthApi,
   BarcodeApi,
   BulkApi,
+  CustodyApi,
   DashboardApi,
   ScanApi,
   EmployeesApi,
@@ -43,6 +44,7 @@ import {
 import {
   toAppUser,
   toArea,
+  toCustodyEvent,
   toAuditEntry,
   toBarcodeJob,
   toBulkJob,
@@ -996,5 +998,64 @@ export const httpMediaService: MediaApi = {
 
   async remove(id) {
     return wrapTrue(await attempt<Dto>('DELETE', `/api/media-links/${id}`));
+  },
+};
+
+// ------------------------------------------------------------- custody chain
+
+type CustodyDto = Record<string, unknown>;
+
+export const httpCustodyService: CustodyApi = {
+  async list(query = {}) {
+    const page = await get<Dto>(
+      `/api/custody${qs({
+        direction: query.direction,
+        search: query.search,
+        page: query.page,
+        pageSize: query.pageSize,
+      })}`,
+    );
+    return {
+      items: (page.items as CustodyDto[]).map(toCustodyEvent),
+      total: Number(page.total),
+      page: Number(page.page),
+      pageSize: Number(page.pageSize),
+      collectionTotal: Number(page.collectionTotal),
+    };
+  },
+
+  async record(input) {
+    const result = await attempt<CustodyDto>('POST', '/api/custody', {
+      direction: input.direction,
+      department: input.department,
+      fileCount: input.fileCount,
+      batchRef: input.batchRef ?? '',
+      vendor: input.vendor ?? '',
+      remarks: input.remarks ?? '',
+    });
+    return result.ok ? ok(toCustodyEvent(result.value)) : result;
+  },
+
+  async reconcile(id, reconciledCount, remarks) {
+    const result = await attempt<CustodyDto>(
+      'POST',
+      `/api/custody/${toApiId(id, 'custody')}/reconcile`,
+      {
+        reconciledCount,
+        remarks: remarks ?? '',
+      },
+    );
+    return result.ok ? ok(toCustodyEvent(result.value)) : result;
+  },
+
+  async signOff(id, signedOffBy) {
+    const result = await attempt<CustodyDto>(
+      'POST',
+      `/api/custody/${toApiId(id, 'custody')}/sign-off`,
+      {
+        signedOffBy: signedOffBy ?? '',
+      },
+    );
+    return result.ok ? ok(toCustodyEvent(result.value)) : result;
   },
 };

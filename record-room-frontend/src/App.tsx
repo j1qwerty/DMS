@@ -48,6 +48,9 @@ const ScanPage = lazy(() => import('./pages/ScanPage').then((m) => ({ default: m
 const DigitizationPage = lazy(() =>
   import('./pages/DigitizationPage').then((m) => ({ default: m.DigitizationPage })),
 );
+const CustodyPage = lazy(() =>
+  import('./pages/CustodyPage').then((m) => ({ default: m.CustodyPage })),
+);
 const ReportsPage = lazy(() =>
   import('./pages/ReportsPage').then((m) => ({ default: m.ReportsPage })),
 );
@@ -153,6 +156,7 @@ export function App() {
               }
             />
             <Route path="/digitization" element={<DigitizationPage />} />
+            <Route path="/custody" element={<CustodyPage />} />
             <Route path="/reports" element={<ReportsPage />} />
             <Route path="/support" element={<SupportPage />} />
             <Route path="/settings" element={<SettingsPage />} />

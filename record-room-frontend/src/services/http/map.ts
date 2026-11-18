@@ -18,6 +18,7 @@ import type {
   BarcodePayload,
   BulkImportJob,
   BulkImportRow,
+  CustodyEvent,
   DashboardStats,
   Employee,
   FileScan,
@@ -367,6 +368,25 @@ export function toFileScan(dto: Record<string, unknown>): FileScan {
     sha256: dto.sha256 ? str(dto.sha256) : undefined,
     pageCount: dto.pageCount == null ? undefined : num(dto.pageCount),
     pageIndex: dto.pageIndex == null ? undefined : num(dto.pageIndex),
+  };
+}
+
+// ------------------------------------------------------------- custody chain
+
+export function toCustodyEvent(dto: Record<string, unknown>): CustodyEvent {
+  return {
+    id: toId(dto.id as number),
+    direction: str(dto.direction) as CustodyEvent['direction'],
+    batchRef: str(dto.batchRef),
+    department: str(dto.department),
+    vendor: str(dto.vendor),
+    fileCount: num(dto.fileCount),
+    reconciledCount: dto.reconciledCount == null ? null : num(dto.reconciledCount),
+    recordedBy: str(dto.recordedBy),
+    recordedAt: str(dto.recordedAt),
+    signedOffBy: dto.signedOffBy ? str(dto.signedOffBy) : null,
+    signedOffAt: dto.signedOffAt ? str(dto.signedOffAt) : null,
+    remarks: str(dto.remarks),
   };
 }
 

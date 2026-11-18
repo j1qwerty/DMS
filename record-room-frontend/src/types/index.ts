@@ -319,6 +319,32 @@ export interface FileScan {
   pageIndex?: number;
 }
 
+export type CustodyDirection = 'Intake' | 'Return';
+
+/**
+ * One handover in the digitization custody chain (work plan §3.8): an intake —
+ * a department's files received and counted for digitization — or a return,
+ * the handover sign-off back to the department. Rows are immutable;
+ * corrections are new events, never edits.
+ */
+export interface CustodyEvent {
+  id: string;
+  direction: CustodyDirection;
+  /** Free-text digitization batch / reference the handover is tied to. */
+  batchRef: string;
+  department: string;
+  vendor: string;
+  /** Files declared by the department (intake) or leaving the room (return). */
+  fileCount: number;
+  /** Files actually counted; null until the intake side is reconciled. */
+  reconciledCount?: number | null;
+  recordedBy: string;
+  recordedAt: string;
+  signedOffBy?: string | null;
+  signedOffAt?: string | null;
+  remarks: string;
+}
+
 /** `upload_map` — scanned room/area maps attached to a file. */
 export interface MapUpload {
   /** Id of the file this page belongs to; lets screens link to it without a barcode lookup. */
