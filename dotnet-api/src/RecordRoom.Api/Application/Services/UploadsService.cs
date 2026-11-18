@@ -176,7 +176,13 @@ public sealed class UploadsService(AppDbContext db, IAuditWriter audit, ICurrent
         var map = await db.Maps.AsNoTracking().FirstOrDefaultAsync(m => m.Id == id, ct);
         if (map?.StorageKey is null || map.ContentType is null || map.Sha256 is null) return null;
         var stream = await documentStore.OpenReadAsync(map.StorageKey, ct);
-        return stream is null ? null : new PrivateDocumentContent(map.FileName, map.ContentType, map.SizeBytes ?? 0, map.Sha256, stream);
+        if (stream is null) return null;
+
+        await audit.LogAsync(db, AuditAction.Access, "MapUpload", map.Id.ToString(),
+            "not accessed", $"opened version {map.Version}",
+            $"Viewed map {map.FileName} v{map.Version} for {map.Barcode}", ct);
+        await db.SaveChangesAsync(ct);
+        return new PrivateDocumentContent(map.FileName, map.ContentType, map.SizeBytes ?? 0, map.Sha256, stream);
     }
 
     private async Task TryDeleteAsync(string storageKey)
