@@ -13,7 +13,7 @@ public class FileScanPage
     public required string FileName { get; set; }
     public int PageNo { get; set; }
     public int Version { get; set; } = 1;
-    /// <summary>Physical sheet size (A0–A4, Other); same options as the file.</summary>
+    /// <summary>Physical sheet size (A0–A4, Legal, Other); same options as the file.</summary>
     public string DocumentSize { get; set; } = "Other";
     public PageStatus Status { get; set; } = PageStatus.PendingReview;
     public string Note { get; set; } = string.Empty;
