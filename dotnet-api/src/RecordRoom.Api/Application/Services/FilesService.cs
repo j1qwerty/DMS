@@ -93,6 +93,31 @@ public sealed class FilesService(
         });
     }
 
+    private async Task<bool> IsScanOcrFullTextIndexReadyAsync(CancellationToken ct)
+    {
+        var connection = db.Database.GetDbConnection();
+        var cacheKey = $"Search:ScanOcrFullTextReady:{connection.DataSource}:{connection.Database}";
+        return await cache.GetOrCreateAsync(cacheKey, TimeSpan.FromMinutes(10), async () =>
+        {
+            try
+            {
+                return await db.Database.SqlQueryRaw<bool>(
+                    "SELECT CONVERT(bit, CASE WHEN FULLTEXTSERVICEPROPERTY('IsFullTextInstalled') = 1 " +
+                    "AND EXISTS (SELECT 1 FROM sys.fulltext_indexes fti " +
+                    "JOIN sys.fulltext_index_columns fic ON fic.object_id = fti.object_id " +
+                    "JOIN sys.columns c ON c.object_id = fic.object_id AND c.column_id = fic.column_id " +
+                    "WHERE fti.object_id = OBJECT_ID(N'dbo.FileScanPages') AND c.name = N'OcrText') " +
+                    "THEN 1 ELSE 0 END) AS [Value]")
+                    .SingleAsync(ct);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Scan OCR full-text index is unavailable; using the OCR text fallback.");
+                return false;
+            }
+        });
+    }
+
     private static string Stamp(DateTime value) =>
         value.ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture);
 
@@ -132,11 +157,21 @@ public sealed class FilesService(
             var needle = q.Search.Trim();
             var fullTextCondition = BuildFullTextCondition(needle);
             var fullTextReady = fullTextCondition is not null && await IsFullTextIndexReadyAsync(ct);
+            var scanOcrFullTextReady = fullTextCondition is not null
+                && await IsScanOcrFullTextIndexReadyAsync(ct);
+
+            IQueryable<string> ocrBarcodes = db.ScanPages.AsNoTracking()
+                .Where(page => page.OcrStatus == "Completed" && page.OcrText != null);
+            ocrBarcodes = scanOcrFullTextReady
+                ? ocrBarcodes.Where(page => EF.Functions.Contains(page.OcrText!, fullTextCondition!))
+                    .Select(page => page.Barcode)
+                : ocrBarcodes.Where(page => page.OcrText!.Contains(needle))
+                    .Select(page => page.Barcode);
 
             if (fullTextReady)
             {
-                // Identity prefixes remain seekable. Descriptive metadata uses
-                // the SQL Server linguistic full-text index.
+                // Identity prefixes remain seekable. Descriptive metadata and
+                // OCR page text use SQL Server Full-Text indexes independently.
                 query = query.Where(f =>
                     f.Barcode.StartsWith(needle)
                     || f.FileNumber.StartsWith(needle)
@@ -148,12 +183,13 @@ public sealed class FilesService(
                     || EF.Functions.Contains(f.Area, fullTextCondition!)
                     || (f.EOfficeReference != null && EF.Functions.Contains(f.EOfficeReference, fullTextCondition!))
                     || (f.Holder != null && EF.Functions.Contains(f.Holder, fullTextCondition!))
-                    || EF.Functions.Contains(f.Description, fullTextCondition!));
+                    || EF.Functions.Contains(f.Description, fullTextCondition!)
+                    || ocrBarcodes.Contains(f.Barcode));
             }
             else
             {
-                // SQL Server Express/instances without the optional Full-Text
-                // component retain the existing metadata search behavior.
+                // SQL Server instances without a Full-Text index retain the
+                // existing metadata fallback and still search completed OCR text.
                 query = query.Where(f =>
                     f.Barcode.StartsWith(needle)
                     || f.FileNumber.StartsWith(needle)
@@ -163,7 +199,8 @@ public sealed class FilesService(
                     || f.Area.Contains(needle)
                     || (f.EOfficeReference != null && f.EOfficeReference.StartsWith(needle))
                     || (f.Holder != null && f.Holder.Contains(needle))
-                    || f.Description.Contains(needle));
+                    || f.Description.Contains(needle)
+                    || ocrBarcodes.Contains(f.Barcode));
             }
         }
 
