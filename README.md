@@ -9,11 +9,11 @@ for ~25 lakh files.
 The final Zila Panchayat proposal is the acceptance authority for this branch.
 The clause-by-clause work plan, implemented gaps, pending integrations, department
 inputs and tests are tracked in `ZILA_PANCHAYAT_CODEX.MD`. Current scope is not
-complete: e-office transfer, OCR extraction/search, automated image-quality
+complete: e-office transfer, OCR engine integration, automated image-quality
 gates, full Scan Studio editing and PDF/A certification remain open. The
-four-role server capability matrix, metadata Full-Text setup and approved-page
-PDF composition are implemented but still need live SQL Server verification
-and Department acceptance. The final Department handover is a project delivery
+four-role server capability matrix, metadata Full-Text search, OCR-text ingestion/
+search foundation and approved-page PDF composition are implemented but still
+need live SQL Server verification and Department acceptance. The final Department handover is a project delivery
 gate, tracked in `docs/DEPARTMENT-APPLICATION-HANDOVER.md`, not an in-app feature.
 A database-editable permission editor is not explicit in the approved proposal
 and is not a delivery blocker.
