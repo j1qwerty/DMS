@@ -1,3 +1,5 @@
+> **Historical plan notice (2026-11-18):** This checklist was written for a frontend-first delivery. The backend now exists, but the final Zila Panchayat proposal adds integration and acceptance obligations. Treat this document as a historical implementation log only; current implementation status and remaining work live in [`../ZILA_PANCHAYAT_CODEX.MD`](../ZILA_PANCHAYAT_CODEX.MD). Do not use old “frontend complete/backend deferred” checkboxes as evidence of final proposal completion.
+
 # Implementation TODO and completion log
 
 This checklist was created before implementation. Frontend scope is now marked complete. Backend services remain intentionally deferred because this delivery is frontend-first.
