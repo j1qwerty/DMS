@@ -1,3 +1,5 @@
+> **Status correction (2026-11-18):** This document is the historical design for a *database-editable* permission matrix. The final Zila Panchayat branch now enforces a static four-role capability matrix on the server using `RequirePermissionAttribute` and `AuthService.PermissionsForRole`. The frontend mirrors it for UI visibility. The editable role-permission table, edit endpoints and matrix editor remain deferred/hidden because they are not in the final proposal. Current role enforcement, test status and scope acceptance are tracked in [`../ZILA_PANCHAYAT_CODEX.MD`](../ZILA_PANCHAYAT_CODEX.MD).
+
 # V2 — Editable role permissions
 
 **Status: not implemented. This document is the plan.**
