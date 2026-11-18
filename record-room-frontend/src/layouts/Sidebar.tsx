@@ -19,6 +19,7 @@ import { cn } from '../lib/utils';
 import { useSession } from '../hooks/useService';
 import { can, type Permission } from '../services/permissions';
 import { APP_NAME, RECORD_ROOM_SECTION } from '../lib/brand';
+import { useFeatures, type Features } from '../lib/features';
 
 interface NavItem {
   label: string;
@@ -28,6 +29,7 @@ interface NavItem {
   also?: string[];
   permission?: Permission;
   anyOf?: Permission[];
+  feature?: keyof Features;
 }
 
 /**
@@ -74,7 +76,7 @@ const groups: Array<{ title: string; items: NavItem[] }> = [
 ];
 
 const footerLinks: NavItem[] = [
-  { label: 'Help & support', to: '/support', icon: Question },
+  { label: 'Help & support', to: '/support', icon: Question, feature: 'support' },
   { label: 'Settings', to: '/settings', icon: Gear },
 ];
 
@@ -92,6 +94,7 @@ export function BrandMark({ size = 36 }: { size?: number }) {
 export function Sidebar({ mobileOpen, onClose }: { mobileOpen: boolean; onClose: () => void }) {
   const location = useLocation();
   const { user, signOut } = useSession();
+  const features = useFeatures();
 
   const permitted = (item: NavItem) =>
     item.anyOf
@@ -99,7 +102,7 @@ export function Sidebar({ mobileOpen, onClose }: { mobileOpen: boolean; onClose:
       : !item.permission || can(user?.role, item.permission);
 
   const visibleGroups = groups
-    .map((group) => ({ ...group, items: group.items.filter(permitted) }))
+    .map((group) => ({ ...group, items: group.items.filter((item) => (!item.feature || features[item.feature]) && permitted(item)) }))
     .filter((group) => group.items.length > 0);
 
   const isActive = (item: NavItem) =>
@@ -170,7 +173,7 @@ export function Sidebar({ mobileOpen, onClose }: { mobileOpen: boolean; onClose:
         </nav>
 
         <div className="shrink-0 border-t border-base p-3">
-          <div className="space-y-0.5">{footerLinks.map(link)}</div>
+          <div className="space-y-0.5">{footerLinks.filter((item) => !item.feature || features[item.feature]).map(link)}</div>
           <div className="mt-3 flex items-center gap-3 rounded-lg bg-[var(--rr-bg)] p-2.5">
             <div className="grid size-9 shrink-0 place-items-center rounded-full bg-[var(--rr-accent)] text-sm font-bold text-white dark:text-[#0d1420]">
               {(user?.displayName ?? '?').slice(0, 1).toUpperCase()}
