@@ -350,11 +350,6 @@ namespace RecordRoom.Api.Migrations
 
                     b.HasIndex("RecordedAt");
 
-                    b.HasOne("RecordRoom.Api.Domain.CustodyEvent", "ParentEvent")
-                        .WithMany("ReturnEvents")
-                        .HasForeignKey("ParentEventId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.ToTable("CustodyEvents", (string)null);
                 });
 
@@ -362,7 +357,8 @@ namespace RecordRoom.Api.Migrations
                 {
                     b.HasOne("RecordRoom.Api.Domain.CustodyEvent", "ParentEvent")
                         .WithMany("ReturnEvents")
-                        .HasForeignKey("ParentEventId");
+                        .HasForeignKey("ParentEventId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("RecordRoom.Api.Domain.Employee", b =>
