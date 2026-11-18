@@ -232,8 +232,7 @@ server-side. **v1 stays read-only** — no editing until the user asks.
 ### 3.8 Custody chain — intake register and return sign-off
 
 The tender needs custody recorded **both ways** — phase 1 (receiving and
-counting the department's files) and phase 5 (return + digital handover
-sign-off); the previous plan only had the outbound half. One entity covers it:
+counting the department's files) and phase 5 (return + departmental physical-record custody sign-off); the previous plan only had the outbound half. One entity covers it:
 `DigitizationCustodyEvent` (direction in/out, batch, file count, reconciled
 count, department, vendor, by / signed-off-by / signed-off-at, remarks),
 written through the existing `IAuditWriter`. The intake side yields the
