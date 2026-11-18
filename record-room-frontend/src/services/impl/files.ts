@@ -11,6 +11,7 @@ import { newId, store, timestamp } from '../store';
 import type { FileCreateInput, RecordFile, Room, Section, Shelf, StorageUnit } from '../../types';
 import { log } from './audit';
 import { locationsService } from './locations';
+import { employeesService } from './employees';
 import { session } from './session';
 import {
   addLocalRecordDocument,
@@ -120,7 +121,7 @@ export const filesService: FilesApi = {
   },
 
   async departments() {
-    return [...new Set(store.getState().files.map((file) => file.department))].sort();
+    return employeesService.departments();
   },
 
   async validateCreate(input: FileCreateInput): Promise<FieldIssue[]> {

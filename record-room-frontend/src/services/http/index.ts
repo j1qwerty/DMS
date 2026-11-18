@@ -410,7 +410,10 @@ export const httpFilesService: FilesApi = {
   },
 
   async departments() {
-    return list(await get<string[]>('/api/files/departments'), str);
+    return list(
+      await get<Dto[]>(`/api/departments${qs({ includeInactive: false })}`),
+      (dto) => str(dto.name),
+    );
   },
 
   async validateCreate(input) {

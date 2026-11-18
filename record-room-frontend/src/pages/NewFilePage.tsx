@@ -178,6 +178,7 @@ export function NewFilePage() {
   // The whole location tree in one read, from which both shelf lists are derived.
   const { data: shelfPaths } = useQuery(() => loadShelfPaths(service), [], [] as ShelfPath[]);
   const { data: areas } = useQuery(() => service.locations.areas(), [], [] as Area[]);
+  const { data: departments } = useQuery(() => service.employees.departments(), [], [] as string[]);
 
   const roomOptions = useMemo(
     () => [
@@ -411,12 +412,16 @@ export function NewFilePage() {
                       required
                       error={errorsFor('department')}
                     >
-                      <TextInput
+                      <SelectInput
                         id="file-department"
                         value={form.department}
                         onChange={(event) => set('department', event.target.value)}
-                        placeholder="Revenue"
-                      />
+                      >
+                        <option value="">Select department</option>
+                        {departments.map((department) => (
+                          <option key={department} value={department}>{department}</option>
+                        ))}
+                      </SelectInput>
                     </Field>
                     <Field
                       label="Subject"
