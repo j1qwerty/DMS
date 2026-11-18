@@ -93,6 +93,52 @@ function Invoke-Api {
     return [pscustomobject]@{ Status = 200; Body = $text; Data = $data }
 }
 
+function Invoke-MultipartUpload {
+    param(
+        [string] $Path,
+        [string] $Token,
+        [string] $FilePath,
+        [string] $ContentType
+    )
+
+    if (-not (Test-Path -LiteralPath $FilePath -PathType Leaf)) {
+        throw "Upload file does not exist: $FilePath"
+    }
+
+    $client = [System.Net.Http.HttpClient]::new()
+    $multipart = [System.Net.Http.MultipartFormDataContent]::new()
+    $fileContent = $null
+    try {
+        $client.DefaultRequestHeaders.Authorization =
+            [System.Net.Http.Headers.AuthenticationHeaderValue]::new('Bearer', $Token)
+
+        $bytes = [System.IO.File]::ReadAllBytes($FilePath)
+        $fileContent = [System.Net.Http.ByteArrayContent]::new($bytes)
+        $fileContent.Headers.ContentType =
+            [System.Net.Http.Headers.MediaTypeHeaderValue]::Parse($ContentType)
+        $multipart.Add($fileContent, 'document', [System.IO.Path]::GetFileName($FilePath))
+
+        $response = $client.PostAsync("$BaseUrl$Path", $multipart).GetAwaiter().GetResult()
+        $body = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+        if ($body) {
+            try { $envelope = $body | ConvertFrom-Json }
+            catch { throw "Upload endpoint returned invalid JSON (HTTP $([int]$response.StatusCode)): $body" }
+        } else {
+            $envelope = [pscustomobject]@{ success = $false; errors = @() }
+        }
+
+        if (-not $response.IsSuccessStatusCode -or -not $envelope.success) {
+            throw "Multipart upload failed (HTTP $([int]$response.StatusCode)): $body"
+        }
+        return $envelope
+    }
+    finally {
+        if ($null -ne $fileContent) { $fileContent.Dispose() }
+        $multipart.Dispose()
+        $client.Dispose()
+    }
+}
+
 function Get-Token {
     param([string] $User, [string] $Password)
     $r = Invoke-Api -Method POST -Path '/api/auth/login' -Body @{ userName = $User; password = $Password }
@@ -597,14 +643,11 @@ if (-not $SkipDestructive) {
     Assert-Equal 2 $page2.Data.data.version 'the re-scan is stored as the next version'
     Assert-Equal $createdFile.Data.data.documentSize $page2.Data.data.documentSize 'a blank document size inherits the file size'
 
-    $scanPdf = Join-Path $env:TEMP 'rr-smoke-scan.pdf'
+    $scanPdf = Join-Path ([System.IO.Path]::GetTempPath()) 'rr-smoke-scan.pdf'
     [IO.File]::WriteAllBytes($scanPdf, [Text.Encoding]::ASCII.GetBytes(
         "%PDF-1.4`n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj`n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj`n" +
         "3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj`ntrailer<</Size 4/Root 1 0 R>>`n%%EOF"))
-    $raw = curl.exe -s -X POST "$BaseUrl/api/scans/$($page1.Data.data.id)/document" `
-        -H "Authorization: Bearer $admin" `
-        -F "document=@$scanPdf;type=application/pdf"
-    $uploaded = $raw | ConvertFrom-Json
+    $uploaded = Invoke-MultipartUpload -Path "/api/scans/$($page1.Data.data.id)/document" -Token $admin -FilePath $scanPdf -ContentType 'application/pdf'
     Assert-True ([bool]$uploaded.success) 'the scanned image is attached to the page row'
     $page3 = $uploaded.data
     Assert-Equal $page1.Data.data.id $page3.id 'attaching the scan fills the registration row in place'
@@ -666,20 +709,14 @@ if (-not $SkipDestructive) {
     # The final-PDF pipeline must use source images, retain the originals, and
     # produce a new versioned derivative. Attach the same tiny PNG to the latest
     # approved Front and Back sides to exercise page-side ordering and PDF output.
-    $scanPng = Join-Path $env:TEMP 'rr-smoke-scan.png'
+    $scanPng = Join-Path ([System.IO.Path]::GetTempPath()) 'rr-smoke-scan.png'
     [IO.File]::WriteAllBytes($scanPng, [Convert]::FromBase64String(
         'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADUlEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC'))
 
-    $frontImageRaw = curl.exe -s -X POST "$BaseUrl/api/scans/$($page2.Data.data.id)/document" `
-        -H "Authorization: Bearer $admin" `
-        -F "document=@$scanPng;type=image/png"
-    $frontImage = $frontImageRaw | ConvertFrom-Json
+    $frontImage = Invoke-MultipartUpload -Path "/api/scans/$($page2.Data.data.id)/document" -Token $admin -FilePath $scanPng -ContentType 'image/png'
     Assert-True ([bool]$frontImage.success) 'an approved Front-side scan image can be attached'
 
-    $backImageRaw = curl.exe -s -X POST "$BaseUrl/api/scans/$($backPage1.Data.data.id)/document" `
-        -H "Authorization: Bearer $admin" `
-        -F "document=@$scanPng;type=image/png"
-    $backImage = $backImageRaw | ConvertFrom-Json
+    $backImage = Invoke-MultipartUpload -Path "/api/scans/$($backPage1.Data.data.id)/document" -Token $admin -FilePath $scanPng -ContentType 'image/png'
     Assert-True ([bool]$backImage.success) 'an approved Back-side scan image can be attached'
 
     $finalPdf = Invoke-Api -Method POST -Path "/api/files/$newFileId/digitization/final-pdf" -Token $admin -Body @{}
@@ -893,10 +930,7 @@ if (-not $SkipDestructive) {
     [IO.File]::WriteAllBytes($scanPdf, [Text.Encoding]::ASCII.GetBytes(
         "%PDF-1.4`n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj`n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj`n" +
         "3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj`ntrailer<</Size 4/Root 1 0 R>>`n%%EOF"))
-    $raw = curl.exe -s -X POST "$BaseUrl/api/files/$newFileId/documents" `
-        -H "Authorization: Bearer $admin" `
-        -F "document=@$scanPdf;type=application/pdf"
-    $uploaded = $raw | ConvertFrom-Json
+    $uploaded = Invoke-MultipartUpload -Path "/api/files/$newFileId/documents" -Token $admin -FilePath $scanPdf -ContentType 'application/pdf'
     Assert-True ([bool]$uploaded.success) 'a scan version is uploaded'
     $scanId = $uploaded.data.id
     Assert-True ($scanId -gt 0) 'the upload returns the stored version id'
