@@ -576,6 +576,19 @@ if (-not $SkipDestructive) {
     Assert-Equal 1 $page1.Data.data.version 'the first page is version 1'
     Assert-Equal 'Pending review' $page1.Data.data.status 'a new page awaits review'
     Assert-Equal 'A4' $page1.Data.data.documentSize 'the page keeps its document size'
+    Assert-Equal 'Front' $page1.Data.data.side 'a page without a side defaults to Front'
+
+    $invalidSide = Invoke-Api -Method POST -Path "/api/files/$newFileId/scans" -Token $admin -Body @{
+        fileName = ''; pageNo = 1; documentSize = 'A4'; side = 'Both'
+    }
+    Assert-Equal 400 $invalidSide.Status 'an invalid page side is refused'
+
+    $backPage1 = Invoke-Api -Method POST -Path "/api/files/$newFileId/scans" -Token $admin -Body @{
+        fileName = ''; pageNo = 1; documentSize = 'A4'; side = 'Back'
+    }
+    Assert-Equal 200 $backPage1.Status 'the back side of the same physical page can be registered'
+    Assert-Equal 'Back' $backPage1.Data.data.side 'the back side is preserved'
+    Assert-Equal 1 $backPage1.Data.data.version 'front and back sides are versioned independently'
 
     $page2 = Invoke-Api -Method POST -Path "/api/files/$newFileId/scans" -Token $admin -Body @{
         fileName = ''; pageNo = 1; documentSize = ''
@@ -644,7 +657,7 @@ if (-not $SkipDestructive) {
         decision = 'Approved'; note = ''
     }
     Assert-Equal 200 $reviewAll.Status 'every pending page of a file can be approved at once'
-    Assert-Equal 2 $reviewAll.Data.data 'the bulk review reports each pending page, including the Legal-size page'
+    Assert-Equal 3 $reviewAll.Data.data 'the bulk review reports pending front, back and Legal-size page records'
     $reviewAllAgain = Invoke-Api -Method POST -Path "/api/files/$newFileId/scans/review-all" -Token $admin -Body @{
         decision = 'Approved'; note = ''
     }
