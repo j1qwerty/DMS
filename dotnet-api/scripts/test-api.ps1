@@ -586,6 +586,12 @@ if (-not $SkipDestructive) {
     Assert-Equal 1 $page3.version 'the attached scan keeps version 1'
     Assert-True ($page3.pageCount -eq 1) 'the pdf page count is stored on the scan'
 
+    $scanContent = Invoke-Api -Path "/api/scans/$($page1.Data.data.id)/content" -Token $admin -Raw
+    Assert-Equal 200 $scanContent.Status 'a digitized scan can be opened by an authorized user'
+    $scanAccess = Invoke-Api -Path "/api/audit?action=Access&entity=FileScanPage&search=$($page1.Data.data.id)" -Token $admin
+    Assert-Equal 200 $scanAccess.Status 'scan access audit can be queried'
+    Assert-True (@($scanAccess.Data.data.entries).Count -gt 0) 'opening a scan writes a document-access audit event'
+
     $empAdd = Invoke-Api -Method POST -Path "/api/files/$newFileId/scans" -Token $employeeToken -Body @{
         fileName = ''; pageNo = 2; documentSize = 'A4'
     }
@@ -806,6 +812,12 @@ if (-not $SkipDestructive) {
     Assert-True ([bool]$uploaded.success) 'a scan version is uploaded'
     $scanId = $uploaded.data.id
     Assert-True ($scanId -gt 0) 'the upload returns the stored version id'
+
+    $documentContent = Invoke-Api -Path "/api/files/$newFileId/documents/$scanId/content" -Token $admin -Raw
+    Assert-Equal 200 $documentContent.Status 'an authorized user can open the uploaded document'
+    $documentAccess = Invoke-Api -Path "/api/audit?action=Access&entity=RecordFileDocument&search=$scanId" -Token $admin
+    Assert-Equal 200 $documentAccess.Status 'file-document access audit can be queried'
+    Assert-True (@($documentAccess.Data.data.entries).Count -gt 0) 'opening a file document writes an access audit event'
 
     $empDelete = Invoke-Api -Method DELETE -Path "/api/files/$newFileId/documents/$scanId" -Token $employeeToken
     Assert-Equal 403 $empDelete.Status 'an employee cannot delete a scan version'
