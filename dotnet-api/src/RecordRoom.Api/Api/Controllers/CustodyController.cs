@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using RecordRoom.Api.Application;
 using RecordRoom.Api.Application.Contracts;
 using RecordRoom.Api.Application.Services;
+using RecordRoom.Api.Infrastructure.Auth;
 
 namespace RecordRoom.Api.Api.Controllers;
 
@@ -14,6 +15,7 @@ namespace RecordRoom.Api.Api.Controllers;
 [ApiController]
 [Route("api/custody")]
 [Authorize]
+[RequirePermission("custody.view")]
 [Produces("application/json")]
 [Tags("Digitization")]
 public class CustodyController(ICustodyService custody) : ControllerBase
@@ -30,7 +32,7 @@ public class CustodyController(ICustodyService custody) : ControllerBase
             await custody.ListAsync(new CustodyQuery(direction, search, page, pageSize), ct)));
 
     /// <summary>Records an intake ("Intake") or a return ("Return") handover.</summary>
-    [Authorize(Roles = "Admin,Supervisor")]
+    [RequirePermission("custody.manage")]
     [HttpPost]
     public async Task<IResult> Record(CustodyRecordInput input, CancellationToken ct) =>
         ApiResults.FromResult(await custody.RecordAsync(input, ct));
