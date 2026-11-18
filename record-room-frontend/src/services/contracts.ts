@@ -224,6 +224,8 @@ export interface FilesApi {
   updateEOfficeReference(fileId: string, reference: string): Promise<Result<RecordFile>>;
   listDocuments(fileId: string): Promise<RecordFileDocument[]>;
   uploadDocument(fileId: string, file: File): Promise<Result<RecordFileDocument>>;
+  /** Compose the latest approved scan version of each physical page side into a new immutable PDF. */
+  generateFinalPdf(fileId: string): Promise<Result<RecordFileDocument>>;
   /** Destructive: removes one stored scan version. Admin-only on the API. */
   deleteDocument(fileId: string, documentId: string): Promise<Result<true>>;
   documentBlob(fileId: string, documentId: string): Promise<Blob>;
