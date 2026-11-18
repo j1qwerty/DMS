@@ -51,7 +51,7 @@ public sealed class FilesService(
     ILogger<FilesService> logger) : IFilesService
 {
     private const int MaxPosition = 100;
-    private static readonly Regex SearchTokenPattern = new(@"[\p{L}\p{Nd}]+", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex SearchTokenPattern = new(@"[\p{L}\p{M}\p{Nd}]+", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     /// <summary>
     /// Creates a safe CONTAINS condition from plain user input. Terms are
