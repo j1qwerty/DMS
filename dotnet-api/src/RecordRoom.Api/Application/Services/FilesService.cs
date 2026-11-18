@@ -317,7 +317,7 @@ public sealed class FilesService(
             RecordKind = input.RecordKind is null
                 ? (string.Equals(input.DocumentSize, "A0", StringComparison.OrdinalIgnoreCase) ? "Map" : "File")
                 : (string.Equals(input.RecordKind, "Map", StringComparison.OrdinalIgnoreCase) ? "Map" : "File"),
-            DocumentSize = input.DocumentSize is "A0" or "A1" or "A2" or "A3" or "A4" ? input.DocumentSize : "Other",
+            DocumentSize = input.DocumentSize is "A0" or "A1" or "A2" or "A3" or "A4" or "Legal" ? input.DocumentSize : "Other",
             EOfficeReference = string.IsNullOrWhiteSpace(input.EOfficeReference) ? null : input.EOfficeReference.Trim(),
             Status = RecordStatus.Available,
             RoomId = room?.Id,
