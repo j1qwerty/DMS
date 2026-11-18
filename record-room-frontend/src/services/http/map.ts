@@ -369,6 +369,11 @@ export function toFileScan(dto: Record<string, unknown>): FileScan {
     sha256: dto.sha256 ? str(dto.sha256) : undefined,
     pageCount: dto.pageCount == null ? undefined : num(dto.pageCount),
     pageIndex: dto.pageIndex == null ? undefined : num(dto.pageIndex),
+    ocrStatus: dto.ocrStatus ? str(dto.ocrStatus) as FileScan['ocrStatus'] : 'NotProcessed',
+    hasOcrText: dto.hasOcrText === true,
+    ocrLanguage: dto.ocrLanguage ? str(dto.ocrLanguage) : undefined,
+    ocrEngine: dto.ocrEngine ? str(dto.ocrEngine) : undefined,
+    ocrUpdatedAt: dto.ocrUpdatedAt ? str(dto.ocrUpdatedAt) : undefined,
   };
 }
 
