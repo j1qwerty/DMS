@@ -10,12 +10,13 @@ The final Zila Panchayat proposal is the acceptance authority for this branch.
 The clause-by-clause work plan, implemented gaps, pending integrations, department
 inputs and tests are tracked in `ZILA_PANCHAYAT_CODEX.MD`. Current scope is not
 complete: e-office transfer, OCR extraction/search, automated image-quality
-gates, OCR extraction/search, e-office transfer, full Scan Studio editing and
-PDF/A certification remain open. The four-role server capability matrix,
-metadata Full-Text setup, approved-page PDF composition and a checksum-backed
-digital handover workflow are implemented but still need live SQL Server
-verification and Department acceptance. A database-editable permission editor
-is not explicit in the approved proposal and is not a delivery blocker.
+gates, full Scan Studio editing and PDF/A certification remain open. The
+four-role server capability matrix, metadata Full-Text setup and approved-page
+PDF composition are implemented but still need live SQL Server verification
+and Department acceptance. The final Department handover is a project delivery
+gate, tracked in `docs/DEPARTMENT-APPLICATION-HANDOVER.md`, not an in-app feature.
+A database-editable permission editor is not explicit in the approved proposal
+and is not a delivery blocker.
 
 Barcode and other retained non-scope modules are hidden by default, not deleted.
 See `docs/BARCODE-SWITCH.md` and the final-scope tracker.
@@ -49,10 +50,10 @@ See `docs/BARCODE-SWITCH.md` and the final-scope tracker.
   interfaces mirror the future API. Pages never import the seed data directly.
   The in-memory adapter persists to `localStorage` and publishes to React on
   every write, so a change on the issue desk appears on the movement log, the
-  audit trail and the dashboard in the same tick. In API mode the custody area also contains the digital deliverables handover workflow; the local demo intentionally does not fake official Department receipts.
+  audit trail and the dashboard in the same tick.
 - Routes: `/login`, `/`, `/search`, `/rooms`, `/rooms/:roomId`, `/files`,
   `/files/new`, `/files/:fileId`, `/issue`, `/return`, `/movement`,
-  `/barcodes`, `/scan`, `/digitization`, `/custody` (including digital deliverables handover), `/reports`,
+  `/barcodes`, `/scan`, `/digitization`, `/custody`, `/reports`,
   `/support`, `/settings`, and `/admin/{users,employees,locations,bulk-import,maps,media,audit}`
   under their own administration layout.
 - Setup: Node 22 + pnpm 10.15.0 — `corepack enable && corepack prepare
