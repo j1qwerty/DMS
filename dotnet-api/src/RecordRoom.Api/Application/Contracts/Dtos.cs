@@ -299,9 +299,10 @@ public sealed record FileScanPageDto(
     string? Sha256 = null,
     int? PageCount = null,
     int? PageIndex = null,
-    string? FileNumber = null);
+    string? FileNumber = null,
+    string Side = "Front");
 
-public sealed record ScanAddInput(string FileName, int PageNo, string? DocumentSize = null, string? Note = null);
+public sealed record ScanAddInput(string FileName, int PageNo, string? DocumentSize = null, string? Note = null, string? Side = null);
 public sealed record PageReviewInput(string Decision, string Note = "");
 
 // Custody chain (§3.8) ---------------------------------------------------------
