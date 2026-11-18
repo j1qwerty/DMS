@@ -42,6 +42,14 @@ export interface LoginHistoryEntry {
 
 export type EmployeeStatus = 'Active' | 'Inactive' | 'Retired';
 
+export interface Department {
+  id: string;
+  code: string;
+  name: string;
+  active: boolean;
+  modifiedAt: string;
+}
+
 export interface Employee {
   id: string;
   employeeCode: string;

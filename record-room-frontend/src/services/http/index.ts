@@ -65,6 +65,7 @@ import {
 } from './map';
 import type {
   Area,
+  Department,
   BarcodeSubject,
   FileCreateInput,
   RecordFile,
@@ -658,6 +659,46 @@ export const httpEmployeesService: EmployeesApi = {
 
   async departments() {
     return list(await get<string[]>('/api/employees/departments'), str);
+  },
+
+  async listDepartments(includeInactive = true) {
+    return list(await get<Dto[]>(`/api/departments${qs({ includeInactive })}`), (dto) => ({
+      id: String(dto.id),
+      code: str(dto.code),
+      name: str(dto.name),
+      active: dto.active === true,
+      modifiedAt: str(dto.modifiedAt),
+    })) as Department[];
+  },
+
+  async createDepartment(input) {
+    const result = await attempt<Dto>('POST', '/api/departments', {
+      code: input.code,
+      name: input.name,
+      active: input.active,
+    });
+    return result.ok ? ok({
+      id: String(result.value.id),
+      code: str(result.value.code),
+      name: str(result.value.name),
+      active: result.value.active === true,
+      modifiedAt: str(result.value.modifiedAt),
+    }) : result;
+  },
+
+  async updateDepartment(id, input) {
+    const result = await attempt<Dto>('PUT', `/api/departments/${toApiId(id, 'department')}`, {
+      code: input.code,
+      name: input.name,
+      active: input.active,
+    });
+    return result.ok ? ok({
+      id: String(result.value.id),
+      code: str(result.value.code),
+      name: str(result.value.name),
+      active: result.value.active === true,
+      modifiedAt: str(result.value.modifiedAt),
+    }) : result;
   },
 };
 

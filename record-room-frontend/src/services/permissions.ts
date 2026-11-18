@@ -29,6 +29,7 @@ export const PERMISSIONS = [
   'digitization.review',
   'employees.view',
   'employees.edit',
+  'departments.manage',
   'users.view',
   'users.edit',
   'audit.view',

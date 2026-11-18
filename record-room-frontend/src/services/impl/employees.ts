@@ -7,7 +7,7 @@
 
 import { err, ok, type EmployeeQuery, type EmployeesApi } from '../contracts';
 import { newId, store, timestamp } from '../store';
-import type { Employee } from '../../types';
+import type { Department, Employee } from '../../types';
 import { log } from './audit';
 
 function matchSearch(employee: Employee, needle: string): boolean {
@@ -23,6 +23,27 @@ function matchSearch(employee: Employee, needle: string): boolean {
     .join(' ')
     .toLowerCase()
     .includes(needle);
+}
+
+let departmentCatalog: Department[] = [];
+
+function currentDepartments(): Department[] {
+  const names = new Set(store.getState().employees.map((employee) => employee.department.trim()).filter(Boolean));
+  const existing = new Map(departmentCatalog.map((department) => [department.name, department]));
+  for (const name of names) {
+    if (!existing.has(name)) {
+      const id = newId('dept');
+      existing.set(name, {
+        id,
+        code: `D-${id.slice(-6).toUpperCase()}`,
+        name,
+        active: true,
+        modifiedAt: timestamp(),
+      });
+    }
+  }
+  departmentCatalog = [...existing.values()].sort((a, b) => a.name.localeCompare(b.name, 'en-IN'));
+  return departmentCatalog;
 }
 
 export const employeesService: EmployeesApi = {
@@ -157,6 +178,44 @@ export const employeesService: EmployeesApi = {
   },
 
   async departments() {
-    return [...new Set(store.getState().employees.map((employee) => employee.department))].sort();
+    return currentDepartments().filter((department) => department.active).map((department) => department.name);
+  },
+
+  async listDepartments(includeInactive = true) {
+    return currentDepartments().filter((department) => includeInactive || department.active);
+  },
+
+  async createDepartment(input) {
+    const code = input.code.trim().toUpperCase();
+    const name = input.name.trim();
+    if (!code || !name) return err('Department code and name are required.', 'name');
+    if (currentDepartments().some((department) => department.code === code || department.name.toLowerCase() === name.toLowerCase())) {
+      return err('A department with this code or name already exists.', 'code');
+    }
+    const department: Department = { ...input, id: newId('dept'), code, name, modifiedAt: timestamp() };
+    departmentCatalog = [...departmentCatalog, department];
+    return ok(department);
+  },
+
+  async updateDepartment(id, input) {
+    const current = currentDepartments().find((department) => department.id === id);
+    if (!current) return err('Department not found.', 'id');
+    const code = input.code?.trim().toUpperCase() ?? current.code;
+    const name = input.name?.trim() ?? current.name;
+    if (!code || !name) return err('Department code and name are required.', 'name');
+    if (currentDepartments().some((department) => department.id !== id && (department.code === code || department.name.toLowerCase() === name.toLowerCase()))) {
+      return err('A department with this code or name already exists.', 'code');
+    }
+    const updated = { ...current, ...input, code, name, modifiedAt: timestamp() };
+    departmentCatalog = departmentCatalog.map((department) => department.id === id ? updated : department);
+    store.update((draft) => {
+      for (const employee of draft.employees) {
+        if (employee.department === current.name) {
+          employee.department = name;
+          employee.modifiedAt = updated.modifiedAt;
+        }
+      }
+    });
+    return ok(updated);
   },
 };

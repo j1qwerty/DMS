@@ -23,6 +23,7 @@ import type {
   BulkImportJob,
   CustodyEvent,
   DashboardStats,
+  Department,
   Employee,
   FileCreateInput,
   FileStatus,
@@ -307,6 +308,9 @@ export interface EmployeesApi {
   update(id: string, input: Partial<Employee>): Promise<Result<Employee>>;
   remove(id: string): Promise<Result<true>>;
   departments(): Promise<string[]>;
+  listDepartments(includeInactive?: boolean): Promise<Department[]>;
+  createDepartment(input: Omit<Department, 'id' | 'modifiedAt'>): Promise<Result<Department>>;
+  updateDepartment(id: string, input: Partial<Omit<Department, 'id' | 'modifiedAt'>>): Promise<Result<Department>>;
 }
 
 // ---------------------------------------------------------- digitization api
