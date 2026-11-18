@@ -1,3 +1,5 @@
+> **Final scope tracker:** current project acceptance is tracked in [`../ZILA_PANCHAYAT_CODEX.MD`](../ZILA_PANCHAYAT_CODEX.MD). This general TODO remains an engineering backlog; it must not override the final proposal coverage table.
+
 # Record Room — TODO tracker
 
 The day-to-day checklist. Each item references its section in
