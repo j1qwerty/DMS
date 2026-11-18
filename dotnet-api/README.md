@@ -183,6 +183,12 @@ percentage reports 0. Until the expected page count is approved, digitization
 percentage reports 0. The dashboard exposes baseline-readiness booleans so the
 web UI explains these states rather than implying false completion rates.
 
+The deploy script starts new installations with both baselines at 0. On subsequent
+deploys, zero/omitted command-line values preserve an existing positive baseline;
+supply a new positive `-ExpectedFileCount` or `-ExpectedPageCount` only when the
+Department approves a revised volume. To clear a value, edit the server environment
+file deliberately rather than relying on a routine deploy.
+
 The `AddFilesFullTextIndex` migration installs a SQL Server Full-Text catalog
 and index over metadata fields when the SQL Server instance has the Full-Text
 component installed. On instances without it, search safely falls back to the
