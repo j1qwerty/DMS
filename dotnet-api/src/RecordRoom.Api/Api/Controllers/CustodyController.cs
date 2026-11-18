@@ -38,13 +38,13 @@ public class CustodyController(ICustodyService custody) : ControllerBase
         ApiResults.FromResult(await custody.RecordAsync(input, ct));
 
     /// <summary>Sets the counted file total on an intake (the reconciliation step).</summary>
-    [Authorize(Roles = "Admin,Supervisor")]
+    [RequirePermission("custody.manage")]
     [HttpPost("{id:long}/reconcile")]
     public async Task<IResult> Reconcile(long id, CustodyReconcileInput input, CancellationToken ct) =>
         ApiResults.FromResult(await custody.ReconcileAsync(id, input, ct));
 
     /// <summary>Closes an event with a sign-off; closed events become read-only.</summary>
-    [Authorize(Roles = "Admin,Supervisor")]
+    [RequirePermission("custody.manage")]
     [HttpPost("{id:long}/sign-off")]
     public async Task<IResult> SignOff(long id, CustodySignOffInput input, CancellationToken ct) =>
         ApiResults.FromResult(await custody.SignOffAsync(id, input, ct));
