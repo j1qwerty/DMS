@@ -293,9 +293,13 @@ if [ ! -f "$envfile" ]; then
     echo "Database__MigrateOnStartup=true"
     echo "Database__SeedOnStartup=true"
     echo "Redis__ConnectionString="
-    # Barcode features of the record-room section. true (default) or false; edit the
-    # env file later to change it, the deploy never overwrites an existing value.
+    # Non-scope modules are retained but disabled by default. Edit the env file
+    # later to enable them; subsequent deploys preserve existing operator choices.
     echo "Features__BarcodeEnabled=${BARCODE_ENABLED:-false}"
+    echo "Features__MovementEnabled=${MOVEMENT_ENABLED:-false}"
+    echo "Features__SupportEnabled=${SUPPORT_ENABLED:-false}"
+    echo "Features__BulkImportEnabled=${BULK_IMPORT_ENABLED:-false}"
+    echo "Scope__ExpectedPageCount=${EXPECTED_PAGE_COUNT:-0}"
     echo "Hangfire__Storage=InMemory"
     echo "Hangfire__EnableScheduling=true"
     echo "Swagger__Enabled=true"
@@ -357,10 +361,22 @@ upsert_env FileStorage__MaxUploadBytes "50331648"
 # whether a Redis that is down at boot is retried in the background (good) or
 # demotes the process to the in-memory cache until the next restart (bad).
 upsert_env Redis__ConnectionString "127.0.0.1:6379,abortConnect=false"
-# Barcode switch: add it (default true) on servers deployed before it existed, but never
-# overwrite a value an operator already chose.
-if ! grep -q "^Features__BarcodeEnabled=" "$envfile"; then
-  printf '%s=%s\n' Features__BarcodeEnabled "${BARCODE_ENABLED:-false}" >> "$envfile"
+# Retained out-of-scope modules. Add missing keys with safe defaults, but never
+# overwrite an operator's explicit choice on an existing deployment.
+for feature in Barcode Movement Support BulkImport; do
+  key="Features__${feature}Enabled"
+  case "$feature" in
+    Barcode) value="${BARCODE_ENABLED:-false}" ;;
+    Movement) value="${MOVEMENT_ENABLED:-false}" ;;
+    Support) value="${SUPPORT_ENABLED:-false}" ;;
+    BulkImport) value="${BULK_IMPORT_ENABLED:-false}" ;;
+  esac
+  if ! grep -q "^${key}=" "$envfile"; then
+    printf '%s=%s\n' "$key" "$value" >> "$envfile"
+  fi
+done
+if ! grep -q "^Scope__ExpectedPageCount=" "$envfile"; then
+  printf '%s=%s\n' Scope__ExpectedPageCount "${EXPECTED_PAGE_COUNT:-0}" >> "$envfile"
 fi
 
 # Hangfire in SQL Server rather than memory. In-memory storage loses every job on
