@@ -453,6 +453,11 @@ export const httpFilesService: FilesApi = {
     return result.ok ? ok(toRecordFileDocument(result.value)) : result;
   },
 
+  async generateFinalPdf(fileId) {
+    const result = await attempt<Dto>('POST', `/api/files/${fileId}/digitization/final-pdf`, {});
+    return result.ok ? ok(toRecordFileDocument(result.value)) : result;
+  },
+
   async deleteDocument(fileId, documentId) {
     return wrapTrue(await attempt<Dto>('DELETE', `/api/files/${fileId}/documents/${documentId}`));
   },
