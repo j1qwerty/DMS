@@ -387,6 +387,8 @@ export interface RecordFileDocument {
   uploadedBy: string;
   /** Pages in a stored PDF; absent when the count is unknown. */
   pageCount?: number;
+  /** Attachment is an uploaded source; FinalPdf is composed from approved page scans. */
+  documentKind?: 'Attachment' | 'FinalPdf';
 }
 
 // ------------------------------------------------------------------- barcodes
