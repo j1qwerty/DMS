@@ -35,14 +35,14 @@ A route, button, database field, or mock adapter alone is not evidence that an e
 | Intake reconciliation before sign-off | DONE / TEST NOT RUN | An inbound custody event cannot be signed off until a reconciliation count exists. |
 | Legal document-size option | DONE / TEST NOT RUN | Legal added alongside A0/A1/A2/A3/A4/Other in the file and scan size validation/UI. |
 | Dashboard metric corrections | PARTIAL / TEST ADDED | Mapped percentage counts files with a shelf placement; due counts count outstanding file-lines, not receipts; digitisation percentage counts approved PDF pages against an agreed expected-page baseline. The denominator remains to be finalized and configured. |\n| Metadata full-text search | PARTIAL / TEST ADDED | Added a SQL Server Full-Text catalog/index migration for registry metadata; API uses `CONTAINS` when the index is active and falls back to the existing search if Full-Text Search is unavailable. |
-| Automated and live verification | PENDING | The GitHub source changes were committed through repository access. A clean local checkout, .NET build/test, pnpm checks, live SQL Server API harness and API-contract test have not yet been observed as passing on this branch. |
+| Automated and live verification | PARTIAL | GitHub Actions verifies the frontend lint/typecheck/tests/build and .NET build/unit tests. The API smoke harness has additional direct-permission, feature-switch, access-audit, custody, page-side and dashboard assertions, but it still needs a live SQL Server run. The live `api-contract.test.ts` has not been run in this session. |
 
 ## 3. Final proposal 1.1 — DMS software
 
 | # | Requirement | Existing implementation / evidence | State | Remaining work and acceptance condition |
 |---|---|---|---|---|
 | 1.1.1 | Web login for authorized users | ASP.NET authentication and React session flow. Four role names exist: Admin, Supervisor, Operator and Employee. | DONE | Run the full role login and access test matrix on SQL Server. Verify inactive account, failed password and logout behavior. |
-| 1.1.2 | Capability matrix for each role | Frontend capability map and API role-based `[Authorize(Roles=...)]` restrictions exist. The database-backed editable permission matrix is only designed; role-name attributes remain the main API authorization boundary. | PARTIAL | Implement central server-side permission policies for every read/write/export/document endpoint. UI hiding is not security. Test each role against each permission, including direct HTTP requests and escalation attempts. |
+| 1.1.2 | Capability matrix for each role | The final branch now enforces a server-owned four-role matrix with `RequirePermissionAttribute` across file registry, users, employees, locations, issue/return, digitization, reports, document storage, custody, audit and retained optional modules. Frontend mirrors the same identifiers for navigation. No role-only authorization attributes remain in the reviewed API controller set. | PARTIAL / TEST ADDED | GitHub .NET unit CI has passed for the current enforcement code; direct HTTP permission assertions were added to `scripts/test-api.ps1` and need a live SQL Server run. The editable DB-backed permission editor remains deferred; verify no hidden endpoints or service operations bypass controller permissions. |
 | 1.1.3 | Audit stamps | Write services use `IAuditWriter`; entries contain actor, role, timestamp, IP, before/after values and summary. Document view events were added in this branch. | PARTIAL | Add/verify audit events for every document read, download, export, upload, deletion, metadata change, permission change and handover. Confirm retention and immutability policy; prove no ordinary user can alter/delete audit rows. |
 | 1.1.4 | Login history | Success/failure/sign-out history, login channel, IP/client and Admin/Supervisor audit view exist. | DONE | Re-run positive, negative, deactivated-user, OTP/PIN and sign-out tests. Confirm user-facing privacy policy for stored IP/client data. |
 | 1.1.5 | Account controls | Admin user create/update/deactivate/delete and role assignment exist. | DONE | Verify password reset, account lock/deactivation, last-admin safety and all four role cases. |
@@ -145,7 +145,7 @@ Implementation rules:
 | Area | Current state | Acceptance work |
 |---|---|---|
 | Four-role authentication | DONE / TEST | Live API test all roles and account-state cases. |
-| Server-side permissions | PARTIAL | Replace coarse role attributes with permission policy enforcement; add positive and negative endpoint tests. |
+| Server-side permissions | PARTIAL / TEST ADDED | Four-role server capability filter is applied across controllers, with unit role allow/deny tests and HTTP harness assertions; confirm latest CI and run the live harness. Editable permission administration remains deferred. |
 | File/document access | PARTIAL | Check authorization before content stream; audit view/download; no public blob URLs. |
 | Audit integrity | PARTIAL | Protect audit data against user update/delete; verify all CRUD, access and export actions. |
 | SQL Server data integrity | PARTIAL | Verify migrations, unique constraints, transaction handling and concurrency for issue/return, file upload/version and custody/handover. |
@@ -174,13 +174,13 @@ Implementation rules:
 | Legal-size scan page accepted and size retained | `scripts/test-api.ps1` | TEST ADDED / NOT RUN |\n| Front and Back sides accepted independently at the same page number; invalid sides rejected; version numbers are independent | `scripts/test-api.ps1`, `record-room-frontend/tests/features-and-rooms.test.ts` | TEST ADDED / NOT RUN |
 | E-office-linked file can be found via link filter and reference search | `scripts/test-api.ps1` | TEST ADDED / NOT RUN |
 | Multiple outstanding files in one receipt count as multiple due files | `scripts/test-api.ps1` | TEST ADDED / NOT RUN |
-| Frontend optional features default off, can be independently enabled, and API config overrides build values | `record-room-frontend/tests/features-and-rooms.test.ts` | TEST ADDED / NOT RUN |
+| Frontend optional features default off, can be independently enabled, and API config overrides build values | `record-room-frontend/tests/features-and-rooms.test.ts` | TEST ADDED / NOT RUN |\n| Frontend four-role capability matrix covers Admin/Supervisor/Operator/Employee grants and denials | `record-room-frontend/tests/permissions.test.ts` | TEST ADDED / NOT RUN |\n| Server permission filter returns 401/403 and enforces the role grants including custody and document deletion | `dotnet-api/tests/RecordRoom.Api.Tests/FeatureSwitchTests.cs` | TEST ADDED / NOT RUN |\n| Live HTTP harness checks supervisor users.view/users.edit, employee issue denial, operator custody view/manage and direct API role boundaries | `dotnet-api/scripts/test-api.ps1` | TEST ADDED / NOT RUN |
 
 ### 9.2 Required tests still missing
 
 | Test group | Required scenarios |
 |---|---|
-| Permission matrix | For every endpoint/action, Admin/Supervisor/Operator/Employee allowed and denied matrix; direct HTTP calls; file read/download/export; no role escalation; disabled account; no self-lockout. |
+| Permission matrix | Full role/action matrix on live API, direct HTTP calls for read/write/export/document/custody operations, no privilege escalation, disabled account, and regression that server grants match the frontend matrix. Editable permission changes and last-admin lockout remain deferred unless approved. |
 | Search | Metadata search, exact file number, department/date filters, OCR body-text search after OCR is added, pagination, permissions, SQL FTS index availability/fallback, Hindi-English matching, query plan and large-volume performance. |
 | e-office | Successful transfer, credential failure, timeout, duplicate/retry idempotency, partial failure, provider rejection, receipt/reference persistence, source checksum match. |
 | Scanning | A0/A1/A2/A3/A4/Legal; front/back side identity and separate versioning; image and PDF uploads; page order; duplicate/rescan versions; corrupted/unsupported/oversized file rejection. |
