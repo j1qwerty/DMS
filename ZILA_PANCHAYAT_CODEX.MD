@@ -33,11 +33,11 @@ A route, button, database field, or mock adapter alone is not evidence that an e
 | Retained non-scope modules instead of deleting them | DONE | Barcode workflows, standalone movement log/report, support/inquiries/media links and bulk import remain in source. |
 | Disabled-by-default optional modules | DONE / TEST NOT RUN | API configuration and web fallback defaults are false; API endpoints are guarded and frontend navigation/routes are hidden. |
 | Document-open audit events | DONE / TEST NOT RUN | Opening file attachments, digitisation scan content and map scan content writes an `Access` audit event. New enum value `Access = 11` is appended without renumbering existing values. |
-| Intake reconciliation before sign-off | DONE / TEST NOT RUN | An inbound custody event cannot be signed off until a reconciliation count exists. |
-| Legal document-size option | DONE / TEST NOT RUN | Legal added alongside A0/A1/A2/A3/A4/Other in the file and scan size validation/UI. |
+| Intake reconciliation before sign-off | DONE / TEST ADDED | An inbound custody event cannot be signed off until a reconciliation count exists; harness checks premature sign-off refusal. |
+| Legal document-size option | DONE / TEST ADDED | Legal added alongside A0/A1/A2/A3/A4/Other in file and scan size validation/UI; harness registers and composes a Legal-size scan. |
 | Dashboard metric corrections | PARTIAL / TEST ADDED | Mapped percentage counts files with a shelf placement against `Scope:ExpectedFileCount`; digitisation percentage counts approved PDF pages against `Scope:ExpectedPageCount`; both remain 0 until a positive department-approved denominator is set. Registry `collectionTotal` uses the approved file count or actual loaded DB count—no hard-coded district total. Due counts count outstanding file-lines, not receipts. |
-| Metadata full-text search | PARTIAL / TEST ADDED | `20261118000400_AddFilesFullTextIndex` now conditionally creates a SQL Server Full-Text catalog/index for registry metadata when the component is installed; API uses safe `CONTAINS` terms when active and falls back to metadata filtering otherwise. OCR-text extraction/indexing is not present. |
-| Automated and live verification | PARTIAL | CI is configured for frontend lint/typecheck/tests/build and .NET build/unit tests plus a SQL Server smoke harness. New digital handover role, manifest, delivery, rejection/acceptance, ZIP integrity and export-audit assertions are added, but no successful current-branch run has been verified in this session. The live `api-contract.test.ts` has not been run here. |
+| Metadata full-text search | PARTIAL / TEST ADDED | `20261118000400_AddFilesFullTextIndex` conditionally creates a SQL Server Full-Text catalog/index for registry metadata when the component is installed; API uses safe `CONTAINS` terms when active and falls back otherwise. The migration and SQL condition tests are added; OCR extraction/indexing is not present. |
+| Digital handover workflow | PARTIAL / TEST ADDED | SQL-backed API, migration, immutable manifest, PDF SHA-256 verification, metadata CSV, handover receipt JSON, ZIP export, size cap, delivery state and Department accept/reject sign-off are implemented. UI is integrated beside physical custody; local demo explicitly does not fabricate official receipts. |
 
 ## 3. Final proposal 1.1 — DMS software
 
@@ -186,7 +186,7 @@ Implementation rules:
 | Frontend optional features default off, can be independently enabled, and API config overrides build values | `record-room-frontend/tests/features-and-rooms.test.ts` | TEST ADDED / NOT RUN |
 | Frontend four-role capability matrix covers Admin/Supervisor/Operator/Employee grants and denials | `record-room-frontend/tests/permissions.test.ts` | TEST ADDED / NOT RUN |
 | Server permission filter returns 401/403 and enforces the role grants including custody and document deletion | `dotnet-api/tests/RecordRoom.Api.Tests/FeatureSwitchTests.cs` | TEST ADDED / NOT RUN |
-| Live HTTP harness checks supervisor users.view/users.edit, employee issue denial, operator custody view/manage and direct API role boundaries | `dotnet-api/scripts/test-api.ps1` | TEST ADDED / NOT RUN |
+| Live HTTP harness checks supervisor users.view/users.edit, employee issue denial, operator custody view/manage, digital handover view/manage and direct API role boundaries | `dotnet-api/scripts/test-api.ps1` | TEST ADDED / NOT RUN |
 
 ### 9.2 Required tests still missing
 
@@ -200,7 +200,7 @@ Implementation rules:
 | Quality | Low DPI, blur, blank page, poor contrast, skew, wrong orientation, crop loss; failed page cannot be marked quality-approved without override and reason. |
 | OCR | Representative Hindi/English, degraded scans, confidence, text persistence, page offsets, search hit links to exact source page, no cross-user leakage. |
 | Custody | Intake manifest vs counted quantity, mismatch, recount, damaged/missing exception, outbound return, signed-off immutability, unauthorized write. |
-| Digital handover | Generate package, verify hashes, export metadata, deliver/retry, receiver reject/accept, signer/time, package version and final closure. |
+| Digital handover | Confirm the 256 MiB package limit is suitable, add retry/re-delivery policy if required, run manifest/source/package hash and ZIP receipt tests on SQL Server, test unauthorized download/sign-off, and obtain Department-approved package format and sign-off wording. |
 | Dashboard | Reconcile approved file-count/page-count baselines, placed count, issued files, due file-lines, overdue files and approved PDF page volume against source registers; verify unset-baseline UI messaging. |
 | Deployment/storage | SQL migration on clean DB, upgrade from existing v2 DB, private file persistence across deploy, backup/restore, large upload and API restart. |
 
