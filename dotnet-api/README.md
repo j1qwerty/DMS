@@ -100,10 +100,10 @@ department scope. The clause-by-clause status remains in
 combined with user-initiated transactions, and issue/return and location writes
 depend on explicit transactions. Transaction correctness wins.
 
-**`collectionTotal` is not `total`.** The registry table holds whatever is
-actually loaded, but `PagedResult<FileDto>.CollectionTotal` reports the legacy
-collection size (2,478,450) so the UI can label its window honestly instead of
-implying it holds every record.
+**`collectionTotal` is not `total`.** `total` is the filtered result count.
+`collectionTotal` reports `Scope:ExpectedFileCount` when the Department has
+approved a positive inventory total; otherwise it reports the actual number of
+records in this database. No historical district volume is hard-coded.
 
 **Enums cross the wire as strings, on both serializer stacks.** Controller
 actions return `IResult`, and `Results.Ok(...)` resolves to a minimal-API
@@ -150,6 +150,7 @@ configuration, so a site can change the cadence without a rebuild.
 | `Features:MovementEnabled` | `false` | retained standalone movement log/report; env `Features__MovementEnabled` |
 | `Features:SupportEnabled` | `false` | retained support/inquiry/media endpoints; env `Features__SupportEnabled` |
 | `Features:BulkImportEnabled` | `false` | retained bulk CSV import endpoints; env `Features__BulkImportEnabled` |
+| `Scope:ExpectedFileCount` | `0` | department-approved registry volume for collection total and mapped percentage; env `Scope__ExpectedFileCount` |
 | `Scope:ExpectedPageCount` | `0` | department-approved page volume for the digitization percentage; env `Scope__ExpectedPageCount` |
 
 Migrations and the seeder never crash the process: a database that is not
@@ -175,10 +176,18 @@ enabled individually by an operator when authorized:
 values. The frontend reads this configuration at startup in HTTP mode, so the
 API setting takes precedence over build-time fallback flags.
 
-Set `Scope:ExpectedPageCount` only after the Department has confirmed the total
-page volume. Until it is set to a positive, approved count, the dashboard
-digitization percentage deliberately reports 0 rather than implying a false
-completion rate.
+Set `Scope:ExpectedFileCount` and `Scope:ExpectedPageCount` only after the
+Department has confirmed the registry and page volumes. Until the expected
+file count is approved, the registry uses the actual database count and mapped
+percentage reports 0. Until the expected page count is approved, digitization
+percentage reports 0. The dashboard exposes baseline-readiness booleans so the
+web UI explains these states rather than implying false completion rates.
+
+The `AddFilesFullTextIndex` migration installs a SQL Server Full-Text catalog
+and index over metadata fields when the SQL Server instance has the Full-Text
+component installed. On instances without it, search safely falls back to the
+existing metadata query. OCR extraction/text indexing remains a separately
+blocked POC; metadata FTS is not evidence that OCR has been implemented.
 
 When barcode is **off**:
 
