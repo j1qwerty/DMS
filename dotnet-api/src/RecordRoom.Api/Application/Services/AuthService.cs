@@ -297,8 +297,8 @@ public sealed class AuthService(
     {
         Role.Admin =>
         [
-            "files.view", "files.create", "files.edit", "files.bulkImport",
-            "issue.issue", "issue.return", "locations.view", "locations.edit",
+            "files.view", "files.create", "files.edit", "files.bulkImport", "files.documentDelete",
+            "issue.issue", "issue.return", "locations.view", "locations.edit", "custody.view", "custody.manage",
             "digitization.view", "digitization.upload", "digitization.review",
             "employees.view", "employees.edit", "users.view", "users.edit",
             "audit.view", "reports.view", "reports.export", "barcodes.print",
@@ -306,17 +306,17 @@ public sealed class AuthService(
         Role.Supervisor =>
         [
             "files.view", "files.create", "files.edit", "files.bulkImport",
-            "issue.issue", "issue.return", "locations.view", "locations.edit",
+            "issue.issue", "issue.return", "locations.view", "locations.edit", "custody.view", "custody.manage",
             "digitization.view", "digitization.upload", "digitization.review",
             "employees.view", "employees.edit", "users.view",
             "audit.view", "reports.view", "reports.export", "barcodes.print",
         ],
         Role.Operator =>
         [
-            "files.view", "files.create", "issue.issue", "issue.return",
+            "files.view", "files.create", "issue.issue", "issue.return", "custody.view",
             "locations.view", "digitization.view", "digitization.upload",
             "employees.view", "reports.view", "barcodes.print",
         ],
-        _ => ["files.view", "digitization.view", "reports.view"],
+        _ => ["files.view", "digitization.view", "reports.view", "custody.view"],
     };
 }
