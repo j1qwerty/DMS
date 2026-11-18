@@ -663,6 +663,381 @@ if (-not $SkipDestructive) {
     }
     Assert-Equal 400 $reviewAllAgain.Status 'a bulk review with nothing pending is refused'
 
+    # The final-PDF pipeline must use source images, retain the originals, and
+    # produce a new versioned derivative. Attach the same tiny PNG to the latest
+    # approved Front and Back sides to exercise page-side ordering and PDF output.
+    $scanPng = Join-Path $env:TEMP 'rr-smoke-scan.png'
+    [IO.File]::WriteAllBytes($scanPng, [Convert]::FromBase64String(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADUlEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC'))
+
+    $frontImageRaw = curl.exe -s -X POST "$BaseUrl/api/scans/$($page2.Data.data.id)/document" `
+        -H "Authorization: Bearer $admin" `
+        -F "document=@$scanPng;type=image/png"
+    $frontImage = $frontImageRaw | ConvertFrom-Json
+    Assert-True ([bool]$frontImage.success) 'an approved Front-side scan image can be attached'
+
+    $backImageRaw = curl.exe -s -X POST "$BaseUrl/api/scans/$($backPage1.Data.data.id)/document" `
+        -H "Authorization: Bearer $admin" `
+        -F "document=@$scanPng;type=image/png"
+    $backImage = $backImageRaw | ConvertFrom-Json
+    Assert-True ([bool]$backImage.success) 'an approved Back-side scan image can be attached'
+
+    $finalPdf = Invoke-Api -Method POST -Path "/api/files/$newFileId/digitization/final-pdf" -Token $admin -Body @{}
+    Assert-Equal 200 $finalPdf.Status 'approved page-side images can be composed into a final PDF'
+    Assert-Equal 'FinalPdf' $finalPdf.Data.data.documentKind 'the derivative is identified separately from source attachments'
+    Assert-Equal 2 $finalPdf.Data.data.pageCount 'the final PDF contains the approved Front and Back sides'
+    Assert-True ($finalPdf.Data.data.sha256 -match '^[A-Fa-f0-9]{64} -Method DELETE -Path "/api/scans/$($page2.Data.data.id)" -Token $supervisorToken
+    Assert-Equal 400 $supRemoveApproved.Status 'a supervisor cannot remove an approved scan'
+    $adminRemoveApproved = Invoke-Api -Method DELETE -Path "/api/scans/$($page2.Data.data.id)" -Token $admin
+    Assert-Equal 200 $adminRemoveApproved.Status 'an admin can remove an approved scan'
+}
+
+# ============================================================ barcodes
+if ($barcodeOn) {
+Write-Step 'Barcode payloads and validation'
+$payload = Invoke-Api -Path "/api/barcodes/payload/File/$newFileId" -Token $admin
+Assert-Equal 200 $payload.Status 'a file payload can be built'
+Assert-True ($payload.Data.data.value -like 'RR|FILE|*') 'the payload follows RR|SUBJECT|VALUE'
+Assert-True ($payload.Data.data.value -like "*|$newBarcode") 'the payload embeds the file barcode'
+# services/impl/barcodes.ts: buildPayload('File', file.fileBarcode, file.fileNumber)
+Assert-Equal $createdFile.Data.data.fileNumber $payload.Data.data.label 'the label is the human file number'
+Assert-Equal 'File' $payload.Data.data.subject 'the payload names its subject'
+
+$validScan = Invoke-Api -Method POST -Path '/api/barcodes/validate' -Token $admin -Body @{ value = "RR|FILE|$newBarcode" }
+Assert-Equal 200 $validScan.Status 'a well-formed payload validates'
+Assert-True ($validScan.Data.data.ok) 'validation accepts a good payload'
+
+$badScan = Invoke-Api -Method POST -Path '/api/barcodes/validate' -Token $admin -Body @{ value = 'not-a-payload' }
+Assert-True (-not $badScan.Data.data.ok) 'a malformed payload is refused'
+Assert-True ($badScan.Data.data.message -match 'Unrecognised') 'the refusal explains the grammar'
+
+$unknownSubject = Invoke-Api -Method POST -Path '/api/barcodes/validate' -Token $admin -Body @{ value = 'RR|WIDGET|X' }
+Assert-True (-not $unknownSubject.Data.data.ok) 'an unknown subject code is refused'
+
+$qrUrl = "RR|FILE|$newBarcode"
+$qr = Invoke-Api -Path "/api/barcodes/qr?value=$([uri]::EscapeDataString($qrUrl))" -Token $admin
+Assert-True ($qr.Data.data -match '/scan\?p=') 'a QR sticker URL is produced'
+
+$job = Invoke-Api -Method POST -Path '/api/barcodes/jobs' -Token $admin -Body @{
+    subject = 'File'; targetId = "$newFileId"; quantity = 3
+}
+Assert-Equal 200 $job.Status 'a print job is queued'
+$tooMany = Invoke-Api -Method POST -Path '/api/barcodes/jobs' -Token $admin -Body @{
+    subject = 'File'; targetId = "$newFileId"; quantity = 9999
+}
+Assert-Equal 400 $tooMany.Status 'an absurd print quantity is refused'
+
+
+} else {
+    $hiddenBarcode = Invoke-Api -Path "/api/barcodes/payload/File/$newFileId" -Token $admin
+    Assert-Equal 404 $hiddenBarcode.Status 'barcode endpoints are hidden when disabled'
+}
+
+# ============================================================ bulk
+if ($bulkImportOn) {
+Write-Step 'Bulk import classification'
+$bulkCsv = @"
+barcode,subject,shelf
+RF-BULK-$([guid]::NewGuid().ToString('N').Substring(0,8)),Fresh row,$($activeShelf.barcode)
+$($first.fileBarcode),Duplicate row,$($activeShelf.barcode)
+RF-BULK-UNKNOWN,Bad shelf,RM-NOPE-99
+"@
+$bulk = Invoke-Api -Method POST -Path '/api/bulk/validate' -Token $admin -Body @{ csv = $bulkCsv; folder = 'bulk/Temp99999/' }
+Assert-Equal 200 $bulk.Status 'a CSV batch validates'
+Assert-Equal 1 $bulk.Data.data.accepted 'only the free barcode is accepted'
+Assert-Equal 2 $bulk.Data.data.rejected 'the duplicate and the bad shelf are rejected'
+Assert-Equal 1 $bulk.Data.data.duplicates 'the duplicate is counted'
+
+$badHeader = Invoke-Api -Method POST -Path '/api/bulk/validate' -Token $admin -Body @{
+    csv = "a,b,c`n1,2,3"; folder = 'bulk/Temp99999/'
+}
+Assert-Equal 400 $badHeader.Status 'a CSV without the required headers is refused'
+
+if (-not $SkipDestructive) {
+    $commit = Invoke-Api -Method POST -Path "/api/bulk/jobs/$($bulk.Data.data.id)/commit" -Token $admin
+    Assert-Equal 200 $commit.Status 'the accepted rows commit'
+    $committedBarcode = "RF-BULK-$([guid]::NewGuid().ToString('N').Substring(0,8))"
+    $reCommit = Invoke-Api -Method POST -Path "/api/bulk/jobs/$($bulk.Data.data.id)/commit" -Token $admin
+    Assert-Equal 400 $reCommit.Status 'a committed job cannot be committed twice'
+}
+
+
+} else {
+    $hiddenBulk = Invoke-Api -Path '/api/bulk/jobs' -Token $admin
+    Assert-Equal 404 $hiddenBulk.Status 'bulk import endpoints are hidden when disabled'
+}
+
+# ============================================================ maps
+Write-Step 'Map uploads'
+$maps = Invoke-Api -Path '/api/uploads/maps' -Token $admin
+Assert-Equal 200 $maps.Status 'GET /api/uploads/maps responds'
+
+if (-not $SkipDestructive) {
+    $map = Invoke-Api -Method POST -Path '/api/uploads/maps' -Token $admin -Body @{
+        fileBarcode = $newBarcode; pageNo = 5; fileName = "$newBarcode-MAP-5.png"; sizeKb = 1500
+    }
+    Assert-Equal 200 $map.Status 'a map page is stored'
+    Assert-Equal 1 $map.Data.data.version 'the first map page is version 1'
+    $map2 = Invoke-Api -Method POST -Path '/api/uploads/maps' -Token $admin -Body @{
+        fileBarcode = $newBarcode; pageNo = 5; fileName = "$newBarcode-MAP-5-v2.png"; sizeKb = 1600
+    }
+    Assert-Equal 2 $map2.Data.data.version 'a re-scan supersedes as the next version'
+    $badMap = Invoke-Api -Method POST -Path '/api/uploads/maps' -Token $admin -Body @{
+        fileBarcode = 'RF-NOPE'; pageNo = 1; fileName = 'x.png'; sizeKb = 10
+    }
+    Assert-Equal 400 $badMap.Status 'a map for an unknown barcode is refused'
+}
+
+# ============================================================ reports
+Write-Step 'Reports'
+$defs = Invoke-Api -Path '/api/reports' -Token $admin
+Assert-Equal 200 $defs.Status 'GET /api/reports responds'
+Assert-True (@($defs.Data.data).Count -ge $(if ($movementOn) { 8 } else { 7 })) 'the report catalogue contains the in-scope reports'
+
+$issueReport = Invoke-Api -Path '/api/reports/issue-register' -Token $admin
+Assert-Equal 200 $issueReport.Status 'a report builds'
+Assert-Equal $issueReport.Data.data.columns.Count @($issueReport.Data.data.rows[0]).Count 'every row matches the column set'
+
+$overdue = Invoke-Api -Path '/api/reports/overdue-files' -Token $admin
+Assert-Equal 200 $overdue.Status 'the overdue report builds'
+if (-not $movementOn) {
+    $hiddenMovementReport = Invoke-Api -Path '/api/reports/movement-log' -Token $admin
+    Assert-Equal 400 $hiddenMovementReport.Status 'the standalone movement report is hidden when disabled'
+}
+
+$export = Invoke-Api -Path '/api/reports/file-registry/export' -Token $admin -Raw
+Assert-Equal 200 $export.Status 'a report exports as CSV'
+if ($barcodeOn) {
+    Assert-True ($export.Body -match 'Barcode,Number,Subject') 'the CSV has the expected barcode-enabled header'
+} else {
+    Assert-True ($export.Body -match 'Number,Subject,Department') 'the CSV omits barcode columns when disabled'
+}
+
+# ============================================================ dashboard
+Write-Step 'Dashboard aggregates'
+# Two open files in one receipt must count as two due files, not one due receipt.
+$dashboardDue = Invoke-Api -Method POST -Path '/api/issues' -Token $admin -Body @{
+    borrowerType = 'Employee'; borrowerEmployeeCode = 'EMP0002'; borrowerName = 'Sneha Verma'
+    department = 'Establishment'; purpose = 'Dashboard due-file metric'
+    fileIds = @($newFileId, $targets[0].id)
+    dueAt = (Get-Date).AddHours(12).ToString('yyyy-MM-ddTHH:mm:ss'); remark = 'dashboard metric test'
+}
+Assert-Equal 200 $dashboardDue.Status 'a due-file metric test receipt is created'
+
+$stats = Invoke-Api -Path '/api/dashboard/stats' -Token $admin
+Assert-Equal 200 $stats.Status 'GET /api/dashboard/stats responds'
+Assert-Equal 2478450 $stats.Data.data.totalRecords 'the dashboard reports the registry size'
+Assert-True ($stats.Data.data.mappedPercent -ge 0 -and $stats.Data.data.mappedPercent -le 100) 'mapped percent is a real percentage'
+Assert-True ($stats.Data.data.dueToday -ge 2) 'two outstanding files on one receipt count as two due files'
+Assert-True ($stats.Data.data.digitizationPercent -ge 0 -and $stats.Data.data.digitizationPercent -le 100) 'digitization percent uses a bounded agreed-volume metric'
+$activity = Invoke-Api -Path '/api/dashboard/activity?limit=5' -Token $admin
+Assert-Equal 200 $activity.Status 'GET /api/dashboard/activity responds'
+Assert-True (@($activity.Data.data).Count -gt 0) 'activity is derived from movement events'
+$dashboardDueReturn = Invoke-Api -Method POST -Path "/api/issues/$($dashboardDue.Data.data.id)/return" -Token $admin -Body @{
+    fileIds = @($newFileId, $targets[0].id); condition = 'Good'
+}
+Assert-Equal 200 $dashboardDueReturn.Status 'dashboard metric test files can be returned after measurement'
+
+# ============================================================ roles
+Write-Step 'Role-based access control'
+Assert-True ($null -ne $operatorToken) 'the operator account can sign in'
+Assert-True ($null -ne $employeeToken) 'the employee account can sign in'
+
+$opUsers = Invoke-Api -Path '/api/users' -Token $operatorToken
+Assert-Equal 403 $opUsers.Status 'an operator cannot manage logins'
+
+$empUsers = Invoke-Api -Path '/api/users' -Token $employeeToken
+Assert-Equal 403 $empUsers.Status 'an employee cannot manage logins'
+
+$empAudit = Invoke-Api -Path '/api/audit' -Token $employeeToken
+Assert-Equal 403 $empAudit.Status 'an employee cannot read the audit trail'
+
+$empEmployees = Invoke-Api -Path '/api/employees' -Token $employeeToken
+Assert-Equal 403 $empEmployees.Status 'an employee cannot read the employee directory without employees.view'
+
+$opEmployees = Invoke-Api -Path '/api/employees' -Token $operatorToken
+Assert-Equal 200 $opEmployees.Status 'an operator with employees.view can read the employee directory'
+
+$empIssue = Invoke-Api -Method POST -Path '/api/issues' -Token $employeeToken -Body @{}
+Assert-Equal 403 $empIssue.Status 'an employee cannot bypass issue.issue with a direct API call'
+
+$supervisorUsers = Invoke-Api -Path '/api/users' -Token $supervisorToken
+Assert-Equal 200 $supervisorUsers.Status 'a supervisor with users.view can read the user directory'
+$supervisorCreateUser = Invoke-Api -Method POST -Path '/api/users' -Token $supervisorToken -Body @{}
+Assert-Equal 403 $supervisorCreateUser.Status 'a supervisor without users.edit cannot create users'
+
+$operatorCustody = Invoke-Api -Path '/api/custody' -Token $operatorToken
+Assert-Equal 200 $operatorCustody.Status 'an operator with custody.view can read custody events'
+$operatorCustodyWrite = Invoke-Api -Method POST -Path '/api/custody' -Token $operatorToken -Body @{
+    direction = 'Intake'; department = 'Audit'; fileCount = 1
+}
+Assert-Equal 403 $operatorCustodyWrite.Status 'custody.manage is required to write a custody event'
+
+$empFiles = Invoke-Api -Path '/api/files' -Token $employeeToken
+Assert-Equal 200 $empFiles.Status 'an employee can still read the registry'
+
+$opMe = Invoke-Api -Path '/api/auth/me' -Token $operatorToken
+Assert-True ($opMe.Data.data.permissions -contains 'issue.issue') 'the operator is granted issue.issue'
+Assert-True (-not ($opMe.Data.data.permissions -contains 'users.edit')) 'the operator is not granted users.edit'
+
+# ============================================================ file scan versions
+Write-Step 'File scan versions (upload + admin delete)'
+$scanList = Invoke-Api -Path "/api/files/$newFileId/documents" -Token $admin
+Assert-Equal 200 $scanList.Status 'GET /api/files/{id}/documents responds'
+
+if (-not $SkipDestructive) {
+    # Invoke-WebRequest on Windows PowerShell 5.1 cannot post a multipart form,
+    # so the upload goes through curl.exe. A minimal one-page PDF is enough:
+    # this section exercises the version row lifecycle, not pdf parsing.
+    $scanPdf = Join-Path $env:TEMP 'rr-smoke-scan.pdf'
+    [IO.File]::WriteAllBytes($scanPdf, [Text.Encoding]::ASCII.GetBytes(
+        "%PDF-1.4`n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj`n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj`n" +
+        "3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj`ntrailer<</Size 4/Root 1 0 R>>`n%%EOF"))
+    $raw = curl.exe -s -X POST "$BaseUrl/api/files/$newFileId/documents" `
+        -H "Authorization: Bearer $admin" `
+        -F "document=@$scanPdf;type=application/pdf"
+    $uploaded = $raw | ConvertFrom-Json
+    Assert-True ([bool]$uploaded.success) 'a scan version is uploaded'
+    $scanId = $uploaded.data.id
+    Assert-True ($scanId -gt 0) 'the upload returns the stored version id'
+
+    $documentContent = Invoke-Api -Path "/api/files/$newFileId/documents/$scanId/content" -Token $admin -Raw
+    Assert-Equal 200 $documentContent.Status 'an authorized user can open the uploaded document'
+    $documentAccess = Invoke-Api -Path "/api/audit?action=Access&entity=RecordFileDocument&search=$scanId" -Token $admin
+    Assert-Equal 200 $documentAccess.Status 'file-document access audit can be queried'
+    Assert-True (@($documentAccess.Data.data.entries).Count -gt 0) 'opening a file document writes an access audit event'
+
+    $empDelete = Invoke-Api -Method DELETE -Path "/api/files/$newFileId/documents/$scanId" -Token $employeeToken
+    Assert-Equal 403 $empDelete.Status 'an employee cannot delete a scan version'
+    $opDelete = Invoke-Api -Method DELETE -Path "/api/files/$newFileId/documents/$scanId" -Token $operatorToken
+    Assert-Equal 403 $opDelete.Status 'an operator cannot delete a scan version'
+    $supDelete = Invoke-Api -Method DELETE -Path "/api/files/$newFileId/documents/$scanId" -Token $supervisorToken
+    Assert-Equal 403 $supDelete.Status 'a supervisor cannot delete a scan version'
+
+    $adminDelete = Invoke-Api -Method DELETE -Path "/api/files/$newFileId/documents/$scanId" -Token $admin
+    Assert-Equal 200 $adminDelete.Status 'an admin can delete a scan version'
+    $gone = Invoke-Api -Method DELETE -Path "/api/files/$newFileId/documents/$scanId" -Token $admin
+    Assert-Equal 400 $gone.Status 'deleting an already removed scan version is refused'
+}
+
+# ============================================================ inquiry + media
+if ($supportOn) {
+Write-Step 'Inquiry and media links'
+$inq = Invoke-Api -Method POST -Path '/api/inquiries' -Token $employeeToken -Body @{
+    name = 'Smoke Tester'; email = 'tester@example.invalid'; department = 'Audit'
+    message = 'Automated smoke test inquiry with enough detail.'
+}
+Assert-Equal 200 $inq.Status 'an inquiry is accepted'
+$shortMsg = Invoke-Api -Method POST -Path '/api/inquiries' -Token $employeeToken -Body @{
+    name = 'Smoke Tester'; email = 'tester@example.invalid'; department = 'Audit'; message = 'hi'
+}
+Assert-Equal 400 $shortMsg.Status 'a too-short inquiry is refused'
+
+$media = Invoke-Api -Method POST -Path '/api/media-links' -Token $employeeToken -Body @{
+    title = 'Smoke test image'; url = 'https://example.invalid/a.png'; alt = 'A test image'
+}
+Assert-Equal 200 $media.Status 'an https media link is accepted'
+$unsafe = Invoke-Api -Method POST -Path '/api/media-links' -Token $employeeToken -Body @{
+    title = 'Unsafe'; url = 'javascript:alert(1)'; alt = 'nope'
+}
+Assert-Equal 400 $unsafe.Status 'a non-http(s) media URL is refused'
+
+
+} else {
+    $hiddenInquiry = Invoke-Api -Path '/api/inquiries' -Token $employeeToken
+    Assert-Equal 404 $hiddenInquiry.Status 'support and inquiry endpoints are hidden when disabled'
+}
+
+# ============================================================ custody chain
+Write-Step 'Custody chain — intake register and return sign-off'
+
+$empCustodyList = Invoke-Api -Path '/api/custody' -Token $employeeToken
+Assert-Equal 200 $empCustodyList.Status 'any authenticated user can read the custody register'
+
+$empCustodyWrite = Invoke-Api -Method POST -Path '/api/custody' -Token $employeeToken -Body @{
+    direction = 'Intake'; department = 'Audit'; fileCount = 3
+}
+Assert-Equal 403 $empCustodyWrite.Status 'an employee cannot record custody'
+
+$opCustodyWrite = Invoke-Api -Method POST -Path '/api/custody' -Token $operatorToken -Body @{
+    direction = 'Intake'; department = 'Audit'; fileCount = 3
+}
+Assert-Equal 403 $opCustodyWrite.Status 'an operator cannot record custody'
+
+$badCustody = Invoke-Api -Method POST -Path '/api/custody' -Token $admin -Body @{
+    direction = 'Intake'; department = ''; fileCount = 0
+}
+Assert-Equal 400 $badCustody.Status 'an intake without a department or count is refused'
+
+$intake = Invoke-Api -Method POST -Path '/api/custody' -Token $admin -Body @{
+    direction = 'Intake'; department = 'Audit'; fileCount = 5
+    batchRef = 'DIG-SMOKE'; vendor = 'ScanServe'; remarks = 'Smoke-test intake.'
+}
+Assert-Equal 200 $intake.Status 'an intake is recorded'
+$custodyId = $intake.Data.data.id
+Assert-Equal 'Intake' $intake.Data.data.direction 'the intake keeps the contract direction word'
+Assert-Equal 'Farida Begum' $intake.Data.data.recordedBy 'the intake names the recorder by display name'
+
+$reconcile = Invoke-Api -Method POST -Path "/api/custody/$custodyId/reconcile" -Token $admin -Body @{
+    reconciledCount = 4; remarks = 'One file short at counting.'
+}
+Assert-Equal 200 $reconcile.Status 'the intake is reconciled'
+Assert-Equal 4 $reconcile.Data.data.reconciledCount 'the counted total is stored'
+
+$return = Invoke-Api -Method POST -Path '/api/custody' -Token $admin -Body @{
+    direction = 'Return'; department = 'Audit'; fileCount = 4; batchRef = 'DIG-SMOKE'
+}
+Assert-Equal 200 $return.Status 'a return is recorded'
+$returnId = $return.Data.data.id
+
+$returnCount = Invoke-Api -Method POST -Path "/api/custody/$returnId/reconcile" -Token $admin -Body @{
+    reconciledCount = 4
+}
+Assert-Equal 400 $returnCount.Status 'a return cannot be reconciled'
+
+$signOff = Invoke-Api -Method POST -Path "/api/custody/$returnId/sign-off" -Token $admin -Body @{
+    signedOffBy = 'Audit Officer'
+}
+Assert-Equal 200 $signOff.Status 'the return is signed off'
+Assert-Equal 'Audit Officer' $signOff.Data.data.signedOffBy 'the sign-off names the signer'
+Assert-True ($null -ne $signOff.Data.data.signedOffAt) 'the sign-off stamps a time'
+
+$reSign = Invoke-Api -Method POST -Path "/api/custody/$returnId/sign-off" -Token $admin -Body @{ }
+Assert-Equal 400 $reSign.Status 'a signed-off event cannot be signed off twice'
+
+$earlyIntakeSign = Invoke-Api -Method POST -Path "/api/custody/$custodyId/sign-off" -Token $admin -Body @{ }
+Assert-Equal 400 $earlyIntakeSign.Status 'an intake cannot be signed off before reconciliation'
+
+$intakeSign = Invoke-Api -Method POST -Path "/api/custody/$custodyId/sign-off" -Token $admin -Body @{ }
+Assert-Equal 200 $intakeSign.Status 'a reconciled intake can be signed off'
+Assert-Equal 'Farida Begum' $intakeSign.Data.data.signedOffBy 'a blank sign-off defaults to the current user'
+
+$reCount = Invoke-Api -Method POST -Path "/api/custody/$custodyId/reconcile" -Token $admin -Body @{
+    reconciledCount = 5
+}
+Assert-Equal 400 $reCount.Status 'a signed-off event can no longer be changed'
+
+$filtered = Invoke-Api -Path '/api/custody?direction=Intake&search=SMOKE' -Token $admin
+Assert-Equal 200 $filtered.Status 'the register filters by direction and text'
+Assert-True ($filtered.Data.data.items.Count -ge 1) 'the smoke-test intake appears in the filtered register'
+
+# ============================================================ summary
+Write-Host "`n================================" -ForegroundColor Cyan
+Write-Host "  passed: $script:Passed   failed: $script:Failed" -ForegroundColor Cyan
+Write-Host "================================" -ForegroundColor Cyan
+if ($script:Failed -gt 0) {
+    Write-Host "`nFailures:" -ForegroundColor Red
+    foreach ($failure in $script:FailList) { Write-Host "  - $failure" -ForegroundColor Red }
+    exit 1
+}
+exit 0
+) 'the final PDF stores a SHA-256 checksum'
+    $finalContent = Invoke-Api -Path "/api/files/$newFileId/documents/$($finalPdf.Data.data.id)/content" -Token $admin -Raw
+    Assert-Equal 200 $finalContent.Status 'the final PDF is available through authenticated document content'
+    $sourceAfterCompose = Invoke-Api -Path "/api/files/$newFileId/scans" -Token $admin
+    Assert-True (@($sourceAfterCompose.Data.data | Where-Object { $_.id -eq $page2.Data.data.id -and $_.hasDocument }).Count -eq 1) 'the Front source scan remains stored after composition'
+    Assert-True (@($sourceAfterCompose.Data.data | Where-Object { $_.id -eq $backPage1.Data.data.id -and $_.hasDocument }).Count -eq 1) 'the Back source scan remains stored after composition'
+
     $supRemoveApproved = Invoke-Api -Method DELETE -Path "/api/scans/$($page2.Data.data.id)" -Token $supervisorToken
     Assert-Equal 400 $supRemoveApproved.Status 'a supervisor cannot remove an approved scan'
     $adminRemoveApproved = Invoke-Api -Method DELETE -Path "/api/scans/$($page2.Data.data.id)" -Token $admin
