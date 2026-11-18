@@ -17,9 +17,12 @@ namespace RecordRoom.Api.Tests;
 /// </summary>
 public class FeatureSwitchTests
 {
-    private sealed class Flags(bool on) : IFeatureFlags
+    private sealed class Flags(bool barcode, bool movement = false, bool support = false, bool bulkImport = false) : IFeatureFlags
     {
-        public bool BarcodeEnabled { get; } = on;
+        public bool BarcodeEnabled { get; } = barcode;
+        public bool MovementEnabled { get; } = movement;
+        public bool SupportEnabled { get; } = support;
+        public bool BulkImportEnabled { get; } = bulkImport;
     }
 
     [Theory]
@@ -51,10 +54,10 @@ public class FeatureSwitchTests
     }
 
     [Fact]
-    public void Flags_read_the_configuration_key_and_default_to_on()
+    public void Flags_read_the_configuration_key_and_default_to_off()
     {
         var empty = new ConfigurationBuilder().Build();
-        Assert.True(new FeatureFlags(empty).BarcodeEnabled);
+        Assert.False(new FeatureFlags(empty).BarcodeEnabled);
 
         var off = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?> { [FeatureFlags.BarcodeKey] = "false" })
@@ -83,6 +86,39 @@ public class FeatureSwitchTests
             new List<IFilterMetadata>(),
             new Dictionary<string, object?>(),
             controller: new object());
+    }
+
+
+    [Fact]
+    public void Non_scope_features_are_off_by_default_and_can_be_enabled_by_configuration()
+    {
+        var defaults = new FeatureFlags(new ConfigurationBuilder().Build());
+        Assert.False(defaults.BarcodeEnabled);
+        Assert.False(defaults.MovementEnabled);
+        Assert.False(defaults.SupportEnabled);
+        Assert.False(defaults.BulkImportEnabled);
+
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            [FeatureFlags.MovementKey] = "true",
+            [FeatureFlags.SupportKey] = "on",
+            [FeatureFlags.BulkImportKey] = "1",
+        }).Build();
+        var flags = new FeatureFlags(config);
+        Assert.True(flags.MovementEnabled);
+        Assert.True(flags.SupportEnabled);
+        Assert.True(flags.BulkImportEnabled);
+    }
+
+    [Fact]
+    public void Config_payload_includes_all_optional_feature_switches()
+    {
+        var dto = new RecordRoom.Api.Application.Contracts.FeaturesDto(
+            Barcode: false, Movement: true, Support: false, BulkImport: true);
+        Assert.False(dto.Barcode);
+        Assert.True(dto.Movement);
+        Assert.False(dto.Support);
+        Assert.True(dto.BulkImport);
     }
 
     [Fact]
@@ -124,7 +160,7 @@ public class FeatureSwitchTests
     public void Config_payload_names_the_product_and_reports_the_flag()
     {
         var dto = new RecordRoom.Api.Application.Contracts.AppConfigDto(
-            AppInfo.Name, new RecordRoom.Api.Application.Contracts.FeaturesDto(false));
+            AppInfo.Name, new RecordRoom.Api.Application.Contracts.FeaturesDto(false, false, false, false));
         Assert.Equal("Document Management System", dto.AppName);
         Assert.False(dto.Features.Barcode);
     }
