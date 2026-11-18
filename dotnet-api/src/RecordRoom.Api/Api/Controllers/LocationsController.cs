@@ -3,12 +3,14 @@ using Microsoft.AspNetCore.Mvc;
 using RecordRoom.Api.Application;
 using RecordRoom.Api.Application.Contracts;
 using RecordRoom.Api.Application.Services;
+using RecordRoom.Api.Infrastructure.Auth;
 
 namespace RecordRoom.Api.Api.Controllers;
 
 [ApiController]
 [Route("api/locations")]
 [Authorize]
+[RequirePermission("locations.view")]
 [Produces("application/json")]
 [Tags("Locations")]
 public class LocationsController(ILocationsService locations) : ControllerBase
@@ -27,7 +29,7 @@ public class LocationsController(ILocationsService locations) : ControllerBase
         return room is null ? Results.NotFound() : Results.Ok(ApiResponse<RoomDto>.Ok(room));
     }
 
-    [Authorize(Roles = "Admin,Supervisor")]
+    [RequirePermission("locations.edit")]
     [HttpPost("rooms")]
     public async Task<IResult> AddRoom(RoomInput input, CancellationToken ct) =>
         ApiResults.FromResult(await locations.AddRoomAsync(input, ct));
