@@ -6,11 +6,7 @@ using RecordRoom.Api.Infrastructure.Features;
 
 namespace RecordRoom.Api.Api.Controllers;
 
-/// <summary>
-/// Public, read-only product settings. Anonymous on purpose: the login screen needs
-/// to know the product name and which features exist before anyone has signed in.
-/// Nothing secret belongs here.
-/// </summary>
+/// <summary>Public, read-only product settings. No secrets belong here.</summary>
 [ApiController]
 [Route("api/config")]
 [AllowAnonymous]
@@ -21,5 +17,11 @@ public class ConfigController(IFeatureFlags flags) : ControllerBase
     [HttpGet]
     [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
     public IResult Get() =>
-        Results.Ok(new AppConfigDto(AppInfo.Name, new FeaturesDto(flags.BarcodeEnabled)));
+        Results.Ok(new AppConfigDto(
+            AppInfo.Name,
+            new FeaturesDto(
+                flags.BarcodeEnabled,
+                flags.MovementEnabled,
+                flags.SupportEnabled,
+                flags.BulkImportEnabled)));
 }
