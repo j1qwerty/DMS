@@ -53,10 +53,12 @@ SQL Server database `RecordRoom`. The app applies migrations and seeds on
 first boot, so no manual SQL step is needed once the `recordroom_app` login
 exists (the deploy script creates it).
 
-142 assertions covering auth, the location hierarchy guards, registry
-validation, multi-file issue with a partial return, audit and movement trails,
-digitization versioning, bulk classification, barcodes, reports, dashboard
-aggregates and role-based access control.
+The real HTTP harness covers authentication, location guards, registry
+validation, multi-file issue/partial return, audit and document access,
+digitization versioning, custody, reports, dashboard aggregates and role access.
+It also verifies the optional-module disabled state where the corresponding
+feature flags are false. The current assertion count is intentionally not stated
+here because it changes as the scope regression matrix is extended.
 
 ## Layout
 
@@ -80,11 +82,12 @@ writes the audit row, the movement event and the changed entity together, then
 publishes to SignalR after commit. There is no path that changes data without
 leaving a trace.
 
-**The API is the authorization boundary.** `[Authorize(Roles = ...)]` on every
-mutating endpoint mirrors the capability matrix in
-`../record-room-frontend/src/services/permissions.ts`. Hiding a control in the
-frontend is UX, not access control; the smoke test asserts the server refuses
-what the matrix withholds.
+**The API is the authorization boundary.** The current implementation still
+uses role-based `[Authorize(Roles = ...)]` policies for most endpoints, while
+the frontend permission matrix is UX gating. This does not yet satisfy the
+final requirement for a fully server-enforced, editable capability matrix.
+Track the policy migration and direct-call permission tests in
+`../ZILA_PANCHAYAT_CODEX.MD`. Frontend hiding is never treated as security.
 
 **No `EnableRetryOnFailure`.** EF Core's retrying execution strategy cannot be
 combined with user-initiated transactions, and issue/return and location writes
@@ -136,31 +139,56 @@ configuration, so a site can change the cadence without a rebuild.
 | `Hangfire:AuditRetentionCron` | `30 2 * * *` | audit retention cadence, UTC |
 | `Cors:AllowedOrigins` | `http://localhost:5173` | frontend origin |
 | `Swagger:Enabled` | `true` | serve `/swagger` |
-| `Features:BarcodeEnabled` | `true` | barcode features of the record-room section; env `Features__BarcodeEnabled`; accepts `false`/`0`/`off`/`no`/`disabled` to turn off |
+| `Features:BarcodeEnabled` | `false` | retained barcode module; env `Features__BarcodeEnabled` |
+| `Features:MovementEnabled` | `false` | retained standalone movement log/report; env `Features__MovementEnabled` |
+| `Features:SupportEnabled` | `false` | retained support/inquiry/media endpoints; env `Features__SupportEnabled` |
+| `Features:BulkImportEnabled` | `false` | retained bulk CSV import endpoints; env `Features__BulkImportEnabled` |
+| `Scope:ExpectedPageCount` | `0` | department-approved page volume for the digitization percentage; env `Scope__ExpectedPageCount` |
 
 Migrations and the seeder never crash the process: a database that is not
 reachable yet is logged and reported by `/api/health` instead.
 
-## Barcode switch and product config
+## Product scope and optional modules
 
-The product is a Document Management System; the record room (physical files, rooms, barcodes)
-is an additional section. `Features:BarcodeEnabled` turns the barcode part on or off (default on).
+The final department proposal and the complete clause-by-clause implementation
+tracker are in `../ZILA_PANCHAYAT_CODEX.MD`. That tracker is the acceptance
+source of truth for this branch.
 
-`GET /api/config` (anonymous) returns `{ "appName": "Document Management System", "features": { "barcode": true } }`.
-The frontend reads it at startup, so changing the setting needs no frontend rebuild.
+Barcode, standalone movement history, support/inquiries/media, and bulk import
+are retained modules outside the current user-facing proposal scope. They are
+hidden by default, not deleted. All four API flags default to false and can be
+enabled individually by an operator when authorized:
 
-When it is **off**:
+- `Features:BarcodeEnabled`
+- `Features:MovementEnabled`
+- `Features:SupportEnabled`
+- `Features:BulkImportEnabled`
 
-- `api/barcodes/*` and `GET api/files/by-barcode/{barcode}` answer **404** ("Barcode features are turned off.").
+`GET /api/config` (anonymous) returns the app name and all four boolean feature
+values. The frontend reads this configuration at startup in HTTP mode, so the
+API setting takes precedence over build-time fallback flags.
+
+Set `Scope:ExpectedPageCount` only after the Department has confirmed the total
+page volume. Until it is set to a positive, approved count, the dashboard
+digitization percentage deliberately reports 0 rather than implying a false
+completion rate.
+
+When barcode is **off**:
+
+- `api/barcodes/*` and `GET api/files/by-barcode/{barcode}` answer **404** ("Barcode features are turned off.");
 - Files are identified by **file number**. Map upload, digitization page-add and similar calls accept a file number
   where they used to need a barcode; a number shared by several files is refused rather than guessed.
 - New files get an internal id (the next `RF-##########`) and new shelves/almirahs derive one from their code, so no
   barcode has to be typed. The stored id still links maps, scans and history; nothing is migrated.
-- Reports drop barcode columns, `barcodes.print` is not offered in permissions, movement and activity sentences no
-  longer lead with the internal id, and bulk-import messages say "ID".
+- Reports drop barcode columns and `barcodes.print` is not offered in permissions. Standalone movement history and the movement report are controlled by their separate flag. Bulk-import endpoints are independently controlled by their own flag.
 
-Rows that carry only the internal id now also carry `fileNumber` (issue lines, movements, digitization pages, map
+Rows that carry only the internal id also carry `fileNumber` (issue lines, movements, digitization pages, map
 pages), and map pages carry `fileId`, so screens never need a barcode lookup.
+
+**Proposal gaps remain:** app-side storage and an e-office reference field do not
+constitute an e-office transfer. OCR extraction/full-text search, final PDF
+composition, measurable image-quality gates, per-side tracking and digital
+handover are still open. See the tracker before making any completion claim.
 
 ## Rooms
 
