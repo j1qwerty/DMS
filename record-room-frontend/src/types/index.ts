@@ -479,6 +479,8 @@ export interface DashboardStats {
   roomCount: number;
   activeBorrowers: number;
   pendingApprovals: number;
+  mappedBaselineConfigured: boolean;
+  digitizationBaselineConfigured: boolean;
 }
 
 // ------------------------------------------------------------------- timeline
