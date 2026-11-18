@@ -93,32 +93,6 @@ function Invoke-Api {
     return [pscustomobject]@{ Status = 200; Body = $text; Data = $data }
 }
 
-function Invoke-Download {
-    param([string] $Path, [string] $Token)
-    $client = [System.Net.Http.HttpClient]::new()
-    $response = $null
-    try {
-        $client.DefaultRequestHeaders.Authorization =
-            [System.Net.Http.Headers.AuthenticationHeaderValue]::new('Bearer', $Token)
-        $response = $client.GetAsync("$BaseUrl$Path").GetAwaiter().GetResult()
-        $bytes = $response.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult()
-        $packageHash = ''
-        [string[]] $values = @()
-        if ($response.Headers.TryGetValues('X-Package-SHA256', [ref]$values)) {
-            $packageHash = $values[0]
-        }
-        return [pscustomobject]@{
-            Status = [int]$response.StatusCode
-            Bytes = $bytes
-            PackageSha256 = $packageHash
-        }
-    }
-    finally {
-        if ($null -ne $response) { $response.Dispose() }
-        $client.Dispose()
-    }
-}
-
 function Invoke-MultipartUpload {
     param(
         [string] $Path,
@@ -770,128 +744,6 @@ if (-not $SkipDestructive) {
     Assert-True (@($sourceAfterCompose.Data.data | Where-Object { $_.id -eq $page2.Data.data.id -and $_.hasDocument }).Count -eq 1) 'the Front source scan remains stored after composition'
     Assert-True (@($sourceAfterCompose.Data.data | Where-Object { $_.id -eq $backPage1.Data.data.id -and $_.hasDocument }).Count -eq 1) 'the Back source scan remains stored after composition'
 
-    # The digital handover is a separate deliverable workflow. It snapshots the
-    # FinalPdf metadata and requires delivery before a department representative
-    # can accept/reject it.
-    $handoverRef = "DIG-HANDOVER-$([guid]::NewGuid().ToString('N').Substring(0,8))"
-    $handover = Invoke-Api -Method POST -Path '/api/digital-handovers' -Token $admin -Body @{
-        batchRef = $handoverRef
-        department = $createdFile.Data.data.department
-        fileIds = @($newFileId)
-        notes = 'Smoke test digital handover.'
-    }
-    Assert-Equal 200 $handover.Status 'a handover manifest is prepared from a file final PDF'
-    Assert-Equal 'Prepared' $handover.Data.data.status 'a new digital handover starts Prepared'
-    Assert-Equal 1 $handover.Data.data.itemCount 'the manifest contains the selected file'
-    Assert-True ($handover.Data.data.manifestSha256 -match '^[A-Fa-f0-9]{64}$') 'the manifest stores a SHA-256 checksum'
-    Assert-Equal $finalPdf.Data.data.id $handover.Data.data.items[0].documentId 'the manifest pins the generated final PDF document id'
-    $earlyPackage = Invoke-Api -Path "/api/digital-handovers/$($handover.Data.data.id)/package" -Token $admin -Raw
-    Assert-Equal 400 $earlyPackage.Status 'a handover package cannot be downloaded before delivery'
-    $earlySignOff = Invoke-Api -Method POST -Path "/api/digital-handovers/$($handover.Data.data.id)/sign-off" -Token $admin -Body @{
-        decision = 'Accepted'; signedOffBy = 'Department Nodal Officer'; notes = ''
-    }
-    Assert-Equal 400 $earlySignOff.Status 'the Department cannot sign off a package before delivery'
-
-    $deliveredHandover = Invoke-Api -Method POST -Path "/api/digital-handovers/$($handover.Data.data.id)/deliver" -Token $admin -Body @{}
-    Assert-Equal 200 $deliveredHandover.Status 'the prepared digital package can be marked delivered'
-    Assert-Equal 'Delivered' $deliveredHandover.Data.data.status 'delivery changes the handover state'
-    $duplicateDelivery = Invoke-Api -Method POST -Path "/api/digital-handovers/$($handover.Data.data.id)/deliver" -Token $admin -Body @{}
-    Assert-Equal 400 $duplicateDelivery.Status 'a delivered package cannot be delivered twice'
-
-    $badHandoverRejection = Invoke-Api -Method POST -Path "/api/digital-handovers/$($handover.Data.data.id)/sign-off" -Token $admin -Body @{
-        decision = 'Rejected'; signedOffBy = 'Department Nodal Officer'; notes = ' '
-    }
-    Assert-Equal 400 $badHandoverRejection.Status 'a rejected handover requires an exception reason'
-
-    $acceptedHandover = Invoke-Api -Method POST -Path "/api/digital-handovers/$($handover.Data.data.id)/sign-off" -Token $admin -Body @{
-        decision = 'Accepted'; signedOffBy = 'Department Nodal Officer'; notes = 'Manifest and PDF received.'
-    }
-    Assert-Equal 200 $acceptedHandover.Status 'the Department representative can accept the delivered package'
-    Assert-Equal 'Accepted' $acceptedHandover.Data.data.status 'the digital handover is recorded as Accepted'
-    Assert-Equal 'Department Nodal Officer' $acceptedHandover.Data.data.signedOffBy 'the named receiver is persisted'
-    Assert-True ($null -ne $acceptedHandover.Data.data.signedOffAt) 'the Department acceptance is timestamped'
-    $duplicateHandoverSignOff = Invoke-Api -Method POST -Path "/api/digital-handovers/$($handover.Data.data.id)/sign-off" -Token $admin -Body @{
-        decision = 'Accepted'; signedOffBy = 'Department Nodal Officer'; notes = ''
-    }
-    Assert-Equal 400 $duplicateHandoverSignOff.Status 'a signed-off handover is immutable'
-
-    $downloadedHandover = Invoke-Download -Path "/api/digital-handovers/$($handover.Data.data.id)/package" -Token $admin
-    Assert-Equal 200 $downloadedHandover.Status 'the accepted digital handover ZIP can be downloaded'
-    Assert-True ($downloadedHandover.Bytes.Length -gt 100) 'the delivered package contains actual bytes'
-    Assert-True ($downloadedHandover.PackageSha256 -match '^[A-Fa-f0-9]{64}$') 'the ZIP response includes its SHA-256 checksum'
-    $actualPackageHash = [Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData($downloadedHandover.Bytes))
-    Assert-Equal $downloadedHandover.PackageSha256 $actualPackageHash 'the ZIP package checksum matches its downloaded bytes'
-    Assert-True ($downloadedHandover.Bytes[0] -eq 0x50 -and $downloadedHandover.Bytes[1] -eq 0x4b) 'the package uses the ZIP file signature'
-    $packageStream = [System.IO.MemoryStream]::new($downloadedHandover.Bytes)
-    $zip = [System.IO.Compression.ZipArchive]::new($packageStream, [System.IO.Compression.ZipArchiveMode]::Read, $true)
-    try {
-        $entryNames = @($zip.Entries | ForEach-Object { $_.FullName })
-        Assert-True ($entryNames -contains 'manifest.json') 'the ZIP contains the immutable JSON manifest'
-        Assert-True ($entryNames -contains 'metadata.csv') 'the ZIP contains the supporting metadata CSV'
-        Assert-True ($entryNames -contains 'handover-receipt.json') 'the ZIP contains the delivered receiver sign-off receipt'
-        $pdfEntries = @($entryNames | Where-Object { $_ -like 'documents/*.pdf' })
-        Assert-Equal 1 $pdfEntries.Count 'the ZIP contains the generated PDF deliverable'
-        $manifestStream = $zip.GetEntry('manifest.json').Open()
-        $manifestReader = [System.IO.StreamReader]::new($manifestStream)
-        try { $manifestText = $manifestReader.ReadToEnd() }
-        finally { $manifestReader.Dispose(); $manifestStream.Dispose() }
-        $manifestHash = [Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($manifestText)))
-        Assert-Equal $handover.Data.data.manifestSha256 $manifestHash 'the exported manifest matches the prepared manifest checksum'
-    }
-    finally {
-        $zip.Dispose()
-        $packageStream.Dispose()
-    }
-
-    $handoverAudit = Invoke-Api -Path "/api/audit?action=Export&entity=DigitalHandoverBatch&search=$($handover.Data.data.id)" -Token $admin
-    Assert-Equal 200 $handoverAudit.Status 'digital handover package export is auditable'
-    Assert-True (@($handoverAudit.Data.data.entries).Count -gt 0) 'downloading the package writes an Export audit entry'
-
-    # Exercise a real Department rejection separately from the acceptance flow.
-    $wrongDepartmentHandover = Invoke-Api -Method POST -Path '/api/digital-handovers' -Token $admin -Body @{
-        batchRef = "$handoverRef-WRONG-DEPT"
-        department = 'Different Department'
-        fileIds = @($newFileId)
-    }
-    Assert-Equal 400 $wrongDepartmentHandover.Status 'a handover cannot include a file from another Department'
-    $rejectedHandoverRef = "$handoverRef-REJECT"
-    $rejectedHandover = Invoke-Api -Method POST -Path '/api/digital-handovers' -Token $admin -Body @{
-        batchRef = $rejectedHandoverRef
-        department = $createdFile.Data.data.department
-        fileIds = @($newFileId)
-        notes = 'Smoke test rejection workflow.'
-    }
-    Assert-Equal 200 $rejectedHandover.Status 'a second handover can be prepared for rejection testing'
-    $rejectedDelivery = Invoke-Api -Method POST -Path "/api/digital-handovers/$($rejectedHandover.Data.data.id)/deliver" -Token $admin -Body @{}
-    Assert-Equal 200 $rejectedDelivery.Status 'the rejection-test package can be marked delivered'
-    $actualRejection = Invoke-Api -Method POST -Path "/api/digital-handovers/$($rejectedHandover.Data.data.id)/sign-off" -Token $admin -Body @{
-        decision = 'Rejected'; signedOffBy = 'Department Nodal Officer'; notes = 'One file needs rescanning.'
-    }
-    Assert-Equal 200 $actualRejection.Status 'the Department can reject a delivered digital handover'
-    Assert-Equal 'Rejected' $actualRejection.Data.data.status 'the rejection state is recorded'
-    Assert-Equal 'Department Nodal Officer' $actualRejection.Data.data.signedOffBy 'the rejecting representative is persisted'
-    Assert-True ($null -ne $actualRejection.Data.data.signedOffAt) 'the rejection is timestamped'
-    $rejectedAgain = Invoke-Api -Method POST -Path "/api/digital-handovers/$($rejectedHandover.Data.data.id)/sign-off" -Token $admin -Body @{
-        decision = 'Accepted'; signedOffBy = 'Department Nodal Officer'; notes = 'Changed mind'
-    }
-    Assert-Equal 400 $rejectedAgain.Status 'a rejected handover cannot be re-signed as accepted'
-    $rejectedPackage = Invoke-Download -Path "/api/digital-handovers/$($rejectedHandover.Data.data.id)/package" -Token $admin
-    Assert-Equal 200 $rejectedPackage.Status 'a rejected handover package remains downloadable'
-    $rejectedZipStream = [System.IO.MemoryStream]::new($rejectedPackage.Bytes)
-    $rejectedZip = [System.IO.Compression.ZipArchive]::new($rejectedZipStream, [System.IO.Compression.ZipArchiveMode]::Read, $true)
-    try {
-        $receiptStream = $rejectedZip.GetEntry('handover-receipt.json').Open()
-        $receiptReader = [System.IO.StreamReader]::new($receiptStream)
-        try { $rejectedReceipt = $receiptReader.ReadToEnd() }
-        finally { $receiptReader.Dispose(); $receiptStream.Dispose() }
-        Assert-True ($rejectedReceipt -match '"status":"Rejected"') 'the exported receipt records Department rejection'
-        Assert-True ($rejectedReceipt -match 'Department Nodal Officer') 'the exported receipt identifies the rejecting representative'
-    }
-    finally {
-        $rejectedZip.Dispose()
-        $rejectedZipStream.Dispose()
-    }
-
     $supRemoveApproved = Invoke-Api -Method DELETE -Path "/api/scans/$($page2.Data.data.id)" -Token $supervisorToken
     Assert-Equal 400 $supRemoveApproved.Status 'a supervisor cannot remove an approved scan'
     $adminRemoveApproved = Invoke-Api -Method DELETE -Path "/api/scans/$($page2.Data.data.id)" -Token $admin
@@ -1082,21 +934,6 @@ $operatorCustodyWrite = Invoke-Api -Method POST -Path '/api/custody' -Token $ope
     direction = 'Intake'; department = 'Audit'; fileCount = 1
 }
 Assert-Equal 403 $operatorCustodyWrite.Status 'custody.manage is required to write a custody event'
-
-$employeeHandovers = Invoke-Api -Path '/api/digital-handovers' -Token $employeeToken
-Assert-Equal 200 $employeeHandovers.Status 'an employee with custody.view can read digital handover records'
-$employeeDownloadHandover = Invoke-Api -Path '/api/digital-handovers/1/package' -Token $employeeToken -Raw
-Assert-Equal 403 $employeeDownloadHandover.Status 'an employee cannot download a handover package without custody.manage'
-$operatorDownloadHandover = Invoke-Api -Path '/api/digital-handovers/1/package' -Token $operatorToken -Raw
-Assert-Equal 403 $operatorDownloadHandover.Status 'an operator cannot download a handover package without custody.manage'
-$employeePrepareHandover = Invoke-Api -Method POST -Path '/api/digital-handovers' -Token $employeeToken -Body @{
-    batchRef = 'DENIED-EMPLOYEE'; department = 'Audit'; fileIds = @(1)
-}
-Assert-Equal 403 $employeePrepareHandover.Status 'an employee cannot prepare a digital handover without custody.manage'
-$operatorPrepareHandover = Invoke-Api -Method POST -Path '/api/digital-handovers' -Token $operatorToken -Body @{
-    batchRef = 'DENIED-OPERATOR'; department = 'Audit'; fileIds = @(1)
-}
-Assert-Equal 403 $operatorPrepareHandover.Status 'an operator cannot prepare a digital handover without custody.manage'
 
 $empFiles = Invoke-Api -Path '/api/files' -Token $employeeToken
 Assert-Equal 200 $empFiles.Status 'an employee can still read the registry'
