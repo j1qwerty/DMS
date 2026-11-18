@@ -759,17 +759,36 @@ if (-not $movementOn) {
 
 $export = Invoke-Api -Path '/api/reports/file-registry/export' -Token $admin -Raw
 Assert-Equal 200 $export.Status 'a report exports as CSV'
-Assert-True ($export.Body -match 'Barcode,Number,Subject') 'the CSV has the expected header'
+if ($barcodeOn) {
+    Assert-True ($export.Body -match 'Barcode,Number,Subject') 'the CSV has the expected barcode-enabled header'
+} else {
+    Assert-True ($export.Body -match 'Number,Subject,Department') 'the CSV omits barcode columns when disabled'
+}
 
 # ============================================================ dashboard
 Write-Step 'Dashboard aggregates'
+# Two open files in one receipt must count as two due files, not one due receipt.
+$dashboardDue = Invoke-Api -Method POST -Path '/api/issues' -Token $admin -Body @{
+    borrowerType = 'Employee'; borrowerEmployeeCode = 'EMP0002'; borrowerName = 'Sneha Verma'
+    department = 'Establishment'; purpose = 'Dashboard due-file metric'
+    fileIds = @($newFileId, $targets[0].id)
+    dueAt = (Get-Date).AddHours(12).ToString('yyyy-MM-ddTHH:mm:ss'); remark = 'dashboard metric test'
+}
+Assert-Equal 200 $dashboardDue.Status 'a due-file metric test receipt is created'
+
 $stats = Invoke-Api -Path '/api/dashboard/stats' -Token $admin
 Assert-Equal 200 $stats.Status 'GET /api/dashboard/stats responds'
 Assert-Equal 2478450 $stats.Data.data.totalRecords 'the dashboard reports the registry size'
 Assert-True ($stats.Data.data.mappedPercent -ge 0 -and $stats.Data.data.mappedPercent -le 100) 'mapped percent is a real percentage'
+Assert-True ($stats.Data.data.dueToday -ge 2) 'two outstanding files on one receipt count as two due files'
+Assert-True ($stats.Data.data.digitizationPercent -ge 0 -and $stats.Data.data.digitizationPercent -le 100) 'digitization percent uses a bounded agreed-volume metric'
 $activity = Invoke-Api -Path '/api/dashboard/activity?limit=5' -Token $admin
 Assert-Equal 200 $activity.Status 'GET /api/dashboard/activity responds'
 Assert-True (@($activity.Data.data).Count -gt 0) 'activity is derived from movement events'
+$dashboardDueReturn = Invoke-Api -Method POST -Path "/api/issues/$($dashboardDue.Data.data.id)/return" -Token $admin -Body @{
+    fileIds = @($newFileId, $targets[0].id); condition = 'Good'
+}
+Assert-Equal 200 $dashboardDueReturn.Status 'dashboard metric test files can be returned after measurement'
 
 # ============================================================ roles
 Write-Step 'Role-based access control'
