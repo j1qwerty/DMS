@@ -1,3 +1,5 @@
+> **Final proposal override (2026-11-18):** This document records earlier project assumptions and is not the current acceptance scope. The final Zila Panchayat proposal and its clause-by-clause work status are authoritative in [`../ZILA_PANCHAYAT_CODEX.MD`](../ZILA_PANCHAYAT_CODEX.MD). Do not treat barcode/movement/support/bulk-import functions as current user-visible scope; retain them behind disabled-by-default feature flags. Do not describe OCR search, e-office upload, final PDF production, quality gates or digital handover as out of scope.
+
 # Project scope and source decisions
 
 ## Product
