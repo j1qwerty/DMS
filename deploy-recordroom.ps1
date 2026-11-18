@@ -51,7 +51,7 @@
     .\deploy-recordroom.ps1
     .\deploy-recordroom.ps1 -Target both -SkipConfirm
     .\deploy-recordroom.ps1 -Target both -BarcodeEnabled true -SkipConfirm
-    .\deploy-recordroom.ps1 -Target api -ExpectedPageCount 8500000 -SkipProvision -SkipConfirm
+    .\deploy-recordroom.ps1 -Target api -ExpectedFileCount 2478450 -ExpectedPageCount 8500000 -SkipProvision -SkipConfirm
 #>
 [CmdletBinding()]
 param(
@@ -67,7 +67,8 @@ param(
     [ValidateSet('true', 'false')] [string] $MovementEnabled = 'false',
     [ValidateSet('true', 'false')] [string] $SupportEnabled = 'false',
     [ValidateSet('true', 'false')] [string] $BulkImportEnabled = 'false',
-    [ValidateRange(0, 2147483647)] [int] $ExpectedPageCount = 0
+    [ValidateRange(0, 2147483647)] [int] $ExpectedPageCount = 0,
+    [ValidateRange(0, 2147483647)] [long] $ExpectedFileCount = 0
 )
 
 $ErrorActionPreference = 'Stop'
@@ -259,6 +260,7 @@ MOVEMENT_ENABLED="$7"
 SUPPORT_ENABLED="$8"
 BULK_IMPORT_ENABLED="$9"
 EXPECTED_PAGE_COUNT="${10}"
+EXPECTED_FILE_COUNT="${11}"
 api_archive=/tmp/recordroom-api-deploy.tar.gz
 web_archive=/tmp/recordroom-web-deploy.tar.gz
 approot=/var/www/recordroom/app
@@ -310,6 +312,7 @@ if [ ! -f "$envfile" ]; then
     echo "Features__MovementEnabled=${MOVEMENT_ENABLED:-false}"
     echo "Features__SupportEnabled=${SUPPORT_ENABLED:-false}"
     echo "Features__BulkImportEnabled=${BULK_IMPORT_ENABLED:-false}"
+    echo "Scope__ExpectedFileCount=${EXPECTED_FILE_COUNT:-0}"
     echo "Scope__ExpectedPageCount=${EXPECTED_PAGE_COUNT:-0}"
     echo "Hangfire__Storage=InMemory"
     echo "Hangfire__EnableScheduling=true"
@@ -380,6 +383,7 @@ upsert_env Features__BarcodeEnabled "$BARCODE_ENABLED"
 upsert_env Features__MovementEnabled "$MOVEMENT_ENABLED"
 upsert_env Features__SupportEnabled "$SUPPORT_ENABLED"
 upsert_env Features__BulkImportEnabled "$BULK_IMPORT_ENABLED"
+upsert_env Scope__ExpectedFileCount "$EXPECTED_FILE_COUNT"
 upsert_env Scope__ExpectedPageCount "$EXPECTED_PAGE_COUNT"
 
 # Hangfire in SQL Server rather than memory. In-memory storage loses every job on
@@ -617,7 +621,7 @@ echo "recordroom $MODE deployed"
     $previousEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        $remoteScript | ssh -o BatchMode=yes $Host_ 'bash -s' -- "$Target" "$WebPort" "$ApiPort" "$ServerIp" "$provisionFlag" "$BarcodeEnabled" "$MovementEnabled" "$SupportEnabled" "$BulkImportEnabled" "$ExpectedPageCount"
+        $remoteScript | ssh -o BatchMode=yes $Host_ 'bash -s' -- "$Target" "$WebPort" "$ApiPort" "$ServerIp" "$provisionFlag" "$BarcodeEnabled" "$MovementEnabled" "$SupportEnabled" "$BulkImportEnabled" "$ExpectedPageCount" "$ExpectedFileCount"
         $deployCode = $LASTEXITCODE
     } finally {
         $ErrorActionPreference = $previousEap
