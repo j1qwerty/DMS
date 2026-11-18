@@ -136,7 +136,7 @@ export interface Room {
 export type FileStatus = 'Available' | 'Issued' | 'Under Digitization' | 'Missing' | 'Archived';
 export type FileType = 'Letter' | 'File' | 'Register' | 'Map' | 'Drawing' | 'Report';
 export type RecordKind = 'File' | 'Map';
-export type DocumentSize = 'A0' | 'A1' | 'A2' | 'A3' | 'A4' | 'Other';
+export type DocumentSize = 'A0' | 'A1' | 'A2' | 'A3' | 'A4' | 'Legal' | 'Other';
 
 /** `file_tbl`. */
 export interface RecordFile {
