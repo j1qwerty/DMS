@@ -141,6 +141,68 @@ describe('optional movement report visibility', () => {
   });
 });
 
+
+describe('front/back page-side identity', () => {
+  beforeEach(async () => {
+    await service.reset();
+  });
+
+  it('versions front and back sides independently for the same page number', async () => {
+    const file = (await service.files.list({ pageSize: 1 })).items[0];
+    const front = await service.digitization.add(file.id, {
+      pageNo: 1,
+      filename: 'page-1-front.pdf',
+      documentSize: 'A4',
+      side: 'Front',
+    });
+    const back = await service.digitization.add(file.id, {
+      pageNo: 1,
+      filename: 'page-1-back.pdf',
+      documentSize: 'A4',
+      side: 'Back',
+    });
+    const frontRescan = await service.digitization.add(file.id, {
+      pageNo: 1,
+      filename: 'page-1-front-rescan.pdf',
+      documentSize: 'A4',
+      side: 'Front',
+    });
+
+    expect(front.ok).toBe(true);
+    expect(back.ok).toBe(true);
+    expect(frontRescan.ok).toBe(true);
+    if (!front.ok || !back.ok || !frontRescan.ok) return;
+    expect(front.value.side).toBe('Front');
+    expect(back.value.side).toBe('Back');
+    expect(front.value.version).toBe(1);
+    expect(back.value.version).toBe(1);
+    expect(frontRescan.value.version).toBe(2);
+  });
+
+  it('defaults existing callers and old records to the Front side', async () => {
+    const file = (await service.files.list({ pageSize: 1 })).items[0];
+    const page = await service.digitization.add(file.id, {
+      pageNo: 2,
+      filename: 'legacy-front.pdf',
+      documentSize: 'A4',
+    });
+    expect(page.ok).toBe(true);
+    if (page.ok) expect(page.value.side).toBe('Front');
+  });
+
+  it('accepts Legal-size scans in the in-memory adapter', async () => {
+    const file = (await service.files.list({ pageSize: 1 })).items[0];
+    const page = await service.digitization.add(file.id, {
+      pageNo: 3,
+      filename: 'legal-page.pdf',
+      documentSize: 'Legal',
+      side: 'Front',
+    });
+    expect(page.ok).toBe(true);
+    if (page.ok) expect(page.value.documentSize).toBe('Legal');
+  });
+});
+
 describe('finding a file from typed text', () => {
   beforeEach(async () => {
     await service.reset();
