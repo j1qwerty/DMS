@@ -303,8 +303,10 @@ export interface FileScan {
   fileNumber?: string;
   filename: string;
   pageNo: number;
+  /** Physical side for duplex scanning; old records are treated as Front. */
+  side?: 'Front' | 'Back';
   version: number;
-  /** Physical sheet size; same options as the file (A0–A4, Other). */
+  /** Physical sheet size; same options as the file (A0–A4, Legal, Other). */
   documentSize: string;
   status: PageStatus;
   note: string;
