@@ -19,6 +19,7 @@ public interface IPrivateDocumentStore
 {
     long MaxUploadBytes { get; }
     Task<Result<StoredDocument>> SaveAsync(IFormFile? upload, CancellationToken ct = default);
+    Task<Result<StoredDocument>> SaveGeneratedPdfAsync(Stream content, string fileName, CancellationToken ct = default);
     Task<Stream?> OpenReadAsync(string storageKey, CancellationToken ct = default);
     Task DeleteAsync(string storageKey, CancellationToken ct = default);
 }
@@ -122,6 +123,51 @@ public sealed class PrivateDocumentStore : IPrivateDocumentStore
         finally
         {
             ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
+    public async Task<Result<StoredDocument>> SaveGeneratedPdfAsync(
+        Stream content, string fileName, CancellationToken ct = default)
+    {
+        if (content is null || !content.CanRead)
+            return Result<StoredDocument>.Fail("Generated PDF content is not readable.", "document");
+
+        var safeName = Path.GetFileName(fileName);
+        if (!safeName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+            safeName += ".pdf";
+
+        MemoryStream? buffered = null;
+        var source = content;
+        if (!content.CanSeek)
+        {
+            buffered = new MemoryStream();
+            await content.CopyToAsync(buffered, ct);
+            buffered.Position = 0;
+            source = buffered;
+        }
+        else
+        {
+            source.Position = 0;
+        }
+
+        try
+        {
+            var length = source.Length - source.Position;
+            if (length <= 0 || length > MaxUploadBytes)
+                return Result<StoredDocument>.Fail(
+                    $"Generated PDFs must be between 1 byte and {MaxUploadBytes / (1024 * 1024)} MiB.",
+                    "document");
+
+            var formFile = new FormFile(source, source.Position, length, "document", safeName)
+            {
+                Headers = new HeaderDictionary(),
+                ContentType = "application/pdf",
+            };
+            return await SaveAsync(formFile, ct);
+        }
+        finally
+        {
+            if (buffered is not null) await buffered.DisposeAsync();
         }
     }
 
