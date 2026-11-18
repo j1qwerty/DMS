@@ -51,7 +51,8 @@
     .\deploy-recordroom.ps1
     .\deploy-recordroom.ps1 -Target both -SkipConfirm
     .\deploy-recordroom.ps1 -Target both -BarcodeEnabled true -SkipConfirm
-    .\deploy-recordroom.ps1 -Target api -ExpectedFileCount 2478450 -ExpectedPageCount 8500000 -SkipProvision -SkipConfirm
+    # Set positive volume values only after the Department signs off the inventory.
+    .\deploy-recordroom.ps1 -Target api -ExpectedFileCount <approved-file-count> -ExpectedPageCount <approved-page-count> -SkipProvision -SkipConfirm
 #>
 [CmdletBinding()]
 param(
@@ -383,8 +384,18 @@ upsert_env Features__BarcodeEnabled "$BARCODE_ENABLED"
 upsert_env Features__MovementEnabled "$MOVEMENT_ENABLED"
 upsert_env Features__SupportEnabled "$SUPPORT_ENABLED"
 upsert_env Features__BulkImportEnabled "$BULK_IMPORT_ENABLED"
-upsert_env Scope__ExpectedFileCount "$EXPECTED_FILE_COUNT"
-upsert_env Scope__ExpectedPageCount "$EXPECTED_PAGE_COUNT"
+# A zero parameter means "leave the existing approved baseline unchanged".
+# On older installs that lack a key, seed zero until the Department signs off.
+if [ "${EXPECTED_FILE_COUNT:-0}" -gt 0 ]; then
+  upsert_env Scope__ExpectedFileCount "$EXPECTED_FILE_COUNT"
+elif ! grep -q "^Scope__ExpectedFileCount=" "$envfile"; then
+  upsert_env Scope__ExpectedFileCount "0"
+fi
+if [ "${EXPECTED_PAGE_COUNT:-0}" -gt 0 ]; then
+  upsert_env Scope__ExpectedPageCount "$EXPECTED_PAGE_COUNT"
+elif ! grep -q "^Scope__ExpectedPageCount=" "$envfile"; then
+  upsert_env Scope__ExpectedPageCount "0"
+fi
 
 # Hangfire in SQL Server rather than memory. In-memory storage loses every job on
 # restart, and with two API nodes each would run the overdue sweep on its own
