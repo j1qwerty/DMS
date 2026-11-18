@@ -68,6 +68,7 @@ jobs:
       Features__MovementEnabled: "false"
       Features__SupportEnabled: "false"
       Features__BulkImportEnabled: "false"
+      Scope__ExpectedFileCount: "100"
       Scope__ExpectedPageCount: "100"
     steps:
       - name: Check out repository
