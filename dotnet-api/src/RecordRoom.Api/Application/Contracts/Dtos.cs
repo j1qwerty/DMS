@@ -436,7 +436,9 @@ public sealed record DashboardStatsDto(
     int OverdueCount,
     int RoomCount,
     int ActiveBorrowers,
-    int PendingApprovals);
+    int PendingApprovals,
+    bool MappedBaselineConfigured,
+    bool DigitizationBaselineConfigured);
 
 public sealed record ActivityDto(string Id, string Label, string Date, string Actor, string Detail, string Tone);
 
