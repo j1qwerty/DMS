@@ -448,7 +448,7 @@ public sealed record MediaLinkDto(long Id, string Title, string Url, string Alt,
 // Misc ------------------------------------------------------------------------
 
 /// <summary>Served at GET /api/config so the frontend knows which optional features are on.</summary>
-public sealed record FeaturesDto(bool Barcode);
+public sealed record FeaturesDto(bool Barcode, bool Movement = false, bool Support = false, bool BulkImport = false);
 public sealed record AppConfigDto(string AppName, FeaturesDto Features);
 
 public sealed record HealthDto(string Status, string Database, bool Redis, string Hangfire, DateTime At);
