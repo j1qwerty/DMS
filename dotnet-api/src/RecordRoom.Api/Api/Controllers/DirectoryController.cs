@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using RecordRoom.Api.Application;
 using RecordRoom.Api.Application.Contracts;
 using RecordRoom.Api.Application.Services;
+using RecordRoom.Api.Infrastructure.Features;
 
 namespace RecordRoom.Api.Api.Controllers;
 
@@ -93,6 +94,7 @@ public sealed record CreateUserRequest(
 
 [ApiController]
 [Route("api/inquiries")]
+[RequireOptionalFeature(OptionalProductFeature.Support)]
 [Authorize]
 [Produces("application/json")]
 [Tags("Content")]
@@ -113,6 +115,7 @@ public class InquiriesController(IContentService content) : ControllerBase
 
 [ApiController]
 [Route("api/media-links")]
+[RequireOptionalFeature(OptionalProductFeature.Support)]
 [Authorize]
 [Produces("application/json")]
 [Tags("Content")]
