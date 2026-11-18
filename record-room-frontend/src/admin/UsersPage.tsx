@@ -161,12 +161,12 @@ export function UsersPage() {
           <p className="text-sm font-semibold">Permission matrix</p>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] text-left text-xs">
+          <table className="w-full min-w-[760px] table-fixed border-collapse text-xs">
             <thead className="text-[10px] uppercase tracking-wider muted">
               <tr>
-                <th className="py-2 pr-4">Capability</th>
+                <th className="w-[38%] px-3 py-3 text-left align-middle">Capability</th>
                 {roles.map((role) => (
-                  <th key={role} className="px-3 py-2 text-center">
+                  <th key={role} className="w-[15.5%] whitespace-nowrap px-2 py-3 text-center align-middle">
                     {role}
                   </th>
                 ))}
@@ -175,9 +175,9 @@ export function UsersPage() {
             <tbody className="divide-y divide-[var(--rr-border)]">
               {PERMISSIONS.map((permission) => (
                 <tr key={permission}>
-                  <td className="py-2 pr-4 font-mono">{permission}</td>
+                  <td className="break-words px-3 py-2.5 text-left align-middle font-mono text-[11px]">{permission}</td>
                   {roles.map((role) => (
-                    <td key={role} className="px-3 py-2 text-center">
+                    <td key={role} className="px-2 py-2.5 text-center align-middle">
                       {can(role as Role, permission) ? (
                         <span className="text-[var(--rr-success)]">●</span>
                       ) : (
@@ -199,8 +199,7 @@ export function UsersPage() {
           ))}
         </div>
         <p className="muted mt-4 text-xs leading-6">
-          This matrix hides controls only. The planned .NET 10 API must enforce every one of these
-          checks server-side on each request.
+          This is the proposal capability reference. The API enforces permissions server-side; hiding a control is not an authorization boundary.
         </p>
       </Card>
 

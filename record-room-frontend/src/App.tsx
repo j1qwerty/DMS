@@ -20,10 +20,6 @@ import { apiBase } from './services/http/client';
 const SearchPage = lazy(() =>
   import('./pages/SearchPage').then((m) => ({ default: m.SearchPage })),
 );
-const RoomsPage = lazy(() => import('./pages/RoomsPage').then((m) => ({ default: m.RoomsPage })));
-const RoomDetailPage = lazy(() =>
-  import('./pages/RoomDetailPage').then((m) => ({ default: m.RoomDetailPage })),
-);
 const FilesPage = lazy(() => import('./pages/FilesPage').then((m) => ({ default: m.FilesPage })));
 const FileViewerPage = lazy(() =>
   import('./pages/FileViewerPage').then((m) => ({ default: m.FileViewerPage })),
@@ -71,7 +67,6 @@ const LocationsPage = lazy(() =>
 const BulkImportPage = lazy(() =>
   import('./admin/BulkImportPage').then((m) => ({ default: m.BulkImportPage })),
 );
-const MapsPage = lazy(() => import('./admin/MapsPage').then((m) => ({ default: m.MapsPage })));
 const AuditPage = lazy(() => import('./admin/AuditPage').then((m) => ({ default: m.AuditPage })));
 
 /** Re-mounts the search page when the top-bar query changes so its input follows the URL. */
@@ -125,17 +120,17 @@ export function App() {
               </RequireAuth>
             }
           >
-            <Route path="/" element={<Navigate to="/files" replace />} />
+            <Route path="/" element={<Navigate to="/overview" replace />} />
             <Route path="/overview" element={<DashboardPage />} />
             <Route path="/search" element={<KeyedSearchPage />} />
-            <Route path="/rooms" element={<RoomsPage />} />
-            <Route path="/rooms/:roomId" element={<RoomDetailPage />} />
+            <Route path="/rooms" element={<Navigate to="/files" replace />} />
+            <Route path="/rooms/:roomId" element={<Navigate to="/files" replace />} />
             <Route path="/files" element={<KeyedFilesPage />} />
             <Route path="/files/new" element={guarded(NewFilePage, 'files.create')} />
             <Route path="/files/:fileId" element={<FileDetailPage />} />
             <Route path="/files/:fileId/scan" element={<FileViewerPage />} />
             <Route path="/files/:fileId/map" element={<FileViewerPage />} />
-            <Route path="/maps" element={guarded(MapsPage, 'files.view')} />
+            <Route path="/maps" element={<Navigate to="/files" replace />} />
             <Route path="/issue" element={<IssuePage />} />
             <Route path="/return" element={<ReturnPage />} />
             <Route
@@ -163,7 +158,7 @@ export function App() {
               }
             />
             <Route path="/digitization" element={<DigitizationPage />} />
-            <Route path="/custody" element={<CustodyPage />} />
+            <Route path="/custody" element={<Navigate to="/digitization?tab=custody" replace />} />
             <Route path="/reports" element={<ReportsPage />} />
             <Route
               path="/support"
@@ -179,7 +174,7 @@ export function App() {
               <Route index element={guarded(UsersPage, 'users.view')} />
               <Route path="users" element={guarded(UsersPage, 'users.view')} />
               <Route path="employees" element={guarded(EmployeesPage, 'employees.view')} />
-              <Route path="locations" element={guarded(LocationsPage, 'locations.view')} />
+              <Route path="locations" element={<Navigate to="/admin/departments" replace />} />
               <Route
                 path="bulk-import"
                 element={
