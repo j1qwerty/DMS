@@ -19,8 +19,6 @@ import type {
   BulkImportJob,
   BulkImportRow,
   CustodyEvent,
-  DigitalHandoverBatch,
-  DigitalHandoverItem,
   DashboardStats,
   Employee,
   FileScan,
@@ -374,43 +372,6 @@ export function toFileScan(dto: Record<string, unknown>): FileScan {
   };
 }
 
-
-export function toDigitalHandoverBatch(dto: Record<string, unknown>): DigitalHandoverBatch {
-  const rows = Array.isArray(dto.items) ? (dto.items as Record<string, unknown>[]) : [];
-  return {
-    id: toId(dto.id as number),
-    batchRef: str(dto.batchRef),
-    department: str(dto.department),
-    notes: str(dto.notes),
-    status: str(dto.status) as DigitalHandoverBatch['status'],
-    manifestSha256: str(dto.manifestSha256),
-    itemCount: num(dto.itemCount, rows.length),
-    preparedBy: str(dto.preparedBy),
-    preparedAt: str(dto.preparedAt),
-    deliveredBy: dto.deliveredBy ? str(dto.deliveredBy) : null,
-    deliveredAt: dto.deliveredAt ? str(dto.deliveredAt) : null,
-    signedOffBy: dto.signedOffBy ? str(dto.signedOffBy) : null,
-    signedOffAt: dto.signedOffAt ? str(dto.signedOffAt) : null,
-    decisionNotes: str(dto.decisionNotes),
-    items: rows.map(toDigitalHandoverItem),
-  };
-}
-
-function toDigitalHandoverItem(dto: Record<string, unknown>): DigitalHandoverItem {
-  return {
-    id: toId(dto.id as number),
-    fileId: toId(dto.fileId as number),
-    documentId: toId(dto.documentId as number),
-    fileNumber: str(dto.fileNumber),
-    department: str(dto.department),
-    filename: str(dto.fileName),
-    version: num(dto.version),
-    contentType: str(dto.contentType),
-    sizeBytes: num(dto.sizeBytes),
-    pageCount: dto.pageCount == null ? null : num(dto.pageCount),
-    sha256: str(dto.sha256),
-  };
-}
 
 // ------------------------------------------------------------- custody chain
 
