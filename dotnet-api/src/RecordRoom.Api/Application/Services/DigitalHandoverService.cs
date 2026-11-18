@@ -75,6 +75,8 @@ public sealed class DigitalHandoverService(
             return Result<DigitalHandoverBatchDto>.Fail("Enter a batch reference (1–64 characters).", "batchRef");
         if (department.Length == 0 || department.Length > 128)
             return Result<DigitalHandoverBatchDto>.Fail("Department is required (maximum 128 characters).", "department");
+        if ((input.Notes?.Trim().Length ?? 0) > 500)
+            return Result<DigitalHandoverBatchDto>.Fail("Notes cannot exceed 500 characters.", "notes");
         if (input.FileIds is null || input.FileIds.Length == 0)
             return Result<DigitalHandoverBatchDto>.Fail("Select at least one file for the digital handover.", "fileIds");
 
@@ -96,6 +98,11 @@ public sealed class DigitalHandoverService(
         var preparedItems = new List<DigitalHandoverItem>();
         foreach (var file in fileRows.OrderBy(file => file.FileNumber, StringComparer.OrdinalIgnoreCase))
         {
+            if (!string.Equals(file.Department.Trim(), department, StringComparison.OrdinalIgnoreCase))
+                return Result<DigitalHandoverBatchDto>.Fail(
+                    $"File {file.FileNumber} belongs to {file.Department}, not {department}. A handover batch must belong to one department.",
+                    "fileIds");
+
             var document = await db.FileDocuments.AsNoTracking()
                 .Where(row => row.RecordFileId == file.Id && row.DocumentKind == "FinalPdf")
                 .OrderByDescending(row => row.Version)
