@@ -59,6 +59,7 @@ export function FileDetailPage() {
   const { success, danger } = useFlash();
   const [scanMode, setScanMode] = useState<'pdf' | 'page'>('pdf');
   const [pageNoDraft, setPageNoDraft] = useState('1');
+  const [sideDraft, setSideDraft] = useState<'Front' | 'Back'>('Front');
   const [sizeDraft, setSizeDraft] = useState('');
 
   // One file id drives every read on this page. `rooms` comes back whole because
@@ -154,6 +155,7 @@ export function FileDetailPage() {
       pageNo,
       filename: upload.name,
       documentSize: sizeDraft,
+      side: sideDraft,
     });
     if (!added.ok) return added;
     return service.digitization.addDocument(added.value.id, upload);
@@ -399,6 +401,16 @@ export function FileDetailPage() {
                         onChange={(event) => setPageNoDraft(event.target.value)}
                       />
                     </Field>
+                    <Field label="Page side" htmlFor="scan-side">
+                      <SelectInput
+                        id="scan-side"
+                        value={sideDraft}
+                        onChange={(event) => setSideDraft(event.target.value as 'Front' | 'Back')}
+                      >
+                        <option value="Front">Front</option>
+                        <option value="Back">Back</option>
+                      </SelectInput>
+                    </Field>
                     <Field
                       label="Sheet size"
                       htmlFor="scan-size"
@@ -486,7 +498,7 @@ export function FileDetailPage() {
                         <div className="min-w-0">
                           <p className="break-all text-xs font-semibold">{scan.filename}</p>
                           <p className="muted mt-1 text-[11px]">
-                            Page {scan.pageNo} · v{scan.version} · {scan.documentSize}
+                            Page {scan.pageNo} · {scan.side ?? 'Front'} · v{scan.version} · {scan.documentSize}
                           </p>
                         </div>
                         <StatusBadge status={scan.status} />
