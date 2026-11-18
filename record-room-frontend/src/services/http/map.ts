@@ -356,6 +356,7 @@ export function toFileScan(dto: Record<string, unknown>): FileScan {
     fileNumber: dto.fileNumber ? str(dto.fileNumber) : undefined,
     filename: str(dto.fileName),
     pageNo: num(dto.pageNo, 1),
+    side: dto.side === 'Back' ? 'Back' : 'Front',
     version: num(dto.version, 1),
     documentSize: str(dto.documentSize),
     status: str(dto.status) as FileScan['status'],
