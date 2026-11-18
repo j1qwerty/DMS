@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using RecordRoom.Api.Application;
 using RecordRoom.Api.Application.Contracts;
 using RecordRoom.Api.Application.Services;
+using RecordRoom.Api.Infrastructure.Features;
 
 namespace RecordRoom.Api.Api.Controllers;
 
@@ -58,6 +59,7 @@ public class IssuesController(IIssuesService issues) : ControllerBase
 
 [ApiController]
 [Route("api/movements")]
+[RequireOptionalFeature(OptionalProductFeature.Movement)]
 [Authorize]
 [Produces("application/json")]
 [Tags("Movements")]
