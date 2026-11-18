@@ -685,6 +685,37 @@ if (-not $SkipDestructive) {
     $page2Image = Invoke-MultipartUpload -Path "/api/scans/$($page2.Data.data.id)/document" -Token $admin -FilePath $scanPng -ContentType 'image/png'
     Assert-True ([bool]$page2Image.success) 'the Front scan image is stored before review'
 
+    $ocrBefore = Invoke-Api -Path "/api/scans/$($page2.Data.data.id)/ocr" -Token $admin
+    Assert-Equal 200 $ocrBefore.Status 'OCR state is available for an uploaded scan'
+    Assert-Equal 'NotProcessed' $ocrBefore.Data.data.status 'new scan pages start with an explicit OCR state'
+    $employeeOcrWrite = Invoke-Api -Method PUT -Path "/api/scans/$($page2.Data.data.id)/ocr" -Token $employeeToken -Body @{
+        status = 'Completed'; text = 'UNTRUSTED-OCR-TEXT'
+    }
+    Assert-Equal 403 $employeeOcrWrite.Status 'an employee cannot inject OCR text'
+    $operatorOcrWrite = Invoke-Api -Method PUT -Path "/api/scans/$($page2.Data.data.id)/ocr" -Token $operatorToken -Body @{
+        status = 'Completed'; text = 'UNTRUSTED-OCR-TEXT'
+    }
+    Assert-Equal 403 $operatorOcrWrite.Status 'an operator cannot approve OCR extraction results'
+    $failedOcrWithoutReason = Invoke-Api -Method PUT -Path "/api/scans/$($page2.Data.data.id)/ocr" -Token $admin -Body @{
+        status = 'Failed'; text = ''
+    }
+    Assert-Equal 400 $failedOcrWithoutReason.Status 'a failed OCR result requires an error description'
+    $ocrText = 'ZPOCRSMOKE2026A विकास योजना public works'
+    $ocrUpdated = Invoke-Api -Method PUT -Path "/api/scans/$($page2.Data.data.id)/ocr" -Token $admin -Body @{
+        status = 'Completed'; text = $ocrText; language = 'hin+eng'; engine = 'verified-import-test'
+    }
+    Assert-Equal 200 $ocrUpdated.Status 'a reviewer can attach a completed OCR result to an uploaded scan'
+    Assert-Equal 'Completed' $ocrUpdated.Data.data.status 'OCR completion state is persisted'
+    Assert-Equal 'hin+eng' $ocrUpdated.Data.data.language 'OCR language provenance is persisted'
+    $ocrRead = Invoke-Api -Path "/api/scans/$($page2.Data.data.id)/ocr" -Token $admin
+    Assert-Equal 200 $ocrRead.Status 'the OCR result can be read back'
+    Assert-Equal $ocrText $ocrRead.Data.data.text 'the OCR text is stored without losing Unicode characters'
+    $ocrSearch = Invoke-Api -Path '/api/files?search=ZPOCRSMOKE2026A&pageSize=10' -Token $admin
+    Assert-True (@($ocrSearch.Data.data.items | Where-Object { $_.id -eq $newFileId }).Count -eq 1) 'registry search can find a file through its completed page OCR text'
+    $ocrAccessAudit = Invoke-Api -Path "/api/audit?action=Access&entity=FileScanPageOcr&search=$($page2.Data.data.id)" -Token $admin
+    Assert-Equal 200 $ocrAccessAudit.Status 'OCR text access audit can be queried'
+    Assert-True (@($ocrAccessAudit.Data.data.entries).Count -gt 0) 'opening OCR text writes an access audit event'
+
     $noReason = Invoke-Api -Method POST -Path "/api/scans/$($page2.Data.data.id)/review" -Token $admin -Body @{
         decision = 'Rejected'; note = '  '
     }
