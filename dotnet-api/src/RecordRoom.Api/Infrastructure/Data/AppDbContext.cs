@@ -267,7 +267,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.ManifestSha256).HasMaxLength(64);
             e.Property(x => x.PreparedBy).HasMaxLength(64);
             e.Property(x => x.DeliveredBy).HasMaxLength(64);
-            e.Property(x => x.AcceptedBy).HasMaxLength(128);
+            e.Property(x => x.SignedOffBy).HasMaxLength(128);
             e.Property(x => x.DecisionNotes).HasMaxLength(500);
             e.HasIndex(x => x.BatchRef).IsUnique();
             e.HasIndex(x => x.Status);
