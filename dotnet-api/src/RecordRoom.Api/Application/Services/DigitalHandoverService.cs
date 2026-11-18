@@ -161,6 +161,12 @@ public sealed class DigitalHandoverService(
             });
         }
 
+        var totalPackageBytes = preparedItems.Sum(item => item.SizeBytes);
+        if (totalPackageBytes > MaxPackageSizeBytes)
+            return Result<DigitalHandoverBatchDto>.Fail(
+                $"The selected PDFs exceed the {MaxPackageSizeBytes / (1024 * 1024)} MiB package limit. Split the files into smaller handover batches.",
+                "fileIds");
+
         var preparedAt = DateTime.UtcNow;
         var manifestItems = preparedItems.Select(item => new
         {
