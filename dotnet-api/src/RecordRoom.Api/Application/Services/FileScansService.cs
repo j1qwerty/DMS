@@ -52,7 +52,7 @@ public sealed class FileScansService(
         p.Id, fileId, p.Barcode, p.FileName, p.PageNo, p.Version, p.DocumentSize,
         Display.Page(p.Status), p.Note, p.UploadedAt, p.UploadedBy,
         !string.IsNullOrWhiteSpace(p.StorageKey), p.ContentType, p.SizeBytes, p.Sha256,
-        p.PageCount, p.PageIndex);
+        p.PageCount, p.PageIndex, Side: p.Side);
 
     public async Task<FileScanPageDto[]> ListByFileAsync(int fileId, CancellationToken ct = default)
     {
@@ -61,7 +61,7 @@ public sealed class FileScansService(
 
         var rows = await db.ScanPages.AsNoTracking()
             .Where(p => p.Barcode == file.Barcode)
-            .OrderBy(p => p.PageNo).ThenBy(p => p.Version)
+            .OrderBy(p => p.PageNo).ThenBy(p => p.Side).ThenBy(p => p.Version)
             .ToListAsync(ct);
         return await fileRefs.EnrichAsync(rows.Select(p => ToPage(p, fileId)).ToArray(), ct);
     }
@@ -78,17 +78,23 @@ public sealed class FileScansService(
         if (!DocumentSizes.Contains(size))
             return Result<FileScanPageDto>.Fail("Choose one of A0, A1, A2, A3, A4, Legal or Other.", "documentSize");
 
-        // Legacy duplicate-page rule, kept per file: the same file and page
-        // re-scanned becomes the next version rather than overwriting an
-        // approved page.
+        var side = string.IsNullOrWhiteSpace(input.Side) ? "Front" : input.Side.Trim();
+        if (!side.Equals("Front", StringComparison.OrdinalIgnoreCase)
+            && !side.Equals("Back", StringComparison.OrdinalIgnoreCase))
+            return Result<FileScanPageDto>.Fail("Choose Front or Back for the scanned page side.", "side");
+        side = side.Equals("Back", StringComparison.OrdinalIgnoreCase) ? "Back" : "Front";
+
+        // Page number + side forms the physical page identity. Rescans version
+        // independently on each side, so front and back never collide.
         var nextVersion = await db.ScanPages
-            .Where(p => p.Barcode == file.Barcode && p.PageNo == input.PageNo)
+            .Where(p => p.Barcode == file.Barcode && p.PageNo == input.PageNo && p.Side == side)
             .Select(p => (int?)p.Version)
             .MaxAsync(ct) ?? 0;
         nextVersion += 1;
 
         var hasActive = await db.ScanPages.AnyAsync(
-            p => p.Barcode == file.Barcode && p.PageNo == input.PageNo && p.Status == PageStatus.Active, ct);
+            p => p.Barcode == file.Barcode && p.PageNo == input.PageNo
+                && p.Side == side && p.Status == PageStatus.Active, ct);
 
         var page = new FileScanPage
         {
@@ -97,6 +103,7 @@ public sealed class FileScansService(
                 ? $"{file.Barcode}-FILE-{input.PageNo}{(nextVersion > 1 ? $"-V{nextVersion}" : string.Empty)}.pdf"
                 : input.FileName.Trim(),
             PageNo = input.PageNo,
+            Side = side,
             Version = nextVersion,
             DocumentSize = size,
             Status = nextVersion > 1 && hasActive ? PageStatus.Duplicate : PageStatus.PendingReview,
@@ -159,14 +166,15 @@ public sealed class FileScansService(
         }
 
         var version = (await db.ScanPages.AsNoTracking()
-            .Where(p => p.Barcode == page.Barcode && p.PageNo == page.PageNo)
+            .Where(p => p.Barcode == page.Barcode && p.PageNo == page.PageNo && p.Side == page.Side)
             .Select(p => (int?)p.Version).MaxAsync(ct) ?? 0) + 1;
         var hasActive = await db.ScanPages.AnyAsync(p =>
-            p.Barcode == page.Barcode && p.PageNo == page.PageNo && p.Status == PageStatus.Active, ct);
+            p.Barcode == page.Barcode && p.PageNo == page.PageNo
+                && p.Side == page.Side && p.Status == PageStatus.Active, ct);
         var rescan = new FileScanPage
         {
             Barcode = page.Barcode, FileName = stored.OriginalFileName,
-            PageNo = page.PageNo, Version = version, DocumentSize = page.DocumentSize,
+            PageNo = page.PageNo, Side = page.Side, Version = version, DocumentSize = page.DocumentSize,
             Status = version > 1 && hasActive ? PageStatus.Duplicate : PageStatus.PendingReview,
             Note = $"Uploaded document version {version} for page {page.PageNo}.",
             UploadedAt = DateTime.UtcNow, UploadedBy = current.UserName,
