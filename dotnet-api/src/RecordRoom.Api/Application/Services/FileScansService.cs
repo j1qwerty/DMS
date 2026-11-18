@@ -25,6 +25,10 @@ public interface IFileScansService
 
     Task<PrivateDocumentContent?> OpenDocumentAsync(long scanId, CancellationToken ct = default);
 
+    Task<ScanOcrDto?> GetOcrAsync(long scanId, CancellationToken ct = default);
+
+    Task<Result<ScanOcrDto>> UpdateOcrAsync(long scanId, ScanOcrInput input, CancellationToken ct = default);
+
     Task<Result<bool>> RemoveAsync(long scanId, CancellationToken ct = default);
 
     Task<Result<FileScanPageDto>> ReviewAsync(long scanId, PageReviewInput input, CancellationToken ct = default);
@@ -52,7 +56,10 @@ public sealed class FileScansService(
         p.Id, fileId, p.Barcode, p.FileName, p.PageNo, p.Version, p.DocumentSize,
         Display.Page(p.Status), p.Note, p.UploadedAt, p.UploadedBy,
         !string.IsNullOrWhiteSpace(p.StorageKey), p.ContentType, p.SizeBytes, p.Sha256,
-        p.PageCount, p.PageIndex, Side: p.Side);
+        p.PageCount, p.PageIndex, Side: p.Side,
+        OcrStatus: p.OcrStatus, HasOcrText: p.OcrText is not null,
+        OcrLanguage: p.OcrLanguage, OcrEngine: p.OcrEngine,
+        OcrUpdatedAt: p.OcrUpdatedAt, OcrUpdatedBy: p.OcrUpdatedBy);
 
     public async Task<FileScanPageDto[]> ListByFileAsync(int fileId, CancellationToken ct = default)
     {
@@ -215,6 +222,102 @@ public sealed class FileScansService(
             $"Viewed scan {page.FileName} v{page.Version} for {page.Barcode}", ct);
         await db.SaveChangesAsync(ct);
         return new PrivateDocumentContent(page.FileName, page.ContentType, page.SizeBytes ?? 0, page.Sha256, stream);
+    }
+
+    public async Task<ScanOcrDto?> GetOcrAsync(long scanId, CancellationToken ct = default)
+    {
+        var row = await db.ScanPages.AsNoTracking()
+            .Where(page => page.Id == scanId)
+            .Select(page => new
+            {
+                page.Id,
+                page.Barcode,
+                page.PageNo,
+                page.Side,
+                page.Version,
+                page.OcrStatus,
+                page.OcrText,
+                page.OcrLanguage,
+                page.OcrEngine,
+                page.OcrError,
+                page.OcrUpdatedAt,
+                page.OcrUpdatedBy,
+            })
+            .FirstOrDefaultAsync(ct);
+        if (row is null) return null;
+
+        var fileId = await db.Files.AsNoTracking()
+            .Where(file => file.Barcode == row.Barcode)
+            .Select(file => (int?)file.Id)
+            .FirstOrDefaultAsync(ct) ?? 0;
+        return new ScanOcrDto(
+            row.Id, fileId, row.PageNo, row.Side, row.Version, row.OcrStatus,
+            row.OcrText ?? string.Empty, row.OcrLanguage, row.OcrEngine,
+            row.OcrError, row.OcrUpdatedAt, row.OcrUpdatedBy);
+    }
+
+    public async Task<Result<ScanOcrDto>> UpdateOcrAsync(
+        long scanId, ScanOcrInput input, CancellationToken ct = default)
+    {
+        const int maxTextLength = 250_000;
+        var page = await db.ScanPages.FirstOrDefaultAsync(row => row.Id == scanId, ct);
+        if (page is null) return Result<ScanOcrDto>.Fail("Scan page not found.", "scanId");
+        if (string.IsNullOrWhiteSpace(page.StorageKey))
+            return Result<ScanOcrDto>.Fail("Upload the scanned PDF or image before attaching OCR text.", "document");
+
+        var status = input.Status?.Trim();
+        var completed = string.Equals(status, "Completed", StringComparison.OrdinalIgnoreCase);
+        var failed = string.Equals(status, "Failed", StringComparison.OrdinalIgnoreCase);
+        if (!completed && !failed)
+            return Result<ScanOcrDto>.Fail("OCR status must be Completed or Failed.", "status");
+
+        var text = input.Text ?? string.Empty;
+        if (text.Length > maxTextLength)
+            return Result<ScanOcrDto>.Fail("OCR text cannot exceed 250,000 characters for one scan page.", "text");
+        var language = input.Language?.Trim();
+        var engine = input.Engine?.Trim();
+        var error = input.Error?.Trim();
+        if ((language?.Length ?? 0) > 24)
+            return Result<ScanOcrDto>.Fail("OCR language cannot exceed 24 characters.", "language");
+        if ((engine?.Length ?? 0) > 64)
+            return Result<ScanOcrDto>.Fail("OCR engine identifier cannot exceed 64 characters.", "engine");
+        if ((error?.Length ?? 0) > 400)
+            return Result<ScanOcrDto>.Fail("OCR error cannot exceed 400 characters.", "error");
+        if (failed && string.IsNullOrWhiteSpace(error))
+            return Result<ScanOcrDto>.Fail("A failure reason is required when OCR status is Failed.", "error");
+
+        // Preserve line breaks/tabs while removing control characters that make
+        // full-text indexing and export pipelines unstable.
+        text = text.Replace("\r\n", "\n").Replace('\r', '\n');
+        text = new string(text.Where(ch => ch == '\n' || ch == '\t' || !char.IsControl(ch)).ToArray());
+
+        var previous = page.OcrStatus + "; chars=" + (page.OcrText?.Length ?? 0);
+        page.OcrStatus = completed ? "Completed" : "Failed";
+        page.OcrText = completed ? text : null;
+        page.OcrLanguage = string.IsNullOrWhiteSpace(language) ? null : language;
+        page.OcrEngine = string.IsNullOrWhiteSpace(engine) ? null : engine;
+        page.OcrError = failed ? error : null;
+        page.OcrUpdatedAt = DateTime.UtcNow;
+        page.OcrUpdatedBy = current.UserName;
+
+        var after = page.OcrStatus + "; chars=" + (page.OcrText?.Length ?? 0)
+            + "; language=" + (page.OcrLanguage ?? "unspecified")
+            + "; engine=" + (page.OcrEngine ?? "unspecified");
+        var summary = "OCR " + page.OcrStatus.ToLowerInvariant() + " for scan "
+            + page.Id + " (" + page.Barcode + " page " + page.PageNo + " " + page.Side + "); "
+            + (page.OcrText?.Length ?? 0) + " characters.";
+        await audit.LogAsync(db, AuditAction.Update, "FileScanPageOcr", page.Id.ToString(),
+            previous, after, summary, ct);
+        await db.SaveChangesAsync(ct);
+        await audit.AnnounceAsync(RealtimeChannels.Digitization, "scan.ocr-updated",
+            page.Id.ToString(), "OCR " + page.OcrStatus.ToLowerInvariant()
+                + " for file " + page.Barcode + " page " + page.PageNo + ".");
+        var fileId = await db.Files.AsNoTracking().Where(file => file.Barcode == page.Barcode)
+            .Select(file => (int?)file.Id).FirstOrDefaultAsync(ct) ?? 0;
+        return Result<ScanOcrDto>.Ok(new ScanOcrDto(
+            page.Id, fileId, page.PageNo, page.Side, page.Version, page.OcrStatus,
+            page.OcrText ?? string.Empty, page.OcrLanguage, page.OcrEngine,
+            page.OcrError, page.OcrUpdatedAt, page.OcrUpdatedBy));
     }
 
     private async Task TryDeleteAsync(string storageKey)
