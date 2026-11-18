@@ -43,12 +43,12 @@ public class EmployeesController(IEmployeesService employees) : ControllerBase
     public async Task<IResult> Create(EmployeeInput input, CancellationToken ct) =>
         ApiResults.FromResult(await employees.CreateAsync(input, ct));
 
-    [Authorize(Roles = "Admin,Supervisor")]
+    [RequirePermission("employees.edit")]
     [HttpPut("{id:int}")]
     public async Task<IResult> Update(int id, EmployeeInput input, CancellationToken ct) =>
         ApiResults.FromResult(await employees.UpdateAsync(id, input, ct));
 
-    [Authorize(Roles = "Admin,Supervisor")]
+    [RequirePermission("employees.edit")]
     [HttpDelete("{id:int}")]
     public async Task<IResult> Delete(int id, CancellationToken ct) =>
         ApiResults.FromResult(await employees.DeleteAsync(id, ct));
