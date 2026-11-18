@@ -274,6 +274,11 @@ public sealed record EmployeeInput(
     string PayScale,
     string Status);
 
+// Department directory -------------------------------------------------------
+
+public sealed record DepartmentDto(int Id, string Code, string Name, bool Active, DateTime ModifiedAt);
+public sealed record DepartmentInput(string Code, string Name, bool Active = true);
+
 // Digitization ----------------------------------------------------------------
 
 /// <summary>

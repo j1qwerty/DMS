@@ -164,6 +164,7 @@ builder.Services.AddScoped<IIssuesService, IssuesService>();
 builder.Services.AddScoped<IFileScansService, FileScansService>();
 builder.Services.AddScoped<ICustodyService, CustodyService>();
 builder.Services.AddScoped<IEmployeesService, EmployeesService>();
+builder.Services.AddScoped<IDepartmentsService, DepartmentsService>();
 builder.Services.AddScoped<IUsersService, UsersService>();
 builder.Services.AddScoped<IContentService, ContentService>();
 builder.Services.AddScoped<IUploadsService, UploadsService>();

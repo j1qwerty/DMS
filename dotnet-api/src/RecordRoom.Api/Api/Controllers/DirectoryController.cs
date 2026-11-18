@@ -9,6 +9,29 @@ using RecordRoom.Api.Infrastructure.Auth;
 namespace RecordRoom.Api.Api.Controllers;
 
 [ApiController]
+[Route("api/departments")]
+[Authorize]
+[Produces("application/json")]
+[Tags("Departments")]
+public sealed class DepartmentsController(IDepartmentsService departments) : ControllerBase
+{
+    [HttpGet]
+    [RequirePermission("custody.view")]
+    public async Task<IResult> List([FromQuery] bool includeInactive = false, CancellationToken ct = default) =>
+        Results.Ok(ApiResponse<DepartmentDto[]>.Ok(await departments.ListAsync(includeInactive, ct)));
+
+    [HttpPost]
+    [RequirePermission("departments.manage")]
+    public async Task<IResult> Create(DepartmentInput input, CancellationToken ct) =>
+        ApiResults.FromResult(await departments.CreateAsync(input, ct));
+
+    [HttpPut("{id:int}")]
+    [RequirePermission("departments.manage")]
+    public async Task<IResult> Update(int id, DepartmentInput input, CancellationToken ct) =>
+        ApiResults.FromResult(await departments.UpdateAsync(id, input, ct));
+}
+
+[ApiController]
 [Route("api/employees")]
 [Authorize]
 [RequirePermission("employees.view")]

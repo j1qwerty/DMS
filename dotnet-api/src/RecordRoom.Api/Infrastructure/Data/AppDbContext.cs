@@ -7,6 +7,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 {
     public DbSet<AppUser> Users => Set<AppUser>();
     public DbSet<Employee> Employees => Set<Employee>();
+    public DbSet<Department> Departments => Set<Department>();
     public DbSet<LoginHistoryEntry> LoginHistory => Set<LoginHistoryEntry>();
 
     public DbSet<Room> Rooms => Set<Room>();
@@ -50,6 +51,15 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.ToTable("Employees");
             e.HasIndex(x => x.EmployeeCode).IsUnique();
             e.Property(x => x.EmployeeCode).HasMaxLength(32);
+        });
+
+        b.Entity<Department>(e =>
+        {
+            e.ToTable("Departments");
+            e.HasIndex(x => x.Code).IsUnique();
+            e.HasIndex(x => x.Name).IsUnique();
+            e.Property(x => x.Code).HasMaxLength(32).IsRequired();
+            e.Property(x => x.Name).HasMaxLength(128).IsRequired();
         });
 
         b.Entity<LoginHistoryEntry>(e =>

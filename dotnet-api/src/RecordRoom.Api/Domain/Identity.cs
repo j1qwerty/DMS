@@ -45,6 +45,17 @@ public class Employee
     public List<AppUser> Users { get; set; } = [];
 }
 
+/// <summary>Department directory used by employee, custody and issue workflows.</summary>
+public class Department
+{
+    public int Id { get; set; }
+    public required string Code { get; set; }
+    public required string Name { get; set; }
+    public bool Active { get; set; } = true;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime ModifiedAt { get; set; } = DateTime.UtcNow;
+}
+
 public class LoginHistoryEntry
 {
     public long Id { get; set; }

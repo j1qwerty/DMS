@@ -68,7 +68,8 @@ public sealed class EmployeesService(AppDbContext db, IAuditWriter audit) : IEmp
     }
 
     public Task<string[]> DepartmentsAsync(CancellationToken ct) =>
-        db.Employees.AsNoTracking().Select(e => e.Department).Distinct().OrderBy(d => d).ToArrayAsync(ct);
+        db.Departments.AsNoTracking().Where(d => d.Active).OrderBy(d => d.Name)
+            .Select(d => d.Name).ToArrayAsync(ct);
 
     private static (string code, Role role, EmployeeStatus status) Normalise(EmployeeInput input)
     {

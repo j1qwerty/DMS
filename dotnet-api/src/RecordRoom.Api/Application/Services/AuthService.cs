@@ -300,7 +300,7 @@ public sealed class AuthService(
             "files.view", "files.create", "files.edit", "files.bulkImport", "files.documentDelete",
             "issue.issue", "issue.return", "locations.view", "locations.edit", "custody.view", "custody.manage",
             "digitization.view", "digitization.upload", "digitization.review",
-            "employees.view", "employees.edit", "users.view", "users.edit",
+            "employees.view", "employees.edit", "departments.manage", "users.view", "users.edit",
             "audit.view", "reports.view", "reports.export", "barcodes.print",
         ],
         Role.Supervisor =>
