@@ -1,10 +1,12 @@
+> **Final scope authority (2026-11-18):** This engineering work plan is a supporting backlog, not the acceptance definition. The final departmental proposal, clause-by-clause status, exclusions, hidden modules, dependencies and acceptance tests are tracked in [`../ZILA_PANCHAYAT_CODEX.MD`](../ZILA_PANCHAYAT_CODEX.MD). Where this plan says a feature is deferred, frontend-first, complete or optional in conflict with that tracker, the final tracker wins. In particular, e-office document transfer, OCR text search, scan/PDF composition, image-quality gates and digital handover are now proposal requirements, not optional stretch work.
+
 # Record Room — work plan
 
 A living tracker: what we are working on now, and everything left to do,
 split into **v1** (small, ship in the current release) and **v2** (the
 digitisation engine and platform hardening).
 
-- Snapshot: **2026-10-28**
+- Snapshot: **2026-11-18**
 - Feature inventory, verified library versions and licence notes: `Recordroom-features.md`
 - Editable permission design: `V2-EDITABLE-PERMISSIONS.md`
 - Tender-phase scope split and phasing: `PHASED-SCOPE.md`
