@@ -32,6 +32,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Inquiry> Inquiries => Set<Inquiry>();
     public DbSet<MediaLink> MediaLinks => Set<MediaLink>();
     public DbSet<CustodyEvent> CustodyEvents => Set<CustodyEvent>();
+    public DbSet<DigitalHandoverBatch> DigitalHandoverBatches => Set<DigitalHandoverBatch>();
+    public DbSet<DigitalHandoverItem> DigitalHandoverItems => Set<DigitalHandoverItem>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -253,6 +255,40 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasIndex(x => x.RecordedAt);
             e.HasIndex(x => x.Department);
             e.HasIndex(x => x.Direction);
+        });
+
+        b.Entity<DigitalHandoverBatch>(e =>
+        {
+            e.ToTable("DigitalHandoverBatches");
+            e.Property(x => x.BatchRef).HasMaxLength(64);
+            e.Property(x => x.Department).HasMaxLength(128);
+            e.Property(x => x.Notes).HasMaxLength(500);
+            e.Property(x => x.Status).HasMaxLength(16);
+            e.Property(x => x.ManifestSha256).HasMaxLength(64);
+            e.Property(x => x.PreparedBy).HasMaxLength(64);
+            e.Property(x => x.DeliveredBy).HasMaxLength(64);
+            e.Property(x => x.AcceptedBy).HasMaxLength(128);
+            e.Property(x => x.DecisionNotes).HasMaxLength(500);
+            e.HasIndex(x => x.BatchRef).IsUnique();
+            e.HasIndex(x => x.Status);
+            e.HasIndex(x => x.PreparedAt);
+            e.HasMany(x => x.Items).WithOne(x => x.Batch!)
+                .HasForeignKey(x => x.DigitalHandoverBatchId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<DigitalHandoverItem>(e =>
+        {
+            e.ToTable("DigitalHandoverItems");
+            e.Property(x => x.FileNumber).HasMaxLength(64);
+            e.Property(x => x.Department).HasMaxLength(128);
+            e.Property(x => x.FileName).HasMaxLength(255);
+            e.Property(x => x.ContentType).HasMaxLength(100);
+            e.Property(x => x.Sha256).HasMaxLength(64);
+            e.HasIndex(x => new { x.DigitalHandoverBatchId, x.RecordFileDocumentId }).IsUnique();
+            e.HasOne(x => x.RecordFile).WithMany().HasForeignKey(x => x.RecordFileId)
+                .OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.Document).WithMany().HasForeignKey(x => x.RecordFileDocumentId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
     }
 }
