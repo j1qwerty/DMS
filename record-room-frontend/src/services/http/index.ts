@@ -13,7 +13,6 @@ import type {
   BarcodeApi,
   BulkApi,
   CustodyApi,
-  DigitalHandoverApi,
   DashboardApi,
   ScanApi,
   EmployeesApi,
@@ -46,7 +45,6 @@ import {
   toAppUser,
   toArea,
   toCustodyEvent,
-  toDigitalHandoverBatch,
   toAuditEntry,
   toBarcodeJob,
   toBulkJob,
@@ -1065,46 +1063,5 @@ export const httpCustodyService: CustodyApi = {
       },
     );
     return result.ok ? ok(toCustodyEvent(result.value)) : result;
-  },
-};
-
-
-// ------------------------------------------------------ digital handover
-
-export const httpDigitalHandoverService: DigitalHandoverApi = {
-  async list() {
-    return list(await get<Dto[]>('/api/digital-handovers'), toDigitalHandoverBatch);
-  },
-
-  async prepare(input) {
-    const result = await attempt<Dto>('POST', '/api/digital-handovers', {
-      batchRef: input.batchRef,
-      department: input.department,
-      fileIds: input.fileIds,
-      notes: input.notes ?? '',
-    });
-    return result.ok ? ok(toDigitalHandoverBatch(result.value)) : result;
-  },
-
-  async markDelivered(id) {
-    const result = await attempt<Dto>(
-      'POST',
-      `/api/digital-handovers/${toApiId(id, 'digital handover')}/deliver`,
-      {},
-    );
-    return result.ok ? ok(toDigitalHandoverBatch(result.value)) : result;
-  },
-
-  async signOff(id, decision, signedOffBy, notes) {
-    const result = await attempt<Dto>(
-      'POST',
-      `/api/digital-handovers/${toApiId(id, 'digital handover')}/sign-off`,
-      { decision, signedOffBy, notes: notes ?? '' },
-    );
-    return result.ok ? ok(toDigitalHandoverBatch(result.value)) : result;
-  },
-
-  async packageBlob(id) {
-    return getBlob(`/api/digital-handovers/${toApiId(id, 'digital handover')}/package`);
   },
 };
