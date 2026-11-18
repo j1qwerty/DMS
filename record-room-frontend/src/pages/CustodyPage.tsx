@@ -76,7 +76,7 @@ export function CustodyPage() {
   const [counting, setCounting] = useState<CustodyEvent | null>(null);
   const [signing, setSigning] = useState<CustodyEvent | null>(null);
 
-  const mayWrite = allowed('digitization.review');
+  const mayWrite = allowed('custody.manage');
 
   const {
     data: register,
