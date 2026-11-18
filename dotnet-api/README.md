@@ -11,7 +11,7 @@ creates the `RecordRoom` database on first run.
 
 ```bash
 cd src/RecordRoom.Api
-dotnet run --urls http://localhost:5199
+dotnet run --urls http://localhost:5198
 ```
 
 On startup the API applies EF migrations and, if the registry is empty, seeds
@@ -40,7 +40,7 @@ a real database and exits non-zero on the first failed assertion.
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test-api.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test-api.ps1 -BaseUrl http://localhost:5199
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test-api.ps1 -BaseUrl http://localhost:5198
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test-api.ps1 -SkipDestructive   # read-only pass
 ```
 
@@ -144,7 +144,7 @@ configuration, so a site can change the cadence without a rebuild.
 | `Hangfire:EnableScheduling` | `true` | register the recurring jobs on startup |
 | `Hangfire:OverdueSweepCron` | `*/15 * * * *` | overdue sweep cadence, UTC |
 | `Hangfire:AuditRetentionCron` | `30 2 * * *` | audit retention cadence, UTC |
-| `Cors:AllowedOrigins` | `http://localhost:5173` | frontend origin |
+| `Cors:AllowedOrigins` | `http://localhost:5172` | frontend origin |
 | `Swagger:Enabled` | `true` | serve `/swagger` |
 | `Features:BarcodeEnabled` | `false` | retained barcode module; env `Features__BarcodeEnabled` |
 | `Features:MovementEnabled` | `false` | retained standalone movement log/report; env `Features__MovementEnabled` |

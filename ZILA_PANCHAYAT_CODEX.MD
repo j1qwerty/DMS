@@ -2,8 +2,9 @@
 
 **Scope authority:** the final proposal supplied in this conversation (sections 1.1–1.4). Where older plans, README files, UI labels, or implementation notes conflict with that proposal, this document takes precedence.
 
-**Working branch:** `zila_codex`  
-**Branch base:** `v2` commit `b0113c1d6c90fe6b98c53a13c3e3f1cc630910da` at branch creation  
+**Working branch:** `zila_codex` (single work target; do not create or switch to another branch)  
+**Audited starting head:** `73b15fd89f9da16c0cf70807065ed540294d5409`  
+**Branch provenance:** continue from the already-established `zila_codex` history; do not merge, cherry-pick or rebase other branches  
 **Review date:** 18 November 2026  
 **Production target:** SQL Server-backed web application  
 **Isolation rule:** all work is committed directly to `zila_codex`; no later `v2` changes are merged, cherry-picked or rebased into this branch. Draft PR #1 targeting `zila_codex` from `v2` was closed without merge.  
@@ -36,6 +37,9 @@ A route, button, database field, or mock adapter alone is not evidence that an e
 | Intake reconciliation before sign-off | DONE / TEST ADDED | An inbound custody event cannot be signed off until a reconciliation count exists; harness checks premature sign-off refusal. |
 | Legal document-size option | DONE / TEST ADDED | Legal added alongside A0/A1/A2/A3/A4/Other in file and scan size validation/UI; harness registers and composes a Legal-size scan. |
 | Dashboard metric corrections | PARTIAL / TEST ADDED | Mapped percentage counts files with a shelf placement against `Scope:ExpectedFileCount`; digitisation percentage counts approved PDF pages against `Scope:ExpectedPageCount`; both remain 0 until a positive department-approved denominator is set. Registry `collectionTotal` uses the approved file count or actual loaded DB count—no hard-coded district total. Due counts count outstanding file-lines, not receipts. |
+| Consolidated proposal navigation | DONE / TEST ADDED | Overview first; Documents, Digitization, Issue & return, Reports; maps/rooms/help are no longer top-level menu items; account identity remains only in Topbar. Route aliases redirect into proposal screens. |
+| Local development ports | DONE / TEST NOT RUN | Vite default is 5172; .NET API default is 5198; frontend API fallback and CORS/docs updated. CI may continue using isolated runner ports explicitly. |
+| Permission matrix alignment and contrast | PARTIAL / TEST NOT RUN | Matrix columns/cells use fixed widths and vertical alignment; primary active navigation uses contrasting foreground/background tokens. Visual browser verification remains required. |
 | Metadata and OCR full-text search | PARTIAL / TEST ADDED | `20261118000400_AddFilesFullTextIndex` conditionally indexes registry metadata; `20261118000700_AddScanPageOcrText` conditionally indexes per-page `OcrText`. Search uses safe bounded `CONTAINS` terms when the respective index is ready and falls back when unavailable. OCR text is supplied by a trusted worker/import; no OCR recognition engine is included. |
 
 ## 3. Final proposal 1.1 — DMS software

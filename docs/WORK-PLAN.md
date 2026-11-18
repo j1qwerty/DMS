@@ -2,6 +2,19 @@
 
 # Record Room — work plan
 
+> **Current authority:** `../ZILA_PANCHAYAT_CODEX.MD` records the final proposal acceptance criteria and is authoritative for this branch. Treat the historical v1/v2 split below as engineering history only: do not defer OCR extraction (Hindi + English), e-office transfer, upload/reference-copy retention, metadata/OCR search, custody, or Department delivery sign-off because an old section labels them v2 or stretch work. Final Department handover means a project deliverable and sign-off, not an in-app feature.
+
+## Current Zila scope execution order (2026-11-18)
+
+1. Close proposal-critical usability and master-data gaps: route consolidation, department master, employee autocomplete/unlisted borrower, custody batch returns and sign-off evidence.
+2. Implement on-premise OCR extraction for Hindi and English with persisted text, provenance, review/retry and file/page search; validate against representative Department scans before acceptance.
+3. Implement configurable e-office transfer only after the Department provides the official API/interface, credentials, network access and test endpoint; retain the signed/hash-verified app copy.
+4. Complete scan quality controls, page composition/editing, searchable PDF output and the approved archival format.
+5. Verify audit completeness, SQL Server Full-Text indexing/relevance, security and load performance.
+6. Produce the handover pack, backups/restore proof, UAT, training and Department sign-off as delivery activities.
+
+
+
 A living tracker: what we are working on now, and everything left to do,
 split into **v1** (small, ship in the current release) and **v2** (the
 digitisation engine and platform hardening).

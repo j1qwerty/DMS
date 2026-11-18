@@ -23,14 +23,14 @@ If an admin panel for contact/inquiry-type data was not explicitly requested, **
 ## Frontend setup (`record-room-frontend/`)
 
 - Requires Node.js 22+, pnpm 10.15.0: `corepack enable && corepack prepare pnpm@10.15.0 --activate`
-- `pnpm install`, `pnpm dev` (port 5173, `strictPort: true`)
+- `pnpm install`, `pnpm dev` (port 5172, `strictPort: true`)
 - All commands run from `record-room-frontend/`. pnpm is mandatory — no npm fallback locally.
 - Defaults to the in-memory adapter. To run against the API, copy `.env.example` to `.env.local` and set `VITE_API_MODE=http`.
 
 ## API setup (`dotnet-api/`)
 
 - Requires .NET 10 SDK and a reachable SQL Server. See `dotnet-api/README.md`.
-- `cd src/RecordRoom.Api && dotnet run --urls http://localhost:5199`
+- `cd src/RecordRoom.Api && dotnet run --urls http://localhost:5198`
 - Applies EF migrations and seeds the demo dataset if the registry is empty.
 - Tests: `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test-api.ps1` (142 assertions, no browser). Plus `dotnet test` for the pure-logic unit tests.
 
