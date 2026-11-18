@@ -321,7 +321,7 @@ export interface ScanApi {
   /** Rejects a repeated file + `pageNo`; bumps `version` on rescan. */
   add(
     fileId: string,
-    input: { pageNo: number; filename: string; documentSize: string },
+    input: { pageNo: number; filename: string; documentSize: string; side?: 'Front' | 'Back' },
   ): Promise<Result<FileScan>>;
   addDocument(scanId: string, file: File): Promise<Result<FileScan>>;
   scanBlob(scanId: string): Promise<Blob>;
