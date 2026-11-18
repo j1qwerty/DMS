@@ -5,9 +5,9 @@
  * 3 Employee, and `User.php` maps the `admin` login to Admin. The frontend
  * keeps those four roles and adds the permission names the UI needs.
  *
- * This is UX gating only. `docs/SECURITY.md` requires the .NET 10 API to
- * re-check every one of these server-side — hiding a control is not
- * authorization.
+ * The frontend uses this matrix for navigation and control visibility. The API
+ * independently enforces the matching server-side grants through RequirePermission;
+ * keep the role entries and API AuthService.PermissionsForRole in parity.
  */
 
 import type { Role } from '../types';
