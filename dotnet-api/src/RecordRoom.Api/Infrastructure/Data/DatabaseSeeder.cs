@@ -1,4 +1,5 @@
 ﻿using Microsoft.EntityFrameworkCore;
+using RecordRoom.Api.Application.Services;
 using RecordRoom.Api.Domain;
 using RecordRoom.Api.Infrastructure.Auth;
 
@@ -15,6 +16,45 @@ public static class DatabaseSeeder
 
     public static async Task SeedAsync(AppDbContext db, ILogger logger, CancellationToken ct = default)
     {
+        // ---------------------------------------------------------------- switches
+        // The feature groups seed independently of the demo dataset: a
+        // deployment that has data but no rows yet should still get its Zila
+        // Panchayat defaults (all four groups hidden) written once. Rows are
+        // only added when absent, so an Admin's later choice is never undone.
+        var known = RecordRoom.Api.Infrastructure.Features.FeatureFlags.KnownKeys;
+        var existingFeatures = await db.FeatureSettings
+            .Select(s => s.FeatureKey)
+            .ToListAsync(ct);
+        foreach (var key in known.Where(k => !existingFeatures.Contains(k)))
+            db.FeatureSettings.Add(new FeatureSetting
+            {
+                FeatureKey = key,
+                Enabled = false,
+                UpdatedBy = "seed",
+                UpdatedAt = DateTime.UtcNow,
+            });
+        if (known.Any(k => !existingFeatures.Contains(k)))
+            await db.SaveChangesAsync(ct);
+
+        // ------------------------------------------------------------- permissions
+        // The capability matrix seeds the four v1 lists verbatim (behaviour-
+        // preserving), and only while the table is empty, so a restart never
+        // re-adds a grant an admin revoked.
+        if (!await db.RolePermissions.AnyAsync(ct))
+        {
+            foreach (var role in (Role[])Enum.GetValues(typeof(Role)))
+            foreach (var permission in AuthService.PermissionsForRole(role))
+                db.RolePermissions.Add(new RolePermission
+                {
+                    Role = role.ToString(),
+                    Permission = permission,
+                    GrantedBy = "seed",
+                    GrantedAt = DateTime.UtcNow,
+                });
+            await db.SaveChangesAsync(ct);
+            logger.LogInformation("Seeded the role permission matrix from the v1 lists.");
+        }
+
         if (await db.Files.AnyAsync(ct))
         {
             logger.LogInformation("Seed skipped: the registry already has rows.");
@@ -301,6 +341,16 @@ public static class DatabaseSeeder
                         : string.Empty,
                     UploadedAt = DateTime.UtcNow.AddDays(-3),
                     UploadedBy = "seed",
+                    // Studio composition order follows the sheet order.
+                    OrderIndex = p + 1,
+                    // Sample OCR text on the first file's approved pages, so the
+                    // registry search demonstrates the OCR-text path (§3.1) and
+                    // the deliverable PDF builder has an invisible text layer to
+                    // lay down. The extraction pipeline itself is POC-gated (§3.3).
+                    OcrText = t == 0
+                        ? $"Page {p + 1} of {target.Subject}. {target.Department} department, file {target.FileNumber}. " +
+                          "Digitized under the Zila Panchayat record programme. कार्यालय जिला पंचायत अभिलेख कक्ष।"
+                        : null,
                 });
             }
         }

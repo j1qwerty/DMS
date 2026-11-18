@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using RecordRoom.Api.Application;
 using RecordRoom.Api.Application.Contracts;
 using RecordRoom.Api.Application.Services;
+using RecordRoom.Api.Infrastructure.Auth;
 
 namespace RecordRoom.Api.Api.Controllers;
 
@@ -44,13 +45,13 @@ public class IssuesController(IIssuesService issues) : ControllerBase
     }
 
     /// <summary>Multi-file issue: several files against one receipt.</summary>
-    [Authorize(Roles = "Admin,Supervisor,Operator")]
+    [Authorize(Policy = "perm:issue.issue")]
     [HttpPost]
     public async Task<IResult> Issue(IssueInput input, CancellationToken ct) =>
         ApiResults.FromResult(await issues.IssueAsync(input, ct));
 
     /// <summary>Partial return: the receipt settles when every line is back.</summary>
-    [Authorize(Roles = "Admin,Supervisor,Operator")]
+    [Authorize(Policy = "perm:issue.return")]
     [HttpPost("{id:long}/return")]
     public async Task<IResult> Return(long id, ReturnInput input, CancellationToken ct) =>
         ApiResults.FromResult(await issues.ReturnAsync(id, input, ct));
@@ -99,7 +100,7 @@ public class DashboardController(IReadService read) : ControllerBase
 /// </summary>
 [ApiController]
 [Route("api/audit")]
-[Authorize(Roles = "Admin,Supervisor")]
+[Authorize(Policy = "perm:audit.view")]
 [Produces("application/json")]
 [Tags("Audit")]
 public class AuditController(IReadService read) : ControllerBase

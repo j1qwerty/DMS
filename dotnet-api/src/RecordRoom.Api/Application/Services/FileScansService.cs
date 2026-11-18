@@ -44,6 +44,7 @@ public sealed class FileScansService(
     ICurrentUserAccessor current,
     IPrivateDocumentStore documentStore,
     IFileRefs fileRefs,
+    Microsoft.Extensions.Configuration.IConfiguration configuration,
     ILogger<FileScansService> logger) : IFileScansService
 {
     private static readonly string[] DocumentSizes = ["A0", "A1", "A2", "A3", "A4", "Other"];
@@ -52,7 +53,13 @@ public sealed class FileScansService(
         p.Id, fileId, p.Barcode, p.FileName, p.PageNo, p.Version, p.DocumentSize,
         Display.Page(p.Status), p.Note, p.UploadedAt, p.UploadedBy,
         !string.IsNullOrWhiteSpace(p.StorageKey), p.ContentType, p.SizeBytes, p.Sha256,
-        p.PageCount, p.PageIndex);
+        p.PageCount, p.PageIndex,
+        FileNumber: null,
+        OrderIndex: p.OrderIndex,
+        Dpi: p.Dpi,
+        Enhancement: p.Enhancement,
+        HasProcessed: !string.IsNullOrWhiteSpace(p.ProcessedStorageKey),
+        OcrText: p.OcrText);
 
     public async Task<FileScanPageDto[]> ListByFileAsync(int fileId, CancellationToken ct = default)
     {
@@ -61,7 +68,7 @@ public sealed class FileScansService(
 
         var rows = await db.ScanPages.AsNoTracking()
             .Where(p => p.Barcode == file.Barcode)
-            .OrderBy(p => p.PageNo).ThenBy(p => p.Version)
+            .OrderBy(p => p.OrderIndex).ThenBy(p => p.PageNo).ThenBy(p => p.Version)
             .ToListAsync(ct);
         return await fileRefs.EnrichAsync(rows.Select(p => ToPage(p, fileId)).ToArray(), ct);
     }
@@ -90,8 +97,14 @@ public sealed class FileScansService(
         var hasActive = await db.ScanPages.AnyAsync(
             p => p.Barcode == file.Barcode && p.PageNo == input.PageNo && p.Status == PageStatus.Active, ct);
 
+        // §3.4: new pages join the composition after every existing page.
+        var nextOrder = await db.ScanPages
+            .Where(p => p.Barcode == file.Barcode)
+            .Select(p => (int?)p.OrderIndex).MaxAsync(ct) ?? 0;
+
         var page = new FileScanPage
         {
+            OrderIndex = nextOrder + 1,
             Barcode = file.Barcode,
             FileName = string.IsNullOrWhiteSpace(input.FileName)
                 ? $"{file.Barcode}-FILE-{input.PageNo}{(nextVersion > 1 ? $"-V{nextVersion}" : string.Empty)}.pdf"
@@ -126,6 +139,18 @@ public sealed class FileScansService(
         if (!storedResult.IsSuccess) return Result<FileScanPageDto>.Fail(storedResult.Errors);
         var stored = storedResult.Value;
 
+        // §3.2 DPI gate: a scan below the minimum is rejected with a field-level
+        // error before any metadata is written. 0 disables the gate; PDFs carry
+        // no DPI and pass (their quality is judged at review).
+        var minimumDpi = configuration.GetValue("Quality:MinimumScanDpi", 200);
+        if (minimumDpi > 0 && stored.Dpi is int dpi && dpi < minimumDpi)
+        {
+            await TryDeleteAsync(stored.StorageKey);
+            return Result<FileScanPageDto>.Fail(
+                $"This scan is {dpi} DPI; the minimum for digitization is {minimumDpi} DPI. Rescan at a higher resolution.",
+                "document");
+        }
+
         // A metadata-only registration is filled in place: registering the page
         // and attaching its scan is one page, not two versions. Attaching a
         // document to a row that already has one is a rescan and becomes the
@@ -139,6 +164,7 @@ public sealed class FileScansService(
             page.SizeBytes = stored.SizeBytes;
             page.Sha256 = stored.Sha256;
             page.PageCount = stored.PageCount;
+            page.Dpi = stored.Dpi;
             await audit.LogAsync(db, AuditAction.Update, "FileScanPage", page.Id.ToString(),
                 beforeFile,
                 $"{stored.OriginalFileName}; bytes={stored.SizeBytes}; sha256={stored.Sha256}",
@@ -171,7 +197,7 @@ public sealed class FileScansService(
             Note = $"Uploaded document version {version} for page {page.PageNo}.",
             UploadedAt = DateTime.UtcNow, UploadedBy = current.UserName,
             StorageKey = stored.StorageKey, ContentType = stored.ContentType, SizeBytes = stored.SizeBytes, Sha256 = stored.Sha256,
-            PageCount = stored.PageCount
+            PageCount = stored.PageCount, Dpi = stored.Dpi
         };
         db.ScanPages.Add(rescan);
         await audit.LogAsync(db, AuditAction.Create, "FileScanPage", "pending",

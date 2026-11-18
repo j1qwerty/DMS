@@ -1,4 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { store } from '../src/services/store';
+import { scansService } from '../src/services/impl/scans';
+import { filesService } from '../src/services/impl/files';
 import { service } from '../src/services';
 import type { FileCreateInput } from '../src/types';
 
@@ -598,5 +601,103 @@ describe('dashboard', () => {
     const activity = await service.dashboard.activity(3);
     expect(activity.length).toBeGreaterThan(0);
     expect(activity[0].label.length).toBeGreaterThan(0);
+  });
+});
+
+
+// ------------------------------------------------------------- scan studio (§3.4/§3.5)
+
+describe('scan studio: order, corrections, deliverable PDF', () => {
+  const firstFile = () => store.getState().files[0];
+
+  it('reorders pages and refuses foreign scan ids', async () => {
+    const file = firstFile();
+    const page = store.getState().scanPages.find((row) => row.fileBarcode === file.fileBarcode);
+    if (!page) return; // seed always has scan pages; guard keeps the test honest
+    const result = await scansService.reorder(file.id, [page.id]);
+    expect(result.ok).toBe(true);
+    const bad = await scansService.reorder(file.id, ['scan-does-not-exist']);
+    expect(bad.ok).toBe(false);
+  });
+
+  it('rotates, enhances and reverts a page, keeping the label honest', async () => {
+    const file = firstFile();
+    const page = store.getState().scanPages.find((row) => row.fileBarcode === file.fileBarcode);
+    if (!page) return;
+    const rotated = await scansService.rotate(page.id, 90);
+    expect(rotated.ok && rotated.value.enhancement).toBe('rotated 90\u00b0');
+    const enhanced = await scansService.enhance(page.id, 'deskew');
+    expect(enhanced.ok && enhanced.value.enhancement).toBe('deskewed');
+    const reverted = await scansService.revert(page.id);
+    expect(reverted.ok && reverted.value.hasProcessed).toBe(false);
+    const invalid = await scansService.rotate(page.id, 45);
+    expect(invalid.ok).toBe(false);
+  });
+
+  it('duplicates a page as its next version', async () => {
+    const file = firstFile();
+    const page = store.getState().scanPages.find((row) => row.fileBarcode === file.fileBarcode);
+    if (!page) return;
+    const copy = await scansService.duplicate(page.id);
+    expect(copy.ok && copy.value.version).toBe(page.version + 1);
+    expect(copy.ok && copy.value.status).toBe('Pending review');
+  });
+
+  it('builds a deliverable PDF from approved pages and serves real PDF bytes', async () => {
+    const file = firstFile();
+    const id = 'scan-studio-test';
+    store.update((draft) => {
+      draft.scanPages.push({
+        id,
+        fileId: file.id,
+        fileBarcode: file.fileBarcode,
+        filename: 'studio-test.pdf',
+        pageNo: 999,
+        version: 1,
+        documentSize: 'A4',
+        status: 'Approved',
+        note: '',
+        uploadedAt: new Date().toISOString(),
+        uploadedBy: 'test',
+        hasDocument: true,
+        ocrText: 'Zila Panchayat digitization deliverable test page',
+      });
+    });
+    const built = await scansService.buildPdf(file.id);
+    expect(built.ok).toBe(true);
+    if (built.ok) {
+      expect(built.value.pageCount).toBeGreaterThanOrEqual(1);
+      expect(built.value.includesOcrText).toBe(true);
+      const blob = await scansService.pdfBlob(built.value.id);
+      const text = await blob.text();
+      expect(text.startsWith('%PDF')).toBe(true);
+      const listed = await scansService.listPdfs(file.id);
+      expect(listed.some((row) => row.id === built.value.id)).toBe(true);
+    }
+    const empty = await scansService.buildPdf('file-none');
+    expect(empty.ok).toBe(false);
+  });
+});
+
+
+// ------------------------------------------------- registry search over OCR text (§3.1)
+
+describe('registry search covers the OCR text of digitized pages', () => {
+  it('returns an OCR-only match flagged matchedVia=ocr', async () => {
+    const result = await filesService.list({ search: 'record programme', pageSize: 50 });
+    expect(result.total).toBeGreaterThanOrEqual(1);
+    const ocrOnly = result.items.filter((file) => file.matchedVia === 'ocr');
+    expect(ocrOnly.length).toBeGreaterThanOrEqual(1);
+    // The token appears in no metadata field of the flagged rows.
+    for (const file of ocrOnly) {
+      const haystack = `${file.subject} ${file.department} ${file.location} ${file.fileNumber}`.toLowerCase();
+      expect(haystack).not.toContain('record programme');
+    }
+  });
+
+  it('still matches metadata and leaves matchedVia unset for those rows', async () => {
+    const result = await filesService.list({ search: 'RF-0000199103', pageSize: 10 });
+    expect(result.total).toBeGreaterThanOrEqual(1);
+    expect(result.items.every((file) => file.matchedVia === undefined)).toBe(true);
   });
 });

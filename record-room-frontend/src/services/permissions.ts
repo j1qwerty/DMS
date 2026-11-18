@@ -1,16 +1,15 @@
 /**
  * Role → permission matrix.
  *
- * Legacy `drm_employee.role` is a 2-char code: 1 Supervisor, 2 Operator,
- * 3 Employee, and `User.php` maps the `admin` login to Admin. The frontend
- * keeps those four roles and adds the permission names the UI needs.
- *
- * This is UX gating only. `docs/SECURITY.md` requires the .NET 10 API to
- * re-check every one of these server-side — hiding a control is not
- * authorization.
+ * The matrix is editable at runtime (V2-EDITABLE-PERMISSIONS): reads go
+ * through `permissionsStore`, seeded from the v1 lists so first paint is
+ * byte-identical to the static build. The API enforces the same grants
+ * server-side through `perm:*` policies — hiding a control here is not the
+ * authorization boundary.
  */
 
 import type { Role } from '../types';
+import { MATRIX_V1, permissionsStore } from './permissionsStore';
 
 export const PERMISSIONS = [
   'files.view',
@@ -36,50 +35,15 @@ export const PERMISSIONS = [
 
 export type Permission = (typeof PERMISSIONS)[number];
 
-const matrix: Record<Role, readonly Permission[]> = {
-  Admin: PERMISSIONS,
-  Supervisor: [
-    'files.view',
-    'files.create',
-    'files.edit',
-    'files.bulkImport',
-    'issue.issue',
-    'issue.return',
-    'locations.view',
-    'locations.edit',
-    'digitization.view',
-    'digitization.upload',
-    'digitization.review',
-    'employees.view',
-    'employees.edit',
-    'users.view',
-    'audit.view',
-    'reports.view',
-    'reports.export',
-    'barcodes.print',
-  ],
-  Operator: [
-    'files.view',
-    'files.create',
-    'issue.issue',
-    'issue.return',
-    'locations.view',
-    'digitization.view',
-    'digitization.upload',
-    'employees.view',
-    'reports.view',
-    'barcodes.print',
-  ],
-  Employee: ['files.view', 'digitization.view', 'reports.view'],
-};
+export { MATRIX_V1 };
 
 export function can(role: Role | undefined, permission: Permission): boolean {
   if (!role) return false;
-  return matrix[role].includes(permission);
+  return permissionsStore.get()[role].includes(permission);
 }
 
 export function permissionsFor(role: Role): readonly Permission[] {
-  return matrix[role];
+  return permissionsStore.get()[role];
 }
 
 export const ROLE_DESCRIPTIONS: Record<Role, string> = {

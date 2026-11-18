@@ -18,6 +18,7 @@ import type { Icon } from '@phosphor-icons/react';
 import { cn } from '../lib/utils';
 import { useSession } from '../hooks/useService';
 import { can, type Permission } from '../services/permissions';
+import { useFeatures, type FeatureKey } from '../lib/features';
 import { APP_NAME, RECORD_ROOM_SECTION } from '../lib/brand';
 
 interface NavItem {
@@ -28,6 +29,8 @@ interface NavItem {
   also?: string[];
   permission?: Permission;
   anyOf?: Permission[];
+  /** Feature group this entry belongs to; hidden while the group is off. */
+  feature?: FeatureKey;
 }
 
 /**
@@ -41,7 +44,7 @@ const groups: Array<{ title: string; items: NavItem[] }> = [
     title: 'Document management',
     items: [
       { label: 'Documents', to: '/files', icon: Files, also: ['/search'] },
-      { label: 'Maps', to: '/maps', icon: MapTrifold, permission: 'files.view' },
+      { label: 'Maps', to: '/maps', icon: MapTrifold, permission: 'files.view', feature: 'maps' },
       { label: 'Scan review', to: '/digitization', icon: Archive, also: ['/custody'] },
       { label: 'Custody register', to: '/custody', icon: Handshake },
       { label: 'Reports', to: '/reports', icon: ChartBar, permission: 'reports.view' },
@@ -56,7 +59,13 @@ const groups: Array<{ title: string; items: NavItem[] }> = [
         icon: ClipboardText,
         also: ['/return', '/movement', '/scan'],
       },
-      { label: 'Rooms & shelves', to: '/rooms', icon: Stack, also: ['/barcodes'] },
+      {
+        label: 'Rooms & shelves',
+        to: '/rooms',
+        icon: Stack,
+        also: ['/barcodes'],
+        feature: 'recordRoom',
+      },
     ],
   },
   {
@@ -74,7 +83,7 @@ const groups: Array<{ title: string; items: NavItem[] }> = [
 ];
 
 const footerLinks: NavItem[] = [
-  { label: 'Help & support', to: '/support', icon: Question },
+  { label: 'Help & support', to: '/support', icon: Question, feature: 'support' },
   { label: 'Settings', to: '/settings', icon: Gear },
 ];
 
@@ -92,9 +101,10 @@ export function BrandMark({ size = 36 }: { size?: number }) {
 export function Sidebar({ mobileOpen, onClose }: { mobileOpen: boolean; onClose: () => void }) {
   const location = useLocation();
   const { user, signOut } = useSession();
+  const features = useFeatures();
 
   const permitted = (item: NavItem) =>
-    item.anyOf
+    (!item.feature || features[item.feature]) && item.anyOf
       ? item.anyOf.some((permission) => can(user?.role, permission))
       : !item.permission || can(user?.role, item.permission);
 
@@ -170,7 +180,7 @@ export function Sidebar({ mobileOpen, onClose }: { mobileOpen: boolean; onClose:
         </nav>
 
         <div className="shrink-0 border-t border-base p-3">
-          <div className="space-y-0.5">{footerLinks.map(link)}</div>
+          <div className="space-y-0.5">{footerLinks.filter(permitted).map(link)}</div>
           <div className="mt-3 flex items-center gap-3 rounded-lg bg-[var(--rr-bg)] p-2.5">
             <div className="grid size-9 shrink-0 place-items-center rounded-full bg-[var(--rr-accent)] text-sm font-bold text-white dark:text-[#0d1420]">
               {(user?.displayName ?? '?').slice(0, 1).toUpperCase()}

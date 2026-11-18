@@ -174,8 +174,68 @@ Assert-Equal 200 $pin.Status 'PIN sign-in works with the demo PIN'
 $badPin = Invoke-Api -Method POST -Path '/api/auth/pin' -Body @{ userName = 'operator'; pin = '9999' }
 Assert-Equal 400 $badPin.Status 'a wrong PIN is rejected'
 
+# ============================================================ feature groups
+Write-Step 'Feature switch groups (ZILA_PANCHAYAT_CC §F)'
+$configAll = Invoke-Api -Path '/api/config'
+Assert-True ($configAll.Data.features.barcode -is [bool]) 'config reports the barcode group'
+Assert-True ($configAll.Data.features.recordRoom -is [bool]) 'config reports the record room group'
+Assert-True ($configAll.Data.features.maps -is [bool]) 'config reports the maps group'
+Assert-True ($configAll.Data.features.support -is [bool]) 'config reports the support group'
+$initialGroups = @{
+    barcode      = [bool]$configAll.Data.features.barcode
+    recordRoom   = [bool]$configAll.Data.features.recordRoom
+    maps         = [bool]$configAll.Data.features.maps
+    support      = [bool]$configAll.Data.features.support
+}
+Write-Host "  (seeded state: barcode=$($initialGroups.barcode) recordRoom=$($initialGroups.recordRoom) maps=$($initialGroups.maps) support=$($initialGroups.support))"
+
+$empFlip = Invoke-Api -Method PUT -Path '/api/config/features' -Token $employeeToken -Body @{
+    features = @{ barcode = $true }
+}
+Assert-Equal 403 $empFlip.Status 'a non-admin cannot change feature visibility'
+$badKey = Invoke-Api -Method PUT -Path '/api/config/features' -Token $admin -Body @{
+    features = @{ teleport = $true }
+}
+Assert-Equal 400 $badKey.Status 'an unknown feature group is refused'
+
+# The rest of the suite exercises every hidden group, so they come on now and
+# the initial state is restored before the summary.
+$flipOn = Invoke-Api -Method PUT -Path '/api/config/features' -Token $admin -Body @{
+    features = @{ barcode = $true; recordRoom = $true; maps = $true; support = $true }
+}
+Assert-Equal 200 $flipOn.Status 'an admin can turn feature groups on'
+$afterOn = Invoke-Api -Path '/api/config'
+Assert-True ([bool]$afterOn.Data.features.recordRoom) 'GET /api/config reflects the live switch state'
+
+# ============================================================ permissions matrix
+Write-Step 'Editable permission matrix (§3.7)'
+$empMatrix = Invoke-Api -Path '/api/permissions/matrix' -Token $employeeToken
+Assert-Equal 403 $empMatrix.Status 'an employee cannot read the permission matrix'
+$matrix = Invoke-Api -Path '/api/permissions/matrix' -Token $admin
+Assert-Equal 200 $matrix.Status 'GET /api/permissions/matrix responds for users.view holders'
+Assert-Equal 4 $matrix.Data.data.roles.Count 'the matrix covers all four roles'
+Assert-True ($matrix.Data.data.permissions.Count -ge 19) 'the permission catalogue is complete'
+
+# Enforcement is real: audit.view is not granted to Operator in the v1 lists.
+$opAuditBefore = Invoke-Api -Path '/api/audit' -Token $operatorToken
+$grant = Invoke-Api -Method PUT -Path '/api/permissions/Operator/audit.view' -Token $admin -Body @{ granted = $true }
+Assert-Equal 200 $grant.Status 'an admin can grant audit.view to Operator'
+$opAuditDuring = Invoke-Api -Path '/api/audit' -Token $operatorToken
+Assert-Equal 200 $opAuditDuring.Status 'the granted permission is enforced on the very next request'
+$revoke = Invoke-Api -Method PUT -Path '/api/permissions/Operator/audit.view' -Token $admin -Body @{ granted = $false }
+Assert-Equal 200 $revoke.Status 'an admin can revoke the grant again'
+$opAuditAfter = Invoke-Api -Path '/api/audit' -Token $operatorToken
+Assert-Equal 403 $opAuditAfter.Status 'the revoked permission is refused on the very next request'
+
+$fixedAdmin = Invoke-Api -Method PUT -Path '/api/permissions/Admin/files.view' -Token $admin -Body @{ granted = $false }
+Assert-Equal 400 $fixedAdmin.Status 'the Admin row is fixed and cannot be edited'
+$unknownPerm = Invoke-Api -Method PUT -Path '/api/permissions/Operator/teleport.files' -Token $admin -Body @{ granted = $true }
+Assert-Equal 400 $unknownPerm.Status 'an unknown permission is refused'
+$unknownRole = Invoke-Api -Method PUT -Path '/api/permissions/Wizard/files.view' -Token $admin -Body @{ granted = $true }
+Assert-Equal 400 $unknownRole.Status 'an unknown role is refused'
+
 # ============================================================ locations
-Write-Step 'Location hierarchy and guards'
+Write-Step 'Location hierarchy and guards
 $rooms = Invoke-Api -Path '/api/locations/rooms' -Token $admin
 Assert-Equal 200 $rooms.Status 'GET /api/locations/rooms responds'
 $roomCount = @($rooms.Data.data).Count
@@ -881,6 +941,80 @@ Assert-Equal 400 $reCount.Status 'a signed-off event can no longer be changed'
 $filtered = Invoke-Api -Path '/api/custody?direction=Intake&search=SMOKE' -Token $admin
 Assert-Equal 200 $filtered.Status 'the register filters by direction and text'
 Assert-True ($filtered.Data.data.items.Count -ge 1) 'the smoke-test intake appears in the filtered register'
+
+# ============================================================ full-text search
+Write-Step 'Registry search + OCR text (§3.1)'
+# The seeded first under-digitization file carries OCR text containing
+# "record programme" — a token none of its own metadata fields hold.
+$ocrSearch = Invoke-Api -Path '/api/files?search=programme' -Token $admin
+Assert-Equal 200 $ocrSearch.Status 'the registry search responds'
+$ocrHits = @($ocrSearch.Data.data.items | Where-Object { $_.matchedVia -eq 'ocr' })
+Assert-True ($ocrHits.Count -ge 1) 'a file whose OCR text alone matches is returned and flagged matchedVia=ocr'
+$plainSearch = Invoke-Api -Path '/api/files?search=Revenue' -Token $admin
+Assert-Equal 200 $plainSearch.Status 'a metadata search still works alongside the OCR path'
+
+# ============================================================ scan studio
+Write-Step 'Scan studio + deliverable PDF (§3.4/§3.5)'
+$studioPage = Invoke-Api -Method POST -Path "/api/files/$newFileId/scans" -Token $admin -Body @{
+    fileName = 'studio-page.png'; pageNo = 71; documentSize = 'A4'
+}
+Assert-Equal 200 $studioPage.Status 'a scan page row is created for the studio'
+$studioScanId = $studioPage.Data.data.id
+
+# Invoke-WebRequest on Windows PowerShell 5.1 cannot post a multipart form, so
+# the upload goes through curl.exe. A real 1x1 PNG decodes for every enhancer op.
+$studioPng = Join-Path $env:TEMP 'rr-smoke-studio.png'
+[IO.File]::WriteAllBytes($studioPng, [Convert]::FromBase64String(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='))
+$rawScan = curl.exe -s -X POST "$BaseUrl/api/scans/$studioScanId/document" `
+    -H "Authorization: Bearer $admin" `
+    -F "document=@$studioPng;type=image/png"
+$scanUpload = $rawScan | ConvertFrom-Json
+Assert-True ([bool]$scanUpload.success) 'the studio page image is attached'
+
+$order = Invoke-Api -Method PUT -Path "/api/files/$newFileId/scans/order" -Token $admin -Body @{
+    scanIds = @($studioScanId)
+}
+Assert-Equal 200 $order.Status 'the composition order is saved'
+$foreignOrder = Invoke-Api -Method PUT -Path "/api/files/$newFileId/scans/order" -Token $admin -Body @{
+    scanIds = @(999999)
+}
+Assert-Equal 400 $foreignOrder.Status 'a scan id from another file is refused in the order'
+
+$rotate = Invoke-Api -Method POST -Path "/api/scans/$studioScanId/rotate" -Token $admin -Body @{ degrees = 90 }
+Assert-Equal 200 $rotate.Status 'the page is rotated (processed copy, original kept)'
+Assert-True ($rotate.Data.data.enhancement -like 'rotated*') 'the rotation is labelled on the page'
+$badRotate = Invoke-Api -Method POST -Path "/api/scans/$studioScanId/rotate" -Token $admin -Body @{ degrees = 45 }
+Assert-Equal 400 $badRotate.Status 'only quarter-turn rotations are accepted'
+$deskew = Invoke-Api -Method POST -Path "/api/scans/$studioScanId/enhance" -Token $admin -Body @{ operation = 'deskew' }
+Assert-Equal 200 $deskew.Status 'the deskew operation runs'
+$processed = curl.exe -s -o - -w "`n%{http_code}" "$BaseUrl/api/scans/$studioScanId/content?variant=processed" -H "Authorization: Bearer $admin"
+Assert-True ($processed -match '^200$' -or $processed -match "`n200$") 'the processed variant is served'
+$revert = Invoke-Api -Method DELETE -Path "/api/scans/$studioScanId/enhancement" -Token $admin
+Assert-Equal 200 $revert.Status 'the page reverts to its original scan'
+
+$approvePage = Invoke-Api -Method POST -Path "/api/scans/$studioScanId/review" -Token $admin -Body @{
+    decision = 'Approved'; note = 'Studio smoke test page'
+}
+Assert-Equal 200 $approvePage.Status 'the studio page is approved'
+
+$noPdf = Invoke-Api -Method POST -Path "/api/files/999999/pdf" -Token $admin -Body @{ }
+Assert-Equal 400 $noPdf.Status 'building a deliverable for an unknown file is refused'
+$pdf = Invoke-Api -Method POST -Path "/api/files/$newFileId/pdf" -Token $admin -Body @{ }
+Assert-Equal 200 $pdf.Status 'the deliverable PDF is built from the approved pages'
+Assert-True ($pdf.Data.data.pageCount -ge 1) 'the deliverable reports its page count'
+$pdfList = Invoke-Api -Path "/api/files/$newFileId/pdf" -Token $admin
+Assert-True (@($pdfList.Data.data).Count -ge 1) 'the deliverable is listed on the file'
+$pdfId = $pdf.Data.data.id
+$pdfBytes = curl.exe -s "$BaseUrl/api/files/$newFileId/pdf/$pdfId/content" -H "Authorization: Bearer $admin"
+Assert-True ($pdfBytes -like '*%PDF*') 'the deliverable downloads as real PDF bytes'
+
+# ============================================================ restore switches
+Write-Step 'Feature groups restored to the seeded profile'
+$restore = Invoke-Api -Method PUT -Path '/api/config/features' -Token $admin -Body @{
+    features = $initialGroups
+}
+Assert-Equal 200 $restore.Status 'the seeded feature state is restored after the run'
 
 # ============================================================ summary
 Write-Host "`n================================" -ForegroundColor Cyan

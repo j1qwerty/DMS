@@ -4,6 +4,7 @@ using RecordRoom.Api.Application;
 using RecordRoom.Api.Application.Contracts;
 using RecordRoom.Api.Application.Services;
 using RecordRoom.Api.Infrastructure.Features;
+using RecordRoom.Api.Infrastructure.Auth;
 
 namespace RecordRoom.Api.Api.Controllers;
 
@@ -80,7 +81,7 @@ public class FilesController(IFilesService files) : ControllerBase
     }
 
     /// <summary>Dry-run the legacy guards without writing anything.</summary>
-    [Authorize(Roles = "Admin,Supervisor,Operator")]
+    [Authorize(Policy = "perm:files.create")]
     [HttpPost("validate")]
     public async Task<IResult> Validate(FileCreateInput input, CancellationToken ct)
     {
@@ -88,22 +89,22 @@ public class FilesController(IFilesService files) : ControllerBase
         return Results.Ok(ApiResponse<bool>.Ok(errors.Count == 0) with { Errors = errors });
     }
 
-    [Authorize(Roles = "Admin,Supervisor,Operator")]
+    [Authorize(Policy = "perm:files.create")]
     [HttpPost]
     public async Task<IResult> Create(FileCreateInput input, CancellationToken ct) =>
         ApiResults.FromResult(await files.CreateAsync(input, ct));
 
-    [Authorize(Roles = "Admin,Supervisor")]
+    [Authorize(Policy = "perm:files.edit")]
     [HttpPost("{id:int}/relocate")]
     public async Task<IResult> Relocate(int id, RelocateInput input, CancellationToken ct) =>
         ApiResults.FromResult(await files.RelocateAsync(id, input, ct));
 
-    [Authorize(Roles = "Admin,Supervisor,Operator")]
+    [Authorize(Policy = "perm:files.edit")]
     [HttpPut("{id:int}/e-office-reference")]
     public async Task<IResult> UpdateEOfficeReference(int id, EOfficeReferenceInput input, CancellationToken ct) =>
         ApiResults.FromResult(await files.UpdateEOfficeReferenceAsync(id, input, ct));
 
-    [Authorize(Roles = "Admin,Supervisor")]
+    [Authorize(Policy = "perm:files.edit")]
     [HttpDelete("{id:int}")]
     public async Task<IResult> Delete(int id, CancellationToken ct) =>
         ApiResults.FromResult(await files.DeleteAsync(id, ct));

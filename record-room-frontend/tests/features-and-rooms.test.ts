@@ -20,9 +20,9 @@ describe('barcode feature switch', () => {
     vi.unstubAllGlobals();
   });
 
-  it('is on by default', async () => {
+  it('is hidden by default (the Zila Panchayat profile)', async () => {
     const { getFeatures } = await freshFeatures();
-    expect(getFeatures().barcode).toBe(true);
+    expect(getFeatures().barcode).toBe(false);
   });
 
   it.each(['false', '0', 'off', 'no', 'disabled', 'FALSE', ' Off '])(
@@ -33,7 +33,7 @@ describe('barcode feature switch', () => {
     },
   );
 
-  it.each(['true', '1', 'on', ''])('stays on for %j', async (value) => {
+  it.each(['true', '1', 'on'])('stays on for %j', async (value) => {
     const { getFeatures } = await freshFeatures(value);
     expect(getFeatures().barcode).toBe(true);
   });

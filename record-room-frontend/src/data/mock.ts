@@ -1256,6 +1256,7 @@ function page(
   status: FileScan['status'],
   uploadedDaysAgo: number,
   note = '',
+  ocrText = '',
 ): FileScan {
   return {
     id: `scan-${fileBarcodeValue}-${pageNo}-v${version}`,
@@ -1267,6 +1268,8 @@ function page(
     documentSize: files.find((f) => f.fileBarcode === fileBarcodeValue)?.documentSize ?? 'Other',
     status,
     note,
+    ocrText: ocrText || undefined,
+    orderIndex: pageNo,
     uploadedAt: iso(uploadedDaysAgo, 10, 30 + (pageNo % 30))
       .slice(0, 16)
       .replace('T', ' '),
@@ -1276,9 +1279,35 @@ function page(
 
 export const fileScans: FileScan[] = [
   // RF-0000199103: digitized and fully approved (page 1 was re-scanned once).
-  page('RF-0000199103', 1, 1, 'Approved', 5),
-  page('RF-0000199103', 1, 2, 'Approved', 4, 'Rescanned after OCR quality failure'),
-  page('RF-0000199103', 2, 1, 'Approved', 5),
+  // Sample OCR text mirrors the API seeder: a token none of the file's own
+  // metadata holds, so an OCR-only match is visible as matchedVia: 'ocr'.
+  page(
+    'RF-0000199103',
+    1,
+    1,
+    'Approved',
+    5,
+    '',
+    'Page 1. Digitized under the Zila Panchayat record programme. कार्यालय जिला पंचायत अभिलेख कक्ष।',
+  ),
+  page(
+    'RF-0000199103',
+    1,
+    2,
+    'Approved',
+    4,
+    'Rescanned after OCR quality failure',
+    'Page 1 (rescan). Digitized under the Zila Panchayat record programme.',
+  ),
+  page(
+    'RF-0000199103',
+    2,
+    1,
+    'Approved',
+    5,
+    '',
+    'Page 2. Digitized under the Zila Panchayat record programme.',
+  ),
   page('RF-0000199103', 3, 1, 'Approved', 4),
   // RF-0000111881: partially reviewed.
   page('RF-0000111881', 1, 1, 'Approved', 3),

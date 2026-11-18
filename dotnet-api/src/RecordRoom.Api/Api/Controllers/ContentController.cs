@@ -4,6 +4,7 @@ using RecordRoom.Api.Application;
 using RecordRoom.Api.Application.Contracts;
 using RecordRoom.Api.Application.Services;
 using RecordRoom.Api.Infrastructure.Features;
+using RecordRoom.Api.Infrastructure.Auth;
 
 namespace RecordRoom.Api.Api.Controllers;
 
@@ -30,21 +31,27 @@ public class DigitizationController(IFileScansService scans) : ControllerBase
 [Authorize]
 [Produces("application/json")]
 [Tags("Files")]
-public class FileScansController(IFileScansService scans) : ControllerBase
+public class FileScansController(IFileScansService scans, IScanStudioService studio) : ControllerBase
 {
     [HttpGet]
     public async Task<IResult> List(int fileId, CancellationToken ct) =>
         Results.Ok(ApiResponse<FileScanPageDto[]>.Ok(await scans.ListByFileAsync(fileId, ct)));
 
-    [Authorize(Roles = "Admin,Supervisor,Operator")]
+    [Authorize(Policy = "perm:digitization.upload")]
     [HttpPost]
     public async Task<IResult> Add(int fileId, ScanAddInput input, CancellationToken ct) =>
         ApiResults.FromResult(await scans.AddAsync(fileId, input, ct));
 
-    [Authorize(Roles = "Admin,Supervisor")]
+    [Authorize(Policy = "perm:digitization.review")]
     [HttpPost("review-all")]
     public async Task<IResult> ReviewAll(int fileId, PageReviewInput input, CancellationToken ct) =>
         ApiResults.FromResult(await scans.ReviewAllAsync(fileId, input, ct));
+
+    /// <summary>Scan studio (§3.4): persists the composition order of the file's pages.</summary>
+    [Authorize(Policy = "perm:digitization.upload")]
+    [HttpPut("order")]
+    public async Task<IResult> Order(int fileId, ScanOrderInput input, CancellationToken ct) =>
+        ApiResults.FromResult(await studio.ReorderAsync(fileId, input, ct));
 }
 
 [ApiController]
@@ -52,9 +59,9 @@ public class FileScansController(IFileScansService scans) : ControllerBase
 [Authorize]
 [Produces("application/json")]
 [Tags("Digitization")]
-public class ScansController(IFileScansService scans) : ControllerBase
+public class ScansController(IFileScansService scans, IScanStudioService studio) : ControllerBase
 {
-    [Authorize(Roles = "Admin,Supervisor,Operator")]
+    [Authorize(Policy = "perm:digitization.upload")]
     [HttpPost("{scanId:long}/document")]
     [Consumes("multipart/form-data")]
     [RequestSizeLimit(50331648)]
@@ -63,9 +70,12 @@ public class ScansController(IFileScansService scans) : ControllerBase
         ApiResults.FromResult(await scans.AddDocumentAsync(scanId, document, ct));
 
     [HttpGet("{scanId:long}/content")]
-    public async Task<IActionResult> Content(long scanId, [FromQuery] bool download = false, CancellationToken ct = default)
+    public async Task<IActionResult> Content(
+        long scanId, [FromQuery] bool download = false,
+        [FromQuery(Name = "variant")] string? variant = null, CancellationToken ct = default)
     {
-        var item = await scans.OpenDocumentAsync(scanId, ct);
+        var processed = string.Equals(variant, "processed", StringComparison.OrdinalIgnoreCase);
+        var item = await (processed ? studio.OpenDocumentAsync(scanId, true, ct) : scans.OpenDocumentAsync(scanId, ct));
         if (item is null) return NotFound();
         Response.Headers["Cache-Control"] = "private, no-store";
         Response.Headers["X-Content-Type-Options"] = "nosniff";
@@ -73,15 +83,41 @@ public class ScansController(IFileScansService scans) : ControllerBase
         return File(item.Stream, item.ContentType, enableRangeProcessing: true);
     }
 
-    [Authorize(Roles = "Admin,Supervisor")]
+    [Authorize(Policy = "perm:digitization.review")]
     [HttpDelete("{scanId:long}")]
     public async Task<IResult> Remove(long scanId, CancellationToken ct) =>
         ApiResults.FromResult(await scans.RemoveAsync(scanId, ct));
 
-    [Authorize(Roles = "Admin,Supervisor")]
+    [Authorize(Policy = "perm:digitization.review")]
     [HttpPost("{scanId:long}/review")]
     public async Task<IResult> Review(long scanId, PageReviewInput input, CancellationToken ct) =>
         ApiResults.FromResult(await scans.ReviewAsync(scanId, input, ct));
+
+    // ------------------------------------------------------------ scan studio
+
+    /// <summary>Writes a rotated processed copy; the original blob is never touched.</summary>
+    [Authorize(Policy = "perm:digitization.upload")]
+    [HttpPost("{scanId:long}/rotate")]
+    public async Task<IResult> Rotate(long scanId, ScanRotateInput input, CancellationToken ct) =>
+        ApiResults.FromResult(await studio.RotateAsync(scanId, input, ct));
+
+    /// <summary>Applies deskew / despeckle / binarize / crop / contrast as the processed copy.</summary>
+    [Authorize(Policy = "perm:digitization.upload")]
+    [HttpPost("{scanId:long}/enhance")]
+    public async Task<IResult> Enhance(long scanId, ScanEnhanceInput input, CancellationToken ct) =>
+        ApiResults.FromResult(await studio.EnhanceAsync(scanId, input, ct));
+
+    /// <summary>Drops the processed copy and serves the original again.</summary>
+    [Authorize(Policy = "perm:digitization.upload")]
+    [HttpDelete("{scanId:long}/enhancement")]
+    public async Task<IResult> Revert(long scanId, CancellationToken ct) =>
+        ApiResults.FromResult(await studio.RevertAsync(scanId, ct));
+
+    /// <summary>Duplicates a page as its next version (insert-after semantics).</summary>
+    [Authorize(Policy = "perm:digitization.upload")]
+    [HttpPost("{scanId:long}/duplicate")]
+    public async Task<IResult> Duplicate(long scanId, CancellationToken ct) =>
+        ApiResults.FromResult(await studio.DuplicateAsync(scanId, ct));
 }
 
 internal static class DocumentHttpHeaders
@@ -98,6 +134,7 @@ internal static class DocumentHttpHeaders
 
 [ApiController]
 [Route("api/uploads")]
+[RequireFeature("maps")]
 [Authorize]
 [Produces("application/json")]
 [Tags("Uploads")]
@@ -112,7 +149,7 @@ public class UploadsController(IUploadsService uploads) : ControllerBase
     public async Task<IResult> AddMap(MapUploadInput input, CancellationToken ct) =>
         ApiResults.FromResult(await uploads.AddMapAsync(input, ct));
 
-    [Authorize(Roles = "Admin,Supervisor,Operator")]
+    [Authorize(Policy = "perm:digitization.upload")]
     [HttpPost("maps/{id:long}/document")]
     [Consumes("multipart/form-data")]
     [RequestSizeLimit(50331648)]
@@ -154,12 +191,12 @@ public class BulkController(IBulkService bulk) : ControllerBase
         return job is null ? Results.NotFound() : Results.Ok(ApiResponse<BulkJobDto>.Ok(job));
     }
 
-    [Authorize(Roles = "Admin,Supervisor")]
+    [Authorize(Policy = "perm:files.bulkImport")]
     [HttpPost("validate")]
     public async Task<IResult> Validate(BulkValidateInput input, CancellationToken ct) =>
         ApiResults.FromResult(await bulk.ValidateAsync(input, ct));
 
-    [Authorize(Roles = "Admin,Supervisor")]
+    [Authorize(Policy = "perm:files.bulkImport")]
     [HttpPost("jobs/{id:long}/commit")]
     public async Task<IResult> Commit(long id, CancellationToken ct) =>
         ApiResults.FromResult(await bulk.CommitAsync(id, ct));
@@ -197,7 +234,7 @@ public class BarcodesController(IBarcodeService barcodes) : ControllerBase
     public async Task<IResult> Jobs(CancellationToken ct) =>
         Results.Ok(ApiResponse<BarcodeJobDto[]>.Ok(await barcodes.JobsAsync(ct)));
 
-    [Authorize(Roles = "Admin,Supervisor,Operator")]
+    [Authorize(Policy = "perm:barcodes.print")]
     [HttpPost("jobs")]
     public async Task<IResult> CreateJob(BarcodeJobInput input, CancellationToken ct) =>
         ApiResults.FromResult(await barcodes.CreateJobAsync(input, ct));
@@ -235,7 +272,7 @@ public class ReportsController(IReportsService reports) : ControllerBase
     /// Streams the CSV. Large exports should move to a Hangfire job that writes
     /// to object storage; this path is fine for the row counts the UI shows now.
     /// </summary>
-    [Authorize(Roles = "Admin,Supervisor")]
+    [Authorize(Policy = "perm:reports.export")]
     [HttpGet("{key}/export")]
     public IResult Export(string key)
     {

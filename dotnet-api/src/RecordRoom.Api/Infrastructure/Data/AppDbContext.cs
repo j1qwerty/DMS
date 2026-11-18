@@ -24,6 +24,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<FileScanPage> ScanPages => Set<FileScanPage>();
     public DbSet<MapUpload> Maps => Set<MapUpload>();
+    public DbSet<DocumentDerivative> Derivatives => Set<DocumentDerivative>();
     public DbSet<RecordFileDocument> FileDocuments => Set<RecordFileDocument>();
     public DbSet<BulkImportJob> BulkJobs => Set<BulkImportJob>();
     public DbSet<BulkImportRow> BulkRows => Set<BulkImportRow>();
@@ -32,6 +33,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Inquiry> Inquiries => Set<Inquiry>();
     public DbSet<MediaLink> MediaLinks => Set<MediaLink>();
     public DbSet<CustodyEvent> CustodyEvents => Set<CustodyEvent>();
+
+    public DbSet<FeatureSetting> FeatureSettings => Set<FeatureSetting>();
+    public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -182,9 +186,29 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.ContentType).HasMaxLength(100);
             e.Property(x => x.Sha256).HasMaxLength(64);
             e.Property(x => x.DocumentSize).HasMaxLength(8);
+            e.Property(x => x.Enhancement).HasMaxLength(200);
+            e.Property(x => x.ProcessedStorageKey).HasMaxLength(80);
+            e.Property(x => x.ProcessedBy).HasMaxLength(64);
             e.HasIndex(x => new { x.Barcode, x.PageNo, x.Version }).IsUnique();
             e.HasIndex(x => x.Status);
+            // The studio lists pages in composition order.
+            e.HasIndex(x => new { x.Barcode, x.OrderIndex });
             e.HasOne(x => x.RecordFile).WithMany(x => x.ScanPages).HasForeignKey(x => x.Barcode)
+                .HasPrincipalKey(x => x.Barcode).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        b.Entity<DocumentDerivative>(e =>
+        {
+            e.ToTable("DocumentDerivatives");
+            e.Property(x => x.Barcode).HasMaxLength(64);
+            e.Property(x => x.FileName).HasMaxLength(255);
+            e.Property(x => x.StorageKey).HasMaxLength(80);
+            e.Property(x => x.ContentType).HasMaxLength(100);
+            e.Property(x => x.Sha256).HasMaxLength(64);
+            e.Property(x => x.CreatedBy).HasMaxLength(64);
+            e.Property(x => x.SourceVersions).HasMaxLength(1000);
+            e.HasIndex(x => x.Barcode);
+            e.HasOne(x => x.RecordFile).WithMany().HasForeignKey(x => x.Barcode)
                 .HasPrincipalKey(x => x.Barcode).OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -251,6 +275,27 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasIndex(x => x.RecordedAt);
             e.HasIndex(x => x.Department);
             e.HasIndex(x => x.Direction);
+        });
+
+        // ------------------------------------------------------- configuration
+        b.Entity<FeatureSetting>(e =>
+        {
+            e.ToTable("FeatureSettings");
+            e.Property(x => x.FeatureKey).HasMaxLength(32);
+            e.Property(x => x.UpdatedBy).HasMaxLength(64);
+            // One live row per group: the Admin's choice, not a history.
+            e.HasIndex(x => x.FeatureKey).IsUnique();
+        });
+
+        b.Entity<RolePermission>(e =>
+        {
+            e.ToTable("RolePermissions");
+            e.Property(x => x.Role).HasMaxLength(32);
+            e.Property(x => x.Permission).HasMaxLength(64);
+            e.Property(x => x.GrantedBy).HasMaxLength(64);
+            // Present-rows semantics: the pair is the grant.
+            e.HasIndex(x => new { x.Role, x.Permission }).IsUnique();
+            e.HasIndex(x => x.Role);
         });
     }
 }

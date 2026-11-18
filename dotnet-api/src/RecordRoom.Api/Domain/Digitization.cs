@@ -28,6 +28,58 @@ public class FileScanPage
     /// <summary>1-based page within a multi-page PDF that this row represents.</summary>
     public int? PageIndex { get; set; }
 
+    // ------------------------------------------------------------- scan studio
+    /// <summary>
+    /// Composition order inside the file (§3.4). Distinct from PageNo: the
+    /// studio reorders freely while PageNo stays the physical sheet number,
+    /// so a reordered page keeps its identity and history.
+    /// </summary>
+    public int OrderIndex { get; set; }
+    /// <summary>Horizontal resolution read from the image at upload; the DPI gate rejects scans below the minimum.</summary>
+    public int? Dpi { get; set; }
+    /// <summary>Human-readable label of the applied enhancement, e.g. "deskew + despeckle".</summary>
+    public string? Enhancement { get; set; }
+    /// <summary>
+    /// The processed (enhanced / rotated) copy. The original blob is never
+    /// touched — archival work must be able to prove what was scanned.
+    /// </summary>
+    public string? ProcessedStorageKey { get; set; }
+    public DateTime? ProcessedAt { get; set; }
+    public string ProcessedBy { get; set; } = string.Empty;
+    /// <summary>
+    /// Extracted text of the page. The OCR extraction pipeline is POC-gated
+    /// (§3.3); until it lands this column is filled by manual entry or seed
+    /// data, and the registry search already covers it (§3.1).
+    /// </summary>
+    public string? OcrText { get; set; }
+
+    public RecordFile? RecordFile { get; set; }
+}
+
+/// <summary>
+/// A generated deliverable derived from a file's scan pages (§3.5): today the
+/// PDF built from the ordered approved pages, with an invisible OCR text layer
+/// where page text exists. The derivative is stored like any other document so
+/// the reference copy stays in the application while the PDF goes to e-office.
+/// </summary>
+public class DocumentDerivative
+{
+    public long Id { get; set; }
+    public required string Barcode { get; set; }
+    /// <summary>Deliverable kind; "Pdf" today, room for other formats later.</summary>
+    public string Kind { get; set; } = "Pdf";
+    public required string FileName { get; set; }
+    public string? StorageKey { get; set; }
+    public string? ContentType { get; set; }
+    public long? SizeBytes { get; set; }
+    public string? Sha256 { get; set; }
+    public int PageCount { get; set; }
+    /// <summary>Which scan versions the deliverable was built from ("scanId:v2, scanId:v1"), for provenance.</summary>
+    public string SourceVersions { get; set; } = string.Empty;
+    public bool IncludesOcrText { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public string CreatedBy { get; set; } = string.Empty;
+
     public RecordFile? RecordFile { get; set; }
 }
 

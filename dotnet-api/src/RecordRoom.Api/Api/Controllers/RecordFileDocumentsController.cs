@@ -4,6 +4,7 @@ using Microsoft.Net.Http.Headers;
 using RecordRoom.Api.Application;
 using RecordRoom.Api.Application.Contracts;
 using RecordRoom.Api.Application.Services;
+using RecordRoom.Api.Infrastructure.Auth;
 
 namespace RecordRoom.Api.Api.Controllers;
 
@@ -21,7 +22,7 @@ public sealed class RecordFileDocumentsController(IRecordFileDocumentsService do
         return rows is null ? Results.NotFound() : Results.Ok(ApiResponse<RecordFileDocumentDto[]>.Ok(rows));
     }
 
-    [Authorize(Roles = "Admin,Supervisor,Operator")]
+    [Authorize(Policy = "perm:digitization.upload")]
     [HttpPost]
     [Consumes("multipart/form-data")]
     [RequestSizeLimit(50331648)]
@@ -42,7 +43,7 @@ public sealed class RecordFileDocumentsController(IRecordFileDocumentsService do
     }
 
     /// <summary>Removing a stored scan version is a destructive admin action.</summary>
-    [Authorize(Roles = "Admin")]
+    [Authorize(Policy = "perm:files.edit")]
     [HttpDelete("{documentId:long}")]
     public async Task<IResult> Delete(int fileId, long documentId, CancellationToken ct) =>
         ApiResults.FromResult(await documents.DeleteAsync(fileId, documentId, ct));

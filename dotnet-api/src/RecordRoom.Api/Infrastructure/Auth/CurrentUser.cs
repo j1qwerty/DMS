@@ -24,6 +24,8 @@ public static class RealtimeChannels
     public const string Audit = "audit";
     public const string Dashboard = "dashboard";
     public const string Uploads = "uploads";
+    /// <summary>Feature-switch changes, so every open screen re-reads /api/config.</summary>
+    public const string Config = "config";
 }
 
 /// <summary>

@@ -1,5 +1,9 @@
-import { useFeatures } from '../lib/features';
-import { useState, type ReactNode } from 'react';
+import { useFeatures, applyFeatures, FEATURE_GROUPS, type FeatureKey } from '../lib/features';
+import { service } from '../services';
+import { dataSource } from '../services';
+import { CheckCircle, Circle, Sliders } from '@phosphor-icons/react';
+import { useEffect, useState, type ReactNode } from 'react';
+
 import {
   ArrowCounterClockwise,
   Bell,
@@ -26,7 +30,7 @@ import { ROLES } from '../types';
  * `dotnet-api/` provides endpoints.
  */
 export function SettingsPage() {
-  const { barcode } = useFeatures();
+  const features = useFeatures();
   const db = useDb();
   const { user } = useSession();
   const [notifications, setNotifications] = useState(true);
@@ -45,6 +49,8 @@ export function SettingsPage() {
         title="Settings"
         description="Configuration surfaces for frontend prototype behaviour. Production values belong behind authenticated administrative APIs."
       />
+
+      <FeatureVisibilityCard />
 
       <div className="grid gap-5 xl:grid-cols-2">
         <Card>
@@ -83,7 +89,7 @@ export function SettingsPage() {
           </div>
           <ul className="mt-5 grid gap-1.5">
             {permissionsFor(user?.role ?? 'Employee')
-              .filter((permission) => barcode || permission !== 'barcodes.print')
+              .filter((permission) => features.barcode || permission !== 'barcodes.print')
               .map((permission) => (
                 <li key={permission} className="flex items-center gap-2 text-xs">
                   <span className="size-1.5 rounded-full bg-[var(--rr-success)]" />
@@ -255,5 +261,101 @@ function Toggle({
         />
       </span>
     </button>
+  );
+}
+
+/**
+ * Feature visibility (ZILA_PANCHAYAT_CC §F): grouped switches that hide whole
+ * capability areas without removing them. Admin-only writes; everyone sees the
+ * current state. Local mode persists to localStorage; http mode writes the
+ * API's FeatureSettings rows (audit-logged server-side).
+ */
+function FeatureVisibilityCard() {
+  const features = useFeatures();
+  const { user } = useSession();
+  const isAdmin = user?.role === 'Admin';
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (dataSource !== 'api') return;
+    // Refresh from the server so another admin's change shows up on navigation.
+    void service.config
+      .features()
+      .then((next) => applyFeatures(next))
+      .catch(() => undefined);
+  }, []);
+
+  const toggle = async (key: FeatureKey) => {
+    if (!isAdmin || busy) return;
+    setBusy(true);
+    setError('');
+    const result = await service.config.updateFeatures({ [key]: !features[key] });
+    if (result.ok) {
+      applyFeatures(result.value, dataSource === 'local');
+    } else {
+      setError(result.error ?? 'The feature groups could not be updated.');
+    }
+    setBusy(false);
+  };
+
+  return (
+    <Card>
+      <div className="flex items-center gap-3">
+        <div className="rounded-lg bg-accent-soft p-2 text-accent">
+          <Sliders size={18} />
+        </div>
+        <div>
+          <p className="text-sm font-semibold">Feature visibility</p>
+          <p className="muted text-xs">
+            Grouped switches — enabling a group enables every related surface. Hidden groups stay
+            built and tested; they come back without a redeploy.
+            {isAdmin ? '' : ' Only an admin can change these.'}
+          </p>
+        </div>
+      </div>
+      <div className="mt-5 space-y-3">
+        {FEATURE_GROUPS.map((group) => (
+          <button
+            key={group.key}
+            onClick={() => toggle(group.key)}
+            disabled={!isAdmin || busy}
+            aria-pressed={features[group.key]}
+            className="focus-ring flex w-full items-start justify-between gap-4 rounded-xl bg-[var(--rr-bg)] p-3 text-left disabled:cursor-default"
+          >
+            <span className="min-w-0">
+              <span className="flex items-center gap-2 text-sm font-semibold">
+                {features[group.key] ? (
+                  <CheckCircle size={16} weight="fill" className="text-[var(--rr-success)]" />
+                ) : (
+                  <Circle size={16} className="muted" />
+                )}
+                {group.label}
+              </span>
+              <span className="muted mt-1 block text-xs leading-5">{group.description}</span>
+              <span className="mt-1.5 flex flex-wrap gap-1">
+                {group.includes.map((item) => (
+                  <Badge key={item} tone="neutral">
+                    {item}
+                  </Badge>
+                ))}
+              </span>
+            </span>
+            <span
+              className={`mt-1 h-6 w-11 shrink-0 rounded-full p-1 transition ${
+                features[group.key] ? 'bg-[var(--rr-accent)]' : 'bg-[var(--rr-surface-2)]'
+              }`}
+            >
+              <span
+                className={`block size-4 rounded-full bg-white transition ${
+                  features[group.key] ? 'translate-x-5' : ''
+                }`}
+              />
+            </span>
+          </button>
+        ))}
+      </div>
+      {error && <p className="mt-3 text-xs text-[var(--rr-danger)]">{error}</p>}
+    </Card>
   );
 }

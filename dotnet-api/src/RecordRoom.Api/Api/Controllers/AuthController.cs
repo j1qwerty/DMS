@@ -58,7 +58,7 @@ public class AuthController(IAuthService auth, ICurrentUserAccessor current) : C
         return Results.Ok(ApiResponse<object>.Ok(new
         {
             user = dto,
-            permissions = auth.PermissionsFor(Enum.Parse<Role>(user.Role)),
+            permissions = await auth.PermissionsForAsync(Enum.Parse<Role>(user.Role), ct),
         }));
     }
 

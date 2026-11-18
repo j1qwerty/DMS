@@ -14,6 +14,7 @@ import type {
   BulkApi,
   CustodyApi,
   DashboardApi,
+  ConfigApi,
   ScanApi,
   EmployeesApi,
   FilesApi,
@@ -27,6 +28,7 @@ import type {
   UsersApi,
   AuditApi,
 } from '../contracts';
+import type { RolePermissionMatrix } from '../permissions-matrix';
 import { err, ok } from '../contracts';
 import {
   attempt,
@@ -51,6 +53,7 @@ import {
   toEmployee,
   toFile,
   toFileScan,
+  toDerivative,
   toIssue,
   toLoginHistory,
   toMapUpload,
@@ -679,10 +682,6 @@ export const httpDigitizationService: ScanApi = {
     return result.ok ? ok(toFileScan(result.value)) : result;
   },
 
-  async scanBlob(scanId) {
-    return getBlob(`/api/scans/${scanId}/content`);
-  },
-
   async remove(scanId) {
     return wrapTrue(await attempt<Dto>('DELETE', `/api/scans/${scanId}`));
   },
@@ -712,6 +711,67 @@ export const httpDigitizationService: ScanApi = {
 
   async pendingReviewCount() {
     return get<number>('/api/digitization/pending-review-count');
+  },
+  // -------------------------------------------------- scan studio (§3.4)
+  async reorder(fileId, scanIds) {
+    const result = await attempt<Dto[]>(
+      'PUT',
+      `/api/files/${toApiId(fileId, 'file')}/scans/order`,
+      {
+        scanIds: scanIds.map((id) => toApiId(id, 'scan')),
+      },
+    );
+    return result.ok ? ok(result.value.map((dto) => toFileScan({ ...dto, fileId }))) : result;
+  },
+
+  async rotate(scanId, degrees) {
+    const result = await attempt<Dto>('POST', `/api/scans/${toApiId(scanId, 'scan')}/rotate`, {
+      degrees,
+    });
+    return result.ok ? ok(toFileScan(result.value)) : result;
+  },
+
+  async enhance(scanId, operation) {
+    const result = await attempt<Dto>('POST', `/api/scans/${toApiId(scanId, 'scan')}/enhance`, {
+      operation,
+    });
+    return result.ok ? ok(toFileScan(result.value)) : result;
+  },
+
+  async revert(scanId) {
+    const result = await attempt<Dto>(
+      'DELETE',
+      `/api/scans/${toApiId(scanId, 'scan')}/enhancement`,
+    );
+    return result.ok ? ok(toFileScan(result.value)) : result;
+  },
+
+  async duplicate(scanId) {
+    const result = await attempt<Dto>('POST', `/api/scans/${toApiId(scanId, 'scan')}/duplicate`);
+    return result.ok ? ok(toFileScan(result.value)) : result;
+  },
+
+  async scanBlob(scanId, variant) {
+    return getBlob(
+      `/api/scans/${toApiId(scanId, 'scan')}/content${variant === 'processed' ? '?variant=processed' : ''}`,
+    );
+  },
+
+  async listPdfs(fileId) {
+    const dtos = await get<Dto[]>(`/api/files/${toApiId(fileId, 'file')}/pdf`);
+    return dtos.map((dto) => toDerivative(dto));
+  },
+
+  async buildPdf(fileId, filename) {
+    const result = await attempt<Dto>('POST', `/api/files/${toApiId(fileId, 'file')}/pdf`, {
+      fileName: filename ?? '',
+    });
+    return result.ok ? ok(toDerivative(result.value)) : result;
+  },
+
+  async pdfBlob(derivativeId) {
+    // The route is file-scoped; the controller resolves the derivative by id.
+    return getBlob(`/api/files/0/pdf/${toApiId(derivativeId, 'derivative')}/content`);
   },
 };
 
@@ -919,6 +979,25 @@ export const httpUsersService: UsersApi = {
     const payload = await get<{ roles: string[] }>('/api/users');
     return payload.roles as UsersApi extends never ? never : Awaited<ReturnType<UsersApi['roles']>>;
   },
+
+  // ------------------------------------------- editable matrix (§3.7)
+  async permissionsMatrix() {
+    const body = await get<{ roles: Array<{ role: string; permissions: string[] }> }>(
+      '/api/permissions/matrix',
+    );
+    const matrix: Record<string, string[]> = {};
+    for (const row of body.roles) matrix[row.role] = row.permissions;
+    return matrix as unknown as RolePermissionMatrix;
+  },
+
+  async setPermission(role, permission, granted) {
+    const result = await attempt<unknown>('PUT', `/api/permissions/${role}/${permission}`, {
+      granted,
+    });
+    if (!result.ok) return result;
+    const matrix = await this.permissionsMatrix();
+    return ok(matrix);
+  },
 };
 
 // -------------------------------------------------- inquiries and media
@@ -1057,5 +1136,27 @@ export const httpCustodyService: CustodyApi = {
       },
     );
     return result.ok ? ok(toCustodyEvent(result.value)) : result;
+  },
+};
+
+// ------------------------------------------------------------ feature config
+
+export const httpConfigService: ConfigApi = {
+  async features() {
+    const body = await get<{ features: Record<string, unknown> }>('/api/config');
+    return {
+      barcode: body.features?.barcode === true,
+      recordRoom: body.features?.recordRoom === true,
+      maps: body.features?.maps === true,
+      support: body.features?.support === true,
+    };
+  },
+
+  async updateFeatures(patch) {
+    const result = await attempt<unknown>('PUT', '/api/config/features', {
+      features: patch,
+    });
+    if (!result.ok) return result;
+    return ok(await this.features());
   },
 };

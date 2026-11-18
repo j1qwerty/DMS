@@ -45,9 +45,47 @@ public sealed class FilesService(
     ICurrentUserAccessor current,
     IPrivateDocumentStore documentStore,
     IFeatureFlags flags,
+    Microsoft.Extensions.Configuration.IConfiguration configuration,
     ILogger<FilesService> logger) : IFilesService
 {
     private const int MaxPosition = 100;
+
+    /// <summary>
+    /// Cached per process: probing sys.fulltext_indexes on every search would
+    /// cost more than it saves. 0 = unknown, 1 = available, 2 = unavailable
+    /// (int so the write is atomic without a lock).
+    /// </summary>
+    private static int fullTextState;
+
+    /// <summary>
+    /// Whether the Files table really has a full-text index to query. SQL Server
+    /// Express (without advanced services) cannot host one, so the search must
+    /// degrade to LIKE rather than error — the probe makes that decision once.
+    /// </summary>
+    private async Task<bool> FullTextAvailableAsync(CancellationToken ct)
+    {
+        // Search:UseFullText=false forces the LIKE path everywhere (a support escape hatch).
+        if (!FeatureFlags.Parse(configuration["Search:UseFullText"], fallback: true)) return false;
+        var cached = Interlocked.CompareExchange(ref fullTextState, 0, 0);
+        if (cached != 0) return cached == 1;
+        try
+        {
+            var probe = await db.Database.SqlQueryRaw<int>("""
+                SELECT CAST(CASE WHEN FULLTEXTSERVICEPROPERTY('IsFullTextInstalled') > 0
+                                  AND EXISTS (SELECT 1 FROM sys.fulltext_indexes i
+                                              JOIN sys.objects o ON o.object_id = i.object_id
+                                              WHERE o.name = 'Files')
+                                 THEN 1 ELSE 0 END AS int) AS Value
+                """).FirstAsync(ct);
+            Interlocked.Exchange(ref fullTextState, probe == 1 ? 1 : 2);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Full-text probe failed; registry search uses the LIKE path.");
+            Interlocked.Exchange(ref fullTextState, 2);
+        }
+        return Interlocked.CompareExchange(ref fullTextState, 0, 0) == 1;
+    }
 
     private static string Stamp(DateTime value) =>
         value.ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture);
@@ -95,20 +133,44 @@ public sealed class FilesService(
             // D1 (work plan §2.1): case-insensitivity comes from the database
             // collation, not from LOWER(column) — wrapping the column side in a
             // function disables every IX_Files_* seek. Identity tokens
-            // (barcode, file number, e-office reference) match as a prefix so
-            // the indexes can serve a seek; free-text columns (subject,
-            // department, location, area, holder) keep substring semantics
-            // until the full-text index takes them over (§3.1).
+            // (barcode, file number, e-office reference) always match as a
+            // prefix so the indexes can serve a seek. Free-text columns and the
+            // OCR text of digitized pages go through SQL Server full-text
+            // (§3.1) when the catalog exists, and fall back to LIKE substring
+            // matching when it does not — same results shape, slower plan.
             var needle = q.Search.Trim();
-            query = query.Where(f =>
-                f.Barcode.StartsWith(needle)
-                || f.FileNumber.StartsWith(needle)
-                || f.Subject.Contains(needle)
-                || f.Department.Contains(needle)
-                || f.LocationDisplay.Contains(needle)
-                || f.Area.Contains(needle)
-                || (f.EOfficeReference != null && f.EOfficeReference.StartsWith(needle))
-                || (f.Holder != null && f.Holder.Contains(needle)));
+            var useFullText = await FullTextAvailableAsync(ct);
+            if (useFullText)
+            {
+                // Prefix term inside double quotes: "needle*" — a valid
+                // full-text prefix search; quotes inside the needle are stripped.
+                var prefix = $"\"{needle.Replace("\"", " ").Trim()}*\"";
+                query = query.Where(f =>
+                    f.Barcode.StartsWith(needle)
+                    || f.FileNumber.StartsWith(needle)
+                    || (f.EOfficeReference != null && f.EOfficeReference.StartsWith(needle))
+                    || EF.Functions.Contains(f.Subject, prefix)
+                    || EF.Functions.Contains(f.Department, prefix)
+                    || EF.Functions.Contains(f.LocationDisplay, prefix)
+                    || EF.Functions.Contains(f.Area!, prefix)
+                    || EF.Functions.Contains(f.Holder!, prefix)
+                    || db.ScanPages.Any(p => p.Barcode == f.Barcode
+                        && p.OcrText != null && EF.Functions.Contains(p.OcrText, prefix)));
+            }
+            else
+            {
+                query = query.Where(f =>
+                    f.Barcode.StartsWith(needle)
+                    || f.FileNumber.StartsWith(needle)
+                    || f.Subject.Contains(needle)
+                    || f.Department.Contains(needle)
+                    || f.LocationDisplay.Contains(needle)
+                    || f.Area.Contains(needle)
+                    || (f.EOfficeReference != null && f.EOfficeReference.StartsWith(needle))
+                    || (f.Holder != null && f.Holder.Contains(needle))
+                    || db.ScanPages.Any(p => p.Barcode == f.Barcode
+                        && p.OcrText != null && p.OcrText.Contains(needle)));
+            }
         }
 
         if (!string.IsNullOrWhiteSpace(q.Department) && q.Department != "All")
@@ -173,7 +235,42 @@ public sealed class FilesService(
             })
             .ToArray();
 
+        // When a search is running, say which files matched through the OCR
+        // text of their digitized pages rather than their own metadata — the
+        // search page shows it as an "OCR text" chip.
+        if (!string.IsNullOrWhiteSpace(q.Search))
+        {
+            var needle = q.Search.Trim();
+            var pageBarcodes = rows.Select(r => r.Barcode).ToList();
+            var ocrBarcodes = (await db.ScanPages.AsNoTracking()
+                    .Where(p => pageBarcodes.Contains(p.Barcode)
+                        && p.OcrText != null && p.OcrText.Contains(needle))
+                    .Select(p => p.Barcode).Distinct().ToListAsync(ct))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (ocrBarcodes.Count > 0)
+            {
+                items = items.Select(dto => ocrBarcodes.Contains(dto.FileBarcode)
+                        && !MetadataMatches(rows.First(r => r.Barcode == dto.FileBarcode), needle)
+                    ? dto with { MatchedVia = "ocr" }
+                    : dto).ToArray();
+            }
+        }
+
         return new PagedResult<FileDto>(items, total, page, pageSize, RegistryTotal);
+    }
+
+    /// <summary>The same fields the search predicate matches on the file row itself.</summary>
+    private static bool MetadataMatches(RecordFile f, string needle)
+    {
+        var comparison = StringComparison.OrdinalIgnoreCase;
+        return f.Barcode.StartsWith(needle, comparison)
+            || f.FileNumber.StartsWith(needle, comparison)
+            || (f.EOfficeReference?.StartsWith(needle, comparison) ?? false)
+            || f.Subject.Contains(needle, comparison)
+            || f.Department.Contains(needle, comparison)
+            || f.LocationDisplay.Contains(needle, comparison)
+            || (f.Area?.Contains(needle, comparison) ?? false)
+            || (f.Holder?.Contains(needle, comparison) ?? false);
     }
 
     public async Task<FileDto?> GetAsync(int id, CancellationToken ct = default)

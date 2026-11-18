@@ -12,13 +12,17 @@ public sealed record StoredDocument(
     long SizeBytes,
     string Sha256,
     /// <summary>Pages in the stored PDF, or null when it is an image or the count is unknown.</summary>
-    int? PageCount = null);
+    int? PageCount = null,
+    /// <summary>Horizontal resolution encoded in the image header; null for PDFs and unknown encodings.</summary>
+    int? Dpi = null);
 public sealed record PrivateDocumentContent(string FileName, string ContentType, long SizeBytes, string Sha256, Stream Stream);
 
 public interface IPrivateDocumentStore
 {
     long MaxUploadBytes { get; }
     Task<Result<StoredDocument>> SaveAsync(IFormFile? upload, CancellationToken ct = default);
+    /// <summary>Stores bytes the API itself produced (generated deliverables), under the same rules as uploads.</summary>
+    Task<Result<StoredDocument>> SaveBytesAsync(byte[] bytes, string fileName, string contentType, CancellationToken ct = default);
     Task<Stream?> OpenReadAsync(string storageKey, CancellationToken ct = default);
     Task DeleteAsync(string storageKey, CancellationToken ct = default);
 }
@@ -99,15 +103,26 @@ public sealed class PrivateDocumentStore : IPrivateDocumentStore
             // completed write rather than from a truncated header. The write handle is
             // closed first because Windows will not reopen the file while it is held.
             int? pageCount = null;
-            if (type == "application/pdf")
+            int? dpi = null;
+            await using (var written = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
+                81920, FileOptions.Asynchronous | FileOptions.SequentialScan))
             {
-                await using var written = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
-                    81920, FileOptions.Asynchronous | FileOptions.SequentialScan);
-                pageCount = await PdfPageCounter.TryCountAsync(written, ct);
+                if (type == "application/pdf")
+                {
+                    pageCount = await PdfPageCounter.TryCountAsync(written, ct);
+                }
+                else
+                {
+                    // §3.2 quality gate input: the DPI the scanner wrote into the
+                    // header. Only the head is needed; EXIF IFDs sit near the start.
+                    var head = new byte[64 * 1024];
+                    var read = await written.ReadAsync(head.AsMemory(), ct);
+                    dpi = ImageDpi.Read(head.AsSpan(0, read), type);
+                }
             }
 
             return Result<StoredDocument>.Ok(new StoredDocument(
-                key, name, type, size, Convert.ToHexString(hash.GetHashAndReset()), pageCount));
+                key, name, type, size, Convert.ToHexString(hash.GetHashAndReset()), pageCount, dpi));
         }
         catch (DocumentTooLargeException)
         {
@@ -122,6 +137,51 @@ public sealed class PrivateDocumentStore : IPrivateDocumentStore
         finally
         {
             ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
+    public async Task<Result<StoredDocument>> SaveBytesAsync(
+        byte[] bytes, string fileName, string contentType, CancellationToken ct = default)
+    {
+        if (bytes.Length == 0)
+            return Result<StoredDocument>.Fail("Nothing to store.", "document");
+        if (bytes.Length > MaxUploadBytes)
+            return Result<StoredDocument>.Fail($"Documents must be {MaxUploadBytes / (1024 * 1024)} MiB or smaller.", "document");
+
+        var extension = contentType switch
+        {
+            "application/pdf" => ".pdf",
+            "image/jpeg" => ".jpg",
+            "image/png" => ".png",
+            _ => "",
+        };
+        if (extension.Length == 0)
+            return Result<StoredDocument>.Fail("Only PDF, JPG and PNG documents are supported.", "document");
+
+        var name = SafeFileName(fileName, extension);
+        var key = Guid.NewGuid().ToString("N") + extension;
+        var path = GetPath(key);
+        Directory.CreateDirectory(_rootPath);
+        try
+        {
+            await File.WriteAllBytesAsync(path, bytes, ct);
+
+            int? pageCount = null;
+            if (contentType == "application/pdf")
+            {
+                await using var written = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
+                    81920, FileOptions.Asynchronous | FileOptions.SequentialScan);
+                pageCount = await PdfPageCounter.TryCountAsync(written, ct);
+            }
+
+            return Result<StoredDocument>.Ok(new StoredDocument(
+                key, name, contentType, bytes.Length,
+                Convert.ToHexString(SHA256.HashData(bytes)), pageCount));
+        }
+        catch
+        {
+            TryRemove(path);
+            throw;
         }
     }
 

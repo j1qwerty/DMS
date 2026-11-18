@@ -17,6 +17,7 @@ import { log } from './audit';
 import { filesService } from './files';
 import { session } from './session';
 import { localDocumentBlob, saveLocalRowDocument } from './document-storage';
+import type { DocumentDerivative } from '../../types';
 import { validateDocumentFile } from '../../lib/document';
 
 const DOCUMENT_SIZES = ['A0', 'A1', 'A2', 'A3', 'A4', 'Other'];
@@ -32,7 +33,12 @@ export const scansService: ScanApi = {
     return store
       .getState()
       .scanPages.filter((row) => row.fileBarcode === file.fileBarcode)
-      .sort((a, b) => a.pageNo - b.pageNo || a.version - b.version)
+      .sort(
+        (a, b) =>
+          (a.orderIndex ?? a.pageNo) - (b.orderIndex ?? b.pageNo) ||
+          a.pageNo - b.pageNo ||
+          a.version - b.version,
+      )
       .map((row) => decorate(row, file.id, file.fileNumber));
   },
 
@@ -167,10 +173,6 @@ export const scansService: ScanApi = {
     return ok(created);
   },
 
-  async scanBlob(scanId) {
-    return localDocumentBlob('page', scanId);
-  },
-
   async remove(scanId) {
     const state = store.getState();
     const page = state.scanPages.find((row) => row.id === scanId);
@@ -279,4 +281,268 @@ export const scansService: ScanApi = {
   async pendingReviewCount() {
     return store.getState().scanPages.filter((row) => row.status === 'Pending review').length;
   },
+
+  // -------------------------------------------------- scan studio (§3.4, §3.2)
+  //
+  // Local mode simulates the pixel work: rotations and enhancements are
+  // recorded as labels on the page row (the UI flow is what matters here);
+  // the HTTP adapter is the one that stores real processed copies, because
+  // the API runs the OpenCV pipeline. Originals are never touched either way.
+
+  async reorder(fileId, scanIds) {
+    const file = await filesService.get(fileId);
+    if (!file) return err('File not found.', 'fileId');
+    if (scanIds.length === 0) return err('Give the page order as a list of scan ids.', 'scanIds');
+    const known = store.getState().scanPages.filter((row) => row.fileBarcode === file.fileBarcode);
+    const knownIds = new Set(known.map((row) => row.id));
+    if (scanIds.some((id) => !knownIds.has(id))) {
+      return err('Every scan id must belong to this file.', 'scanIds');
+    }
+    store.update((draft) => {
+      scanIds.forEach((scanId, index) => {
+        const row = draft.scanPages.find((item) => item.id === scanId);
+        if (row) row.orderIndex = index + 1;
+      });
+      log(draft, {
+        action: 'Update',
+        entity: 'FileScanPage',
+        entityId: fileId,
+        before: 'composition order',
+        after: `${scanIds.length} page(s) reordered`,
+        summary: `${file.fileBarcode}: studio page order saved`,
+      });
+    });
+    return ok(await scansService.list(fileId));
+  },
+
+  async rotate(scanId, degrees) {
+    const row = store.getState().scanPages.find((item) => item.id === scanId);
+    if (!row) return err('Scan page not found.', 'scanId');
+    if (![90, 180, 270].includes(degrees))
+      return err('Rotation must be 90, 180 or 270 degrees.', 'degrees');
+    store.update((draft) => {
+      const page = draft.scanPages.find((item) => item.id === scanId);
+      if (page) {
+        page.enhancement = `rotated ${degrees}°`;
+        page.hasProcessed = true;
+      }
+      log(draft, {
+        action: 'Update',
+        entity: 'FileScanPage',
+        entityId: scanId,
+        before: 'original',
+        after: `rotated ${degrees}°`,
+        summary: `Page ${row.pageNo} of ${row.fileBarcode} rotated (original kept)`,
+      });
+    });
+    return ok({ ...row, enhancement: `rotated ${degrees}°`, hasProcessed: true });
+  },
+
+  async enhance(scanId, operation) {
+    const labels: Record<string, string> = {
+      deskew: 'deskewed',
+      despeckle: 'despeckled',
+      binarize: 'binarized',
+      crop: 'cropped',
+      contrast: 'contrast (CLAHE)',
+    };
+    const label = labels[operation];
+    if (!label) return err('Unknown enhancement operation.', 'operation');
+    const row = store.getState().scanPages.find((item) => item.id === scanId);
+    if (!row) return err('Scan page not found.', 'scanId');
+    store.update((draft) => {
+      const page = draft.scanPages.find((item) => item.id === scanId);
+      if (page) {
+        page.enhancement = label;
+        page.hasProcessed = true;
+      }
+      log(draft, {
+        action: 'Update',
+        entity: 'FileScanPage',
+        entityId: scanId,
+        before: 'original',
+        after: label,
+        summary: `Page ${row.pageNo} of ${row.fileBarcode} ${label} (original kept)`,
+      });
+    });
+    return ok({ ...row, enhancement: label, hasProcessed: true });
+  },
+
+  async revert(scanId) {
+    const row = store.getState().scanPages.find((item) => item.id === scanId);
+    if (!row) return err('Scan page not found.', 'scanId');
+    if (!row.hasProcessed) return err('This page has no processed copy to revert.', 'scanId');
+    store.update((draft) => {
+      const page = draft.scanPages.find((item) => item.id === scanId);
+      if (page) {
+        page.enhancement = undefined;
+        page.hasProcessed = false;
+      }
+      log(draft, {
+        action: 'Update',
+        entity: 'FileScanPage',
+        entityId: scanId,
+        before: row.enhancement ?? 'processed',
+        after: 'original',
+        summary: `Page ${row.pageNo} of ${row.fileBarcode} reverted to the original scan`,
+      });
+    });
+    return ok({ ...row, enhancement: undefined, hasProcessed: false });
+  },
+
+  async duplicate(scanId) {
+    const row = store.getState().scanPages.find((item) => item.id === scanId);
+    if (!row) return err('Scan page not found.', 'scanId');
+    const siblings = store
+      .getState()
+      .scanPages.filter(
+        (item) => item.fileBarcode === row.fileBarcode && item.pageNo === row.pageNo,
+      );
+    const nextVersion = siblings.reduce((max, item) => Math.max(max, item.version), 0) + 1;
+    const nextOrder =
+      store
+        .getState()
+        .scanPages.filter((item) => item.fileBarcode === row.fileBarcode)
+        .reduce((max, item) => Math.max(max, item.orderIndex ?? item.pageNo), 0) + 1;
+    const copy: FileScan = {
+      ...row,
+      id: newId('scan'),
+      version: nextVersion,
+      status: 'Pending review',
+      note: `Duplicated from version ${row.version}.`,
+      uploadedAt: timestamp(),
+      uploadedBy: session.actorName(),
+      orderIndex: nextOrder,
+    };
+    store.update((draft) => {
+      draft.scanPages.push(copy);
+      log(draft, {
+        action: 'Create',
+        entity: 'FileScanPage',
+        entityId: copy.id,
+        before: '-',
+        after: `duplicate of v${row.version}`,
+        summary: `Page ${row.pageNo} of ${row.fileBarcode} duplicated as version ${nextVersion}`,
+      });
+    });
+    return ok(copy);
+  },
+
+  async scanBlob(scanId, variant) {
+    // Local mode keeps one blob per page; the processed variant is the same
+    // bytes (the enhancement is simulated). The API serves the real copy.
+    void variant;
+    return localDocumentBlob('page', scanId);
+  },
+
+  // Deliverable PDFs (§3.5). Local mode composes a real, minimal text PDF
+  // from the pages' OCR text; the API composes the image deliverable with
+  // QuestPDF. Derivative records live for the session (demo mode).
+  async listPdfs(fileId) {
+    const file = await filesService.get(fileId);
+    if (!file) return [];
+    return localDerivatives
+      .filter((row) => row.fileId === fileId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  },
+
+  async buildPdf(fileId, filename) {
+    const file = await filesService.get(fileId);
+    if (!file) return err('File not found.', 'fileId');
+    const pages = (await scansService.list(fileId)).filter(
+      (row) => row.status === 'Approved' && row.hasDocument,
+    );
+    if (pages.length === 0) {
+      return err(
+        'No approved scan pages to build from: approve pages in the review queue first.',
+        'fileId',
+      );
+    }
+    const texts = pages.map((row, index) => ({
+      label: `${file.fileNumber} — ${file.subject} · page ${index + 1} of ${pages.length}`,
+      text:
+        row.ocrText?.trim() || `Page ${row.pageNo} of ${file.fileNumber} (${row.documentSize}).`,
+    }));
+    const bytes = composeLocalPdf(texts);
+    const derivative: DocumentDerivative = {
+      id: newId('derivative'),
+      fileId: file.id,
+      fileBarcode: file.fileBarcode,
+      fileNumber: file.fileNumber,
+      kind: 'Pdf',
+      filename:
+        (filename?.trim() ||
+          `${file.fileNumber}-deliverable-${new Date().toISOString().slice(0, 10)}`) + '.pdf',
+      sizeBytes: bytes.byteLength,
+      sha256: '',
+      pageCount: pages.length,
+      sourceVersions: pages.map((row) => `#${row.id}:v${row.version}`).join(', '),
+      includesOcrText: pages.some((row) => !!row.ocrText?.trim()),
+      createdAt: timestamp(),
+      createdBy: session.actorName(),
+    };
+    derivativeBytes.set(derivative.id, bytes);
+    localDerivatives.unshift(derivative);
+    store.update((draft) => {
+      log(draft, {
+        action: 'Create',
+        entity: 'DocumentDerivative',
+        entityId: derivative.id,
+        before: '-',
+        after: `${derivative.filename}; pages=${derivative.pageCount}`,
+        summary: `Deliverable PDF built for ${file.fileBarcode} from ${pages.length} approved page(s)`,
+      });
+    });
+    return ok(derivative);
+  },
+
+  async pdfBlob(derivativeId) {
+    const bytes = derivativeBytes.get(derivativeId);
+    return new Blob([new Uint8Array(bytes ?? [])] as BlobPart[], { type: 'application/pdf' });
+  },
 };
+
+/** Session-local derivative records + their composed bytes (local mode only). */
+const localDerivatives: DocumentDerivative[] = [];
+const derivativeBytes = new Map<string, Uint8Array>();
+
+/** A small, valid, text-only PDF: one page per sheet, with header lines. */
+function composeLocalPdf(pages: Array<{ label: string; text: string }>): Uint8Array {
+  const esc = (s: string) =>
+    s
+      .split('')
+      .map((ch) => (ch === '(' || ch === ')' || ch === '\\' ? '\\' + ch : ch))
+      .join('');
+  const objects: string[] = [];
+  const pageCount = pages.length;
+  const kids = pages.map((_, index) => `${4 + index * 2} 0 R`).join(' ');
+  objects.push('<< /Type /Catalog /Pages 2 0 R >>');
+  objects.push(`<< /Type /Pages /Kids [${kids}] /Count ${pageCount} >>`);
+  objects.push('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
+  pages.forEach((page, index) => {
+    objects.push(
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents ${5 + index * 2} 0 R >>`,
+    );
+    const lines = [page.label, '', ...(page.text.match(/.{1,90}(?:\s|$)/g)?.slice(0, 40) ?? [])];
+    const content =
+      'BT /F1 10 Tf 40 800 Td 14 TL\n' +
+      lines.map((line) => `(${esc(line)}) Tj T*`).join('\n') +
+      '\nET';
+    objects.push(`<< /Length ${content.length} >>\nstream\n${content}\nendstream`);
+  });
+  let pdf = '%PDF-1.4\n';
+  const offsets: number[] = [];
+  objects.forEach((body, index) => {
+    offsets.push(pdf.length);
+    pdf += `${index + 1} 0 obj\n${body}\nendobj\n`;
+  });
+  const xrefStart = pdf.length;
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  offsets.forEach((offset) => {
+    pdf += `${String(offset).padStart(10, '0')} 00000 n \n`;
+  });
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF`;
+  const bytes = new Uint8Array(pdf.length);
+  for (let i = 0; i < pdf.length; i += 1) bytes[i] = pdf.charCodeAt(i) & 0xff;
+  return bytes;
+}

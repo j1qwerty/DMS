@@ -23,6 +23,7 @@ import { bulkService } from './impl/bulk';
 import { dashboardService } from './impl/dashboard';
 import { scansService } from './impl/scans';
 import { custodyService } from './impl/custody';
+import { configService } from './impl/config';
 import { employeesService } from './impl/employees';
 import { filesService } from './impl/files';
 import { issuesService } from './impl/issues';
@@ -53,10 +54,12 @@ import {
   httpUsersService,
 } from './http';
 import { apiBase } from './http/client';
+import { httpConfigService } from './http';
 
 const useHttp = import.meta.env.VITE_API_MODE === 'http';
 
 const localService: RecordRoomService = {
+  config: configService,
   auth: authService,
   locations: locationsService,
   files: filesService,
@@ -81,6 +84,7 @@ const localService: RecordRoomService = {
 };
 
 const httpService: RecordRoomService = {
+  config: httpConfigService,
   auth: httpAuthService,
   locations: httpLocationsService,
   files: httpFilesService,

@@ -11,6 +11,7 @@
  */
 
 import type {
+  DocumentDerivative,
   AppUser,
   Area,
   AuditEntry,
@@ -233,6 +234,7 @@ export function toFile(dto: Record<string, unknown>): RecordFile {
     holder: dto.holder ? str(dto.holder) : undefined,
     holderEmployeeCode: dto.holderEmployeeCode ? str(dto.holderEmployeeCode) : undefined,
     description: str(dto.description),
+    matchedVia: dto.matchedVia === 'ocr' ? 'ocr' : undefined,
   };
 }
 
@@ -368,6 +370,11 @@ export function toFileScan(dto: Record<string, unknown>): FileScan {
     sha256: dto.sha256 ? str(dto.sha256) : undefined,
     pageCount: dto.pageCount == null ? undefined : num(dto.pageCount),
     pageIndex: dto.pageIndex == null ? undefined : num(dto.pageIndex),
+    orderIndex: num(dto.orderIndex),
+    dpi: dto.dpi == null ? undefined : num(dto.dpi),
+    enhancement: str(dto.enhancement) || undefined,
+    hasProcessed: dto.hasProcessed === true,
+    ocrText: dto.ocrText == null ? undefined : String(dto.ocrText),
   };
 }
 
@@ -529,5 +536,23 @@ export function toReportDefinition(dto: Record<string, unknown>): ReportDefiniti
     description: str(dto.description),
     columns: (Array.isArray(dto.columns) ? (dto.columns as unknown[]) : []).map(str),
     legacySource: str(dto.legacySource),
+  };
+}
+
+export function toDerivative(dto: Record<string, unknown>): DocumentDerivative {
+  return {
+    id: String(dto.id),
+    fileId: String(dto.fileId ?? ''),
+    fileBarcode: str(dto.fileBarcode),
+    fileNumber: str(dto.fileNumber) || undefined,
+    kind: str(dto.kind) || 'Pdf',
+    filename: str(dto.fileName),
+    sizeBytes: dto.sizeBytes == null ? undefined : num(dto.sizeBytes),
+    sha256: str(dto.sha256) || undefined,
+    pageCount: num(dto.pageCount),
+    sourceVersions: str(dto.sourceVersions),
+    includesOcrText: dto.includesOcrText === true,
+    createdAt: str(dto.createdAt),
+    createdBy: str(dto.createdBy),
   };
 }

@@ -64,8 +64,17 @@ export const filesService: FilesApi = {
   async list(query: FileQuery = {}) {
     const state = store.getState();
     const search = query.search?.trim().toLowerCase() ?? '';
+    // §3.1: the registry search also covers the OCR text of digitized pages.
+    // Barcodes matched only through OCR are flagged so the UI can say so.
+    const ocrBarcodes = new Set(
+      search
+        ? state.scanPages
+            .filter((row) => (row.ocrText ?? '').toLowerCase().includes(search))
+            .map((row) => row.fileBarcode)
+        : [],
+    );
     const filtered = state.files.filter((file) => {
-      if (search && !matchSearch(file, search)) return false;
+      if (search && !matchSearch(file, search) && !ocrBarcodes.has(file.fileBarcode)) return false;
       if (query.department && query.department !== 'All' && file.department !== query.department) {
         return false;
       }
@@ -97,8 +106,15 @@ export const filesService: FilesApi = {
     const pageSize = Math.max(1, query.pageSize ?? 10);
     const page = Math.max(1, query.page ?? 1);
     const start = (page - 1) * pageSize;
+    const items = filtered
+      .slice(start, start + pageSize)
+      .map((file) =>
+        search && !matchSearch(file, search) && ocrBarcodes.has(file.fileBarcode)
+          ? { ...file, matchedVia: 'ocr' as const }
+          : file,
+      );
     return {
-      items: filtered.slice(start, start + pageSize),
+      items,
       total: filtered.length,
       page,
       pageSize,

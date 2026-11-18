@@ -17,6 +17,7 @@ using RecordRoom.Api.Infrastructure.Jobs;
 using RecordRoom.Api.Infrastructure.RateLimiting;
 using RecordRoom.Api.Infrastructure.Realtime;
 using StackExchange.Redis;
+using Microsoft.AspNetCore.Authorization;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -161,7 +162,11 @@ builder.Services.AddScoped<IRecordFileDocumentsService, RecordFileDocumentsServi
 builder.Services.AddSingleton<IPrivateDocumentStore, PrivateDocumentStore>();
 builder.Services.AddScoped<IIssuesService, IssuesService>();
 builder.Services.AddScoped<IFileScansService, FileScansService>();
+builder.Services.AddSingleton<RecordRoom.Api.Infrastructure.Imaging.IScanEnhancer, RecordRoom.Api.Infrastructure.Imaging.ScanEnhancer>();
+builder.Services.AddScoped<IScanStudioService, ScanStudioService>();
 builder.Services.AddScoped<ICustodyService, CustodyService>();
+builder.Services.AddScoped<IFeatureSettingsService, FeatureSettingsService>();
+builder.Services.AddScoped<IPermissionService, PermissionService>();
 builder.Services.AddScoped<IEmployeesService, EmployeesService>();
 builder.Services.AddScoped<IUsersService, UsersService>();
 builder.Services.AddScoped<IContentService, ContentService>();
@@ -173,6 +178,13 @@ builder.Services.AddScoped<IReportsService, ReportsService>();
 builder.Services.AddScoped<RecordRoomJobs>();
 builder.Services.AddSingleton<IRealtimePublisher, RealtimePublisher>();
 builder.Services.AddHttpContextAccessor();
+
+// Permission policies (§3.7): [Authorize(Policy = "perm:...")] resolves against
+// the editable matrix, so a revoked grant is enforced on the next request, not
+// just hidden in the UI. The provider manufactures perm:* policies on demand;
+// the handler consults the cached matrix per role.
+builder.Services.AddSingleton<IAuthorizationPolicyProvider, PermissionPolicyProvider>();
+builder.Services.AddScoped<IAuthorizationHandler, PermissionHandler>();
 // Enums must serialize as strings: the frontend contract uses readable status
 // values ("Issued", "Partially returned"), and numbers would make the client's
 // StatusBadge fall through to its neutral default.
@@ -262,6 +274,20 @@ using (var scope = app.Services.CreateScope())
         {
             logger.LogError(ex, "Seeding failed.");
         }
+    }
+
+    // The Admin's feature-switch choices are rows; overlay them onto the
+    // singleton so endpoint gating sees the live state from the first request.
+    try
+    {
+        var flags = scope.ServiceProvider.GetRequiredService<IFeatureFlags>();
+        var rows = await db.FeatureSettings.AsNoTracking()
+            .ToDictionaryAsync(s => s.FeatureKey, s => s.Enabled);
+        flags.Apply(rows);
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Could not load feature settings; configuration defaults apply.");
     }
 }
 

@@ -12,7 +12,10 @@
  * mean the UI silently showed stale rows while claiming to be filtered.
  */
 
+import type { FeatureKey, Features } from '../lib/features';
+import type { Permission, RolePermissionMatrix } from './permissions-matrix';
 import type {
+  DocumentDerivative,
   AppUser,
   Area,
   AuditAction,
@@ -324,7 +327,6 @@ export interface ScanApi {
     input: { pageNo: number; filename: string; documentSize: string },
   ): Promise<Result<FileScan>>;
   addDocument(scanId: string, file: File): Promise<Result<FileScan>>;
-  scanBlob(scanId: string): Promise<Blob>;
   remove(scanId: string): Promise<Result<true>>;
   review(
     scanId: string,
@@ -340,6 +342,26 @@ export interface ScanApi {
   /** The pending-review queue across all files. */
   pending(query?: { search?: string }): Promise<FileScan[]>;
   pendingReviewCount(): Promise<number>;
+
+  // -------------------------------------------------- scan studio (§3.4)
+
+  /** Persists the composition order: OrderIndex follows the scan-id sequence. */
+  reorder(fileId: string, scanIds: string[]): Promise<Result<FileScan[]>>;
+  /** Writes a rotated processed copy (quarter turns); the original is kept. */
+  rotate(scanId: string, degrees: 90 | 180 | 270): Promise<Result<FileScan>>;
+  /** Applies deskew / despeckle / binarize / crop / contrast as the processed copy. */
+  enhance(scanId: string, operation: string): Promise<Result<FileScan>>;
+  /** Drops the processed copy and serves the original again. */
+  revert(scanId: string): Promise<Result<FileScan>>;
+  /** Duplicates a page as its next version (insert-after semantics). */
+  duplicate(scanId: string): Promise<Result<FileScan>>;
+  /** The stored bytes; `processed` serves the enhanced copy when one exists. */
+  scanBlob(scanId: string, variant?: 'original' | 'processed'): Promise<Blob>;
+  /** Generated PDF deliverables of one file, newest first. */
+  listPdfs(fileId: string): Promise<DocumentDerivative[]>;
+  /** Builds the PDF from the file's approved pages, in composition order. */
+  buildPdf(fileId: string, filename?: string): Promise<Result<DocumentDerivative>>;
+  pdfBlob(derivativeId: string): Promise<Blob>;
 }
 
 // ------------------------------------------------------------- custody chain
@@ -466,6 +488,17 @@ export interface UsersApi {
   update(id: string, input: Partial<AppUser>): Promise<Result<AppUser>>;
   remove(id: string): Promise<Result<true>>;
   roles(): Promise<Role[]>;
+
+  // ------------------------------------------- editable matrix (§3.7)
+
+  /** Full role → permission matrix. Absent permission means "not granted". */
+  permissionsMatrix(): Promise<RolePermissionMatrix>;
+  /** Single-cell grant/revoke. Admin is fixed; the last users.edit holder is protected. */
+  setPermission(
+    role: Role,
+    permission: Permission,
+    granted: boolean,
+  ): Promise<Result<RolePermissionMatrix>>;
 }
 
 // ------------------------------------------------------ inquiries and media
@@ -481,6 +514,14 @@ export interface MediaApi {
   saveLink(payload: MediaLinkPayload): Promise<Result<MediaLinkRecord>>;
   list(): Promise<MediaLinkRecord[]>;
   remove(id: string): Promise<Result<true>>;
+}
+
+// ------------------------------------------------------------ feature config
+
+/** The grouped feature switchboard (ZILA_PANCHAYAT_CC §F). */
+export interface ConfigApi {
+  features(): Promise<Features>;
+  updateFeatures(patch: Partial<Record<FeatureKey, boolean>>): Promise<Result<Features>>;
 }
 
 // --------------------------------------------------------------- root facade
@@ -503,6 +544,7 @@ export interface RecordRoomService {
   users: UsersApi;
   inquiries: InquiriesApi;
   media: MediaApi;
+  config: ConfigApi;
   /** Drops the local snapshot and reloads the seed dataset. */
   reset(): Promise<void>;
 }

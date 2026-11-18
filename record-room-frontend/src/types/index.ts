@@ -146,6 +146,8 @@ export interface RecordFile {
   /** Legacy display alias kept because the UI and mock data reference RF ids. */
   rfId: string;
   fileNumber: string;
+  /** "ocr" when a search matched this file only through its pages' OCR text. */
+  matchedVia?: 'ocr';
   subject: string;
   department: string;
   year: number;
@@ -317,6 +319,34 @@ export interface FileScan {
   pageCount?: number;
   /** 1-based page inside a multi-page PDF that this row represents. */
   pageIndex?: number;
+  /** Composition order inside the file; the studio reorders freely. */
+  orderIndex?: number;
+  /** Horizontal resolution read at upload; the DPI gate's evidence. */
+  dpi?: number;
+  /** Label of the applied enhancement, e.g. "deskewed" or "rotated 90°". */
+  enhancement?: string;
+  /** A processed (enhanced/rotated) copy exists; the original is kept. */
+  hasProcessed?: boolean;
+  /** Extracted OCR text of the page; searchable through the registry search. */
+  ocrText?: string;
+}
+
+/** A generated PDF deliverable built from a file's approved scan pages. */
+export interface DocumentDerivative {
+  id: string;
+  fileId: string;
+  fileBarcode: string;
+  fileNumber?: string;
+  kind: string;
+  filename: string;
+  sizeBytes?: number;
+  sha256?: string;
+  pageCount: number;
+  /** Which scan versions the deliverable was built from, for provenance. */
+  sourceVersions: string;
+  includesOcrText: boolean;
+  createdAt: string;
+  createdBy: string;
 }
 
 export type CustodyDirection = 'Intake' | 'Return';

@@ -11,6 +11,8 @@ import { err, ok, type UsersApi } from '../contracts';
 import { newId, store, timestamp } from '../store';
 import { ROLES, type AppUser } from '../../types';
 import { log } from './audit';
+import { permissionsStore } from '../permissionsStore';
+import { session } from './session';
 
 export const usersService: UsersApi = {
   async list() {
@@ -125,5 +127,35 @@ export const usersService: UsersApi = {
 
   async roles() {
     return [...ROLES];
+  },
+
+  // ------------------------------------------- editable matrix (§3.7)
+  async permissionsMatrix() {
+    return { ...permissionsStore.get() };
+  },
+
+  async setPermission(role, permission, granted) {
+    if (role === 'Admin') return err('The Admin role is fixed.', 'role');
+    if (session.role() !== 'Admin')
+      return err('Only an admin can change the capability matrix.', 'role');
+    const matrix = permissionsStore.get();
+    const current = matrix[role];
+    if (granted === current.includes(permission)) {
+      return ok({ ...matrix });
+    }
+    const next = granted ? [...current, permission] : current.filter((item) => item !== permission);
+    const updated = { ...matrix, [role]: next };
+    permissionsStore.replace(updated, true);
+    store.update((draft) => {
+      log(draft, {
+        action: 'Update',
+        entity: 'RolePermission',
+        entityId: `${role}:${permission}`,
+        before: granted ? 'not granted' : 'granted',
+        after: granted ? 'granted' : 'not granted',
+        summary: `${permission} ${granted ? 'granted to' : 'revoked from'} ${role}`,
+      });
+    });
+    return ok({ ...updated });
   },
 };

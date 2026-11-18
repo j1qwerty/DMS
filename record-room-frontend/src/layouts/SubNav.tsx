@@ -1,7 +1,7 @@
 import { NavLink, useLocation } from 'react-router-dom';
 import { cn } from '../lib/utils';
 import { useSession } from '../hooks/useService';
-import { useFeatures } from '../lib/features';
+import { useFeatures, type FeatureKey } from '../lib/features';
 import type { Permission } from '../services/permissions';
 
 interface Tab {
@@ -10,6 +10,8 @@ interface Tab {
   permission?: Permission;
   /** Shown only while barcode features are on. */
   barcode?: boolean;
+  /** Feature group this tab belongs to; hidden while the group is off. */
+  feature?: FeatureKey;
 }
 
 interface Group {
@@ -38,7 +40,7 @@ const GROUPS: Group[] = [
     title: 'Record room · Rooms & shelves',
     match: ['/rooms', '/barcodes'],
     tabs: [
-      { label: 'Rooms', to: '/rooms' },
+      { label: 'Rooms', to: '/rooms', feature: 'recordRoom' },
       { label: 'Barcode labels', to: '/barcodes', permission: 'barcodes.print', barcode: true },
     ],
   },
@@ -51,7 +53,10 @@ export function SubNav() {
   const group = GROUPS.find((item) => item.match.some((prefix) => pathname.startsWith(prefix)));
   if (!group) return null;
   const tabs = group.tabs.filter(
-    (tab) => (!tab.barcode || features.barcode) && (!tab.permission || allowed(tab.permission)),
+    (tab) =>
+      (!tab.barcode || features.barcode) &&
+      (!tab.feature || features[tab.feature]) &&
+      (!tab.permission || allowed(tab.permission)),
   );
   if (tabs.length < 2) return null;
 

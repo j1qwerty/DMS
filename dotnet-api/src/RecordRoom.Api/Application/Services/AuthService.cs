@@ -30,8 +30,8 @@ public interface IAuthService
     Task<Result<string>> RequestRecoveryAsync(string userName, CancellationToken ct = default);
     Task<Result<UserDto>> RecoverPasswordAsync(PasswordResetRequest request, CancellationToken ct = default);
     Task SignOutAsync(int userId, string ip, CancellationToken ct = default);
-    string[] PermissionsFor(Role role);
-    string GenerateToken(AppUser user);
+    /// <summary>Effective capabilities for the role: the matrix, minus feature groups that are off.</summary>
+    Task<string[]> PermissionsForAsync(Role role, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -44,7 +44,7 @@ public sealed class AuthService(
     IOptions<JwtOptions> jwt,
     ICacheService cache,
     IAuditWriter audit,
-    IFeatureFlags flags,
+    IPermissionService permissions,
     ILogger<AuthService> logger) : IAuthService
 {
     private readonly JwtOptions _jwt = jwt.Value;
@@ -81,7 +81,7 @@ public sealed class AuthService(
 
     private string NewOtp() => Random.Shared.Next(100_000, 1_000_000).ToString();
 
-    private AuthTokenResponse BuildToken(AppUser user)
+    private async Task<AuthTokenResponse> BuildTokenAsync(AppUser user, CancellationToken ct)
     {
         var expires = DateTime.UtcNow.AddMinutes(_jwt.ExpiryMinutes);
         var claims = new List<Claim>
@@ -110,7 +110,7 @@ public sealed class AuthService(
             new JwtSecurityTokenHandler().WriteToken(token),
             expires,
             ToDto(user),
-            PermissionsFor(user.Role));
+            await PermissionsForAsync(user.Role, ct));
     }
 
     private async Task<AppUser> TouchAsync(AppUser user, CancellationToken ct)
@@ -149,7 +149,7 @@ public sealed class AuthService(
             "Web login accepted", ip, userAgent, ct);
         var tracked = await TouchAsync(user, ct);
         await db.SaveChangesAsync(ct);
-        return Result<AuthTokenResponse>.Ok(BuildToken(tracked));
+        return Result<AuthTokenResponse>.Ok(await BuildTokenAsync(tracked, ct));
     }
 
     public async Task<Result<OtpChallengeResponse>> RequestOtpAsync(
@@ -192,7 +192,7 @@ public sealed class AuthService(
             "Mobile OTP login accepted", ip, userAgent, ct);
         var tracked = await TouchAsync(user, ct);
         await db.SaveChangesAsync(ct);
-        return Result<AuthTokenResponse>.Ok(BuildToken(tracked));
+        return Result<AuthTokenResponse>.Ok(await BuildTokenAsync(tracked, ct));
     }
 
     public async Task<Result<AuthTokenResponse>> SignInWithPinAsync(
@@ -212,7 +212,7 @@ public sealed class AuthService(
             "Mobile PIN login accepted", ip, userAgent, ct);
         var tracked = await TouchAsync(user, ct);
         await db.SaveChangesAsync(ct);
-        return Result<AuthTokenResponse>.Ok(BuildToken(tracked));
+        return Result<AuthTokenResponse>.Ok(await BuildTokenAsync(tracked, ct));
     }
 
     public async Task<Result<string>> RequestRecoveryAsync(string userName, CancellationToken ct = default)
@@ -283,14 +283,19 @@ public sealed class AuthService(
         user.Id, user.UserName, user.DisplayName, user.Role.ToString(),
         user.EmployeeCode, user.Active, user.LastLoginAt);
 
-    public string GenerateToken(AppUser user) => BuildToken(user).Token;
+    /// <summary>Capabilities for a role, minus the ones whose feature group is switched off.</summary>
+    public Task<string[]> PermissionsForAsync(Role role, CancellationToken ct = default) =>
+        permissions.VisibleForAsync(role.ToString(), ct);
 
-    /// <summary>Capabilities for a role, minus the ones whose feature is switched off.</summary>
-    public string[] PermissionsFor(Role role) => WithFeatures(PermissionsForRole(role), flags.BarcodeEnabled);
-
-    /// <summary>Barcode label printing is meaningless while barcodes are off, so it is not offered.</summary>
-    public static string[] WithFeatures(string[] permissions, bool barcodeEnabled) =>
-        barcodeEnabled ? permissions : permissions.Where(p => p != "barcodes.print").ToArray();
+    /// <summary>
+    /// Permissions whose feature group is off are not offered. Static so the
+    /// pure-logic tests can exercise it without a database.
+    /// </summary>
+    public static string[] WithFeatures(string[] permissions, bool barcodeEnabled, bool recordRoomEnabled = true) =>
+        permissions
+            .Where(p => barcodeEnabled || p != "barcodes.print")
+            .Where(p => recordRoomEnabled || !p.StartsWith("locations.", StringComparison.Ordinal))
+            .ToArray();
 
     /// <summary>Same capability list as the frontend <c>services/permissions.ts</c>.</summary>
     public static string[] PermissionsForRole(Role role) => role switch

@@ -10,7 +10,7 @@ import {
 import type { Icon } from '@phosphor-icons/react';
 import { cn } from '../lib/utils';
 import { useSession } from '../hooks/useService';
-import { useFeatures } from '../lib/features';
+import { useFeatures, type FeatureKey } from '../lib/features';
 import type { Permission } from '../services/permissions';
 
 interface Tab {
@@ -20,11 +20,13 @@ interface Tab {
   permission?: Permission;
   /** `on` shows it only with barcodes enabled, `off` only with barcodes disabled. */
   barcode?: 'on' | 'off';
+  /** Feature group this tab belongs to; hidden while the group is off. */
+  feature?: FeatureKey;
 }
 
 const tabs: Tab[] = [
   { label: 'Documents', to: '/files', icon: Files },
-  { label: 'Maps', to: '/maps', icon: MapTrifold, permission: 'files.view' },
+  { label: 'Maps', to: '/maps', icon: MapTrifold, permission: 'files.view', feature: 'maps' },
   { label: 'Scan', to: '/scan', icon: ScanSmiley, barcode: 'on' },
   { label: 'Review', to: '/digitization', icon: Archive, barcode: 'off' },
   { label: 'Issue', to: '/issue', icon: ClipboardText, permission: 'issue.issue' },
@@ -38,6 +40,7 @@ export function MobileTabBar({ onMore }: { onMore: () => void }) {
   const visible = tabs.filter(
     (tab) =>
       (!tab.permission || allowed(tab.permission)) &&
+      (!tab.feature || features[tab.feature]) &&
       (tab.barcode === undefined || (tab.barcode === 'on') === features.barcode),
   );
 

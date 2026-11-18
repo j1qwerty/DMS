@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using RecordRoom.Api.Application;
 using RecordRoom.Api.Application.Contracts;
 using RecordRoom.Api.Application.Services;
+using RecordRoom.Api.Infrastructure.Auth;
 
 namespace RecordRoom.Api.Api.Controllers;
 
@@ -30,19 +31,19 @@ public class CustodyController(ICustodyService custody) : ControllerBase
             await custody.ListAsync(new CustodyQuery(direction, search, page, pageSize), ct)));
 
     /// <summary>Records an intake ("Intake") or a return ("Return") handover.</summary>
-    [Authorize(Roles = "Admin,Supervisor")]
+    [Authorize(Policy = "perm:digitization.review")]
     [HttpPost]
     public async Task<IResult> Record(CustodyRecordInput input, CancellationToken ct) =>
         ApiResults.FromResult(await custody.RecordAsync(input, ct));
 
     /// <summary>Sets the counted file total on an intake (the reconciliation step).</summary>
-    [Authorize(Roles = "Admin,Supervisor")]
+    [Authorize(Policy = "perm:digitization.review")]
     [HttpPost("{id:long}/reconcile")]
     public async Task<IResult> Reconcile(long id, CustodyReconcileInput input, CancellationToken ct) =>
         ApiResults.FromResult(await custody.ReconcileAsync(id, input, ct));
 
     /// <summary>Closes an event with a sign-off; closed events become read-only.</summary>
-    [Authorize(Roles = "Admin,Supervisor")]
+    [Authorize(Policy = "perm:digitization.review")]
     [HttpPost("{id:long}/sign-off")]
     public async Task<IResult> SignOff(long id, CustodySignOffInput input, CancellationToken ct) =>
         ApiResults.FromResult(await custody.SignOffAsync(id, input, ct));

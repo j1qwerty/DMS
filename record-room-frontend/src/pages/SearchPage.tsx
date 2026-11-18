@@ -56,6 +56,9 @@ export function SearchPage() {
 
   return (
     <div className="space-y-6">
+      <p className="muted text-xs">
+        Search covers the registry metadata and the OCR text of digitized documents.
+      </p>
       <PageHeader
         kicker="Search & locate"
         title="Find the record, then follow its physical path."

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Plus, ShieldCheck, Trash, UserCircle } from '@phosphor-icons/react';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Card } from '../components/ui/Card';
@@ -10,9 +10,9 @@ import { StatusBadge } from '../components/ui/Flash';
 import { EmptyState } from '../components/ui/EmptyState';
 import { TableSkeleton } from '../components/ui/Skeletons';
 import { useFlash, useQuery, useService, useSession } from '../hooks/useService';
-import { ROLE_DESCRIPTIONS } from '../services/permissions';
+import { ROLE_DESCRIPTIONS, permissionsFor, type Permission } from '../services/permissions';
+import type { RolePermissionMatrix } from '../services/permissions-matrix';
 import { PERMISSIONS } from '../services/permissions';
-import { can } from '../services/permissions';
 import type { Page } from '../services/contracts';
 import type { AppUser, Employee, Role } from '../types';
 
@@ -24,9 +24,42 @@ const EMPTY: Page<Employee> = { items: [], total: 0, page: 1, pageSize: 100 };
  */
 export function UsersPage() {
   const service = useService();
-  const { allowed } = useSession();
+  const { allowed, user } = useSession();
 
   const [editing, setEditing] = useState<string | null>(null);
+  const [matrix, setMatrix] = useState<RolePermissionMatrix | null>(null);
+  const canEditMatrix = allowed('users.edit') && user?.role === 'Admin';
+  const [matrixError, setMatrixError] = useState('');
+
+  useEffect(() => {
+    void service.users
+      .permissionsMatrix()
+      .then(setMatrix)
+      .catch(() => undefined);
+    // The matrix loads once per mount; service.users is stable for the session.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const togglePermission = async (role: Role, permission: Permission) => {
+    if (!matrix) return;
+    const granted = !matrix[role].includes(permission);
+    const previous = matrix;
+    setMatrix({
+      ...matrix,
+      [role]: granted
+        ? [...matrix[role], permission]
+        : matrix[role].filter((p) => p !== permission),
+    });
+    const result = await service.users.setPermission(role, permission, granted);
+    if (result.ok) {
+      setMatrix(result.value);
+      setMatrixError('');
+    } else {
+      setMatrix(previous);
+      setMatrixError(result.error ?? 'The matrix could not be updated.');
+    }
+  };
+
   const [creating, setCreating] = useState(false);
   const { success, danger } = useFlash();
 
@@ -178,11 +211,15 @@ export function UsersPage() {
                   <td className="py-2 pr-4 font-mono">{permission}</td>
                   {roles.map((role) => (
                     <td key={role} className="px-3 py-2 text-center">
-                      {can(role as Role, permission) ? (
-                        <span className="text-[var(--rr-success)]">●</span>
-                      ) : (
-                        <span className="muted">—</span>
-                      )}
+                      <MatrixCell
+                        role={role as Role}
+                        permission={permission}
+                        granted={(matrix?.[role as Role] ?? permissionsFor(role as Role)).includes(
+                          permission,
+                        )}
+                        editable={canEditMatrix}
+                        onToggle={() => togglePermission(role as Role, permission)}
+                      />
                     </td>
                   ))}
                 </tr>
@@ -190,6 +227,7 @@ export function UsersPage() {
             </tbody>
           </table>
         </div>
+        {matrixError && <p className="mt-2 text-xs text-[var(--rr-danger)]">{matrixError}</p>}
         <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           {roles.map((role) => (
             <div key={role} className="rounded-xl bg-[var(--rr-bg)] p-4">
@@ -199,8 +237,10 @@ export function UsersPage() {
           ))}
         </div>
         <p className="muted mt-4 text-xs leading-6">
-          This matrix hides controls only. The planned .NET 10 API must enforce every one of these
-          checks server-side on each request.
+          The matrix is editable for Admin and enforced server-side: every authorized API endpoint
+          resolves through the <span className="font-mono">perm:*</span> policies, so a revoked
+          grant is refused on the next request. The Admin column is fixed — it is the recovery path
+          — and the last <span className="font-mono">users.edit</span> holder can never be revoked.
         </p>
       </Card>
 
@@ -378,5 +418,52 @@ function UserForm({
         <Button type="submit">Save login</Button>
       </div>
     </form>
+  );
+}
+
+/** One matrix cell: a checkbox for editable roles, a fixed dot for Admin, a dash when not granted. */
+function MatrixCell({
+  role,
+  permission,
+  granted,
+  editable,
+  onToggle,
+}: {
+  role: Role;
+  permission: Permission;
+  granted: boolean;
+  editable: boolean;
+  onToggle: () => void;
+}) {
+  if (role === 'Admin') {
+    return granted ? (
+      <span className="text-[var(--rr-success)]" title="The Admin role is fixed.">
+        ●
+      </span>
+    ) : (
+      <span className="muted">—</span>
+    );
+  }
+  if (!editable) {
+    return granted ? (
+      <span className="text-[var(--rr-success)]">●</span>
+    ) : (
+      <span className="muted">—</span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-pressed={granted}
+      aria-label={`${granted ? 'Revoke' : 'Grant'} ${permission} for ${role}`}
+      className={`focus-ring grid size-5 place-items-center rounded border text-[11px] transition ${
+        granted
+          ? 'border-[var(--rr-success)] bg-[var(--rr-success)] text-white'
+          : 'border-[var(--rr-border)] text-transparent hover:border-[var(--rr-accent)]'
+      }`}
+    >
+      ●
+    </button>
   );
 }

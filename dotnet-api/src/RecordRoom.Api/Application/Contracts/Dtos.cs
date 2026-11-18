@@ -148,7 +148,9 @@ public sealed record FileDto(
     string Description,
     string? RecordKind = null,
     string? DocumentSize = null,
-    string? EOfficeReference = null);
+    string? EOfficeReference = null,
+    /// <summary>"ocr" when a search matched this file only through the OCR text of its digitized pages.</summary>
+    string? MatchedVia = null);
 
 public sealed record FileCreateInput(
     string FileBarcode,
@@ -299,10 +301,44 @@ public sealed record FileScanPageDto(
     string? Sha256 = null,
     int? PageCount = null,
     int? PageIndex = null,
-    string? FileNumber = null);
+    string? FileNumber = null,
+    // Scan studio (§3.4) + quality gates (§3.2)
+    int OrderIndex = 0,
+    int? Dpi = null,
+    string? Enhancement = null,
+    bool HasProcessed = false,
+    string? OcrText = null);
 
 public sealed record ScanAddInput(string FileName, int PageNo, string? DocumentSize = null, string? Note = null);
 public sealed record PageReviewInput(string Decision, string Note = "");
+
+/// <summary>Body of PUT /api/files/{fileId}/scans/order: the studio's persisted page order.</summary>
+public sealed record ScanOrderInput(long[] ScanIds);
+
+/// <summary>Body of POST /api/scans/{id}/rotate.</summary>
+public sealed record ScanRotateInput(int Degrees);
+
+/// <summary>Body of POST /api/scans/{id}/enhance. Operation: deskew | despeckle | binarize | crop | contrast.</summary>
+public sealed record ScanEnhanceInput(string Operation);
+
+/// <summary>A generated deliverable (PDF built from the file's ordered approved pages).</summary>
+public sealed record DocumentDerivativeDto(
+    long Id,
+    int FileId,
+    string FileBarcode,
+    string Kind,
+    string FileName,
+    long? SizeBytes,
+    string? Sha256,
+    int PageCount,
+    string SourceVersions,
+    bool IncludesOcrText,
+    DateTime CreatedAt,
+    string CreatedBy,
+    string? FileNumber = null);
+
+/// <summary>Body of POST /api/files/{fileId}/pdf — builds the deliverable from approved pages.</summary>
+public sealed record DeliverablePdfInput(string? FileName = null);
 
 // Custody chain (§3.8) ---------------------------------------------------------
 
@@ -448,8 +484,25 @@ public sealed record MediaLinkDto(long Id, string Title, string Url, string Alt,
 // Misc ------------------------------------------------------------------------
 
 /// <summary>Served at GET /api/config so the frontend knows which optional features are on.</summary>
-public sealed record FeaturesDto(bool Barcode);
+public sealed record FeaturesDto(bool Barcode, bool RecordRoom, bool Maps, bool Support);
 public sealed record AppConfigDto(string AppName, FeaturesDto Features);
 
 public sealed record HealthDto(string Status, string Database, bool Redis, string Hangfire, DateTime At);
 public sealed record JobAcceptedDto(string JobId, string Queue);
+
+// Feature visibility (ZILA_PANCHAYAT_CC §F) ------------------------------------
+
+/// <summary>One feature group's live state, as shown in Settings → Feature visibility.</summary>
+public sealed record FeatureSettingDto(string Key, bool Enabled, string UpdatedBy, DateTime UpdatedAt);
+
+/// <summary>Only the listed keys change; unknown keys are refused, not ignored.</summary>
+public sealed record FeatureUpdateInput(Dictionary<string, bool> Features);
+
+// Permission matrix (§3.7) ------------------------------------------------------
+
+/// <summary>The whole editable capability matrix: the permission catalogue plus, per role, the granted cells.</summary>
+public sealed record PermissionMatrixDto(string[] Permissions, PermissionMatrixRowDto[] Roles);
+public sealed record PermissionMatrixRowDto(string Role, string[] Permissions);
+
+/// <summary>Single-cell update: granting or revoking one permission for one role.</summary>
+public sealed record PermissionGrantInput(bool Granted);

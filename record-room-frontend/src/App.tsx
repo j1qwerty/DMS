@@ -48,6 +48,9 @@ const ScanPage = lazy(() => import('./pages/ScanPage').then((m) => ({ default: m
 const DigitizationPage = lazy(() =>
   import('./pages/DigitizationPage').then((m) => ({ default: m.DigitizationPage })),
 );
+const ScanStudioPage = lazy(() =>
+  import('./pages/ScanStudioPage').then((m) => ({ default: m.ScanStudioPage })),
+);
 const CustodyPage = lazy(() =>
   import('./pages/CustodyPage').then((m) => ({ default: m.CustodyPage })),
 );
@@ -128,14 +131,34 @@ export function App() {
             <Route path="/" element={<Navigate to="/files" replace />} />
             <Route path="/overview" element={<DashboardPage />} />
             <Route path="/search" element={<KeyedSearchPage />} />
-            <Route path="/rooms" element={<RoomsPage />} />
-            <Route path="/rooms/:roomId" element={<RoomDetailPage />} />
+            <Route
+              path="/rooms"
+              element={
+                <RequireFeature feature="recordRoom">
+                  <RoomsPage />
+                </RequireFeature>
+              }
+            />
+            <Route
+              path="/rooms/:roomId"
+              element={
+                <RequireFeature feature="recordRoom">
+                  <RoomDetailPage />
+                </RequireFeature>
+              }
+            />
             <Route path="/files" element={<KeyedFilesPage />} />
             <Route path="/files/new" element={guarded(NewFilePage, 'files.create')} />
             <Route path="/files/:fileId" element={<FileDetailPage />} />
+            <Route path="/files/:fileId/studio" element={<ScanStudioPage />} />
             <Route path="/files/:fileId/scan" element={<FileViewerPage />} />
             <Route path="/files/:fileId/map" element={<FileViewerPage />} />
-            <Route path="/maps" element={guarded(MapsPage, 'files.view')} />
+            <Route
+              path="/maps"
+              element={
+                <RequireFeature feature="maps">{guarded(MapsPage, 'files.view')}</RequireFeature>
+              }
+            />
             <Route path="/issue" element={<IssuePage />} />
             <Route path="/return" element={<ReturnPage />} />
             <Route path="/movement" element={<MovementPage />} />
@@ -158,7 +181,14 @@ export function App() {
             <Route path="/digitization" element={<DigitizationPage />} />
             <Route path="/custody" element={<CustodyPage />} />
             <Route path="/reports" element={<ReportsPage />} />
-            <Route path="/support" element={<SupportPage />} />
+            <Route
+              path="/support"
+              element={
+                <RequireFeature feature="support">
+                  <SupportPage />
+                </RequireFeature>
+              }
+            />
             <Route path="/settings" element={<SettingsPage />} />
 
             <Route path="/admin" element={<AdminLayout />}>
@@ -167,7 +197,12 @@ export function App() {
               <Route path="employees" element={guarded(EmployeesPage, 'employees.view')} />
               <Route path="locations" element={guarded(LocationsPage, 'locations.view')} />
               <Route path="bulk-import" element={guarded(BulkImportPage, 'files.bulkImport')} />
-              <Route path="maps" element={guarded(MapsPage, 'files.view')} />
+              <Route
+                path="maps"
+                element={
+                  <RequireFeature feature="maps">{guarded(MapsPage, 'files.view')}</RequireFeature>
+                }
+              />
               <Route path="audit" element={guarded(AuditPage, 'audit.view')} />
             </Route>
 
