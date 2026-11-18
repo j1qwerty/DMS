@@ -341,6 +341,145 @@ namespace RecordRoom.Api.Migrations
                     b.ToTable("CustodyEvents", (string)null);
                 });
 
+            modelBuilder.Entity("RecordRoom.Api.Domain.DigitalHandoverBatch", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("BatchRef")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTime?>("DeliveredAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeliveredBy")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("Department")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("DecisionNotes")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("ManifestJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("ManifestSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("Notes")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime>("PreparedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("PreparedBy")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("SignedOffBy")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<DateTime?>("SignedOffAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BatchRef")
+                        .IsUnique();
+
+                    b.HasIndex("PreparedAt");
+
+                    b.HasIndex("Status");
+
+                    b.ToTable("DigitalHandoverBatches", (string)null);
+                });
+
+            modelBuilder.Entity("RecordRoom.Api.Domain.DigitalHandoverItem", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("Department")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<long>("DigitalHandoverBatchId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<string>("FileNumber")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<int?>("PageCount")
+                        .HasColumnType("int");
+
+                    b.Property<long>("RecordFileDocumentId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("RecordFileId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Sha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DigitalHandoverBatchId", "RecordFileDocumentId")
+                        .IsUnique();
+
+                    b.HasIndex("RecordFileDocumentId");
+
+                    b.HasIndex("RecordFileId");
+
+                    b.ToTable("DigitalHandoverItems", (string)null);
+                });
+
             modelBuilder.Entity("RecordRoom.Api.Domain.Employee", b =>
                 {
                     b.Property<int>("Id")
@@ -536,6 +675,33 @@ namespace RecordRoom.Api.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("Inquiries", (string)null);
+                });
+
+            modelBuilder.Entity("RecordRoom.Api.Domain.DigitalHandoverItem", b =>
+                {
+                    b.HasOne("RecordRoom.Api.Domain.DigitalHandoverBatch", "Batch")
+                        .WithMany("Items")
+                        .HasForeignKey("DigitalHandoverBatchId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("RecordRoom.Api.Domain.RecordFile", "RecordFile")
+                        .WithMany()
+                        .HasForeignKey("RecordFileId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("RecordRoom.Api.Domain.RecordFileDocument", "Document")
+                        .WithMany()
+                        .HasForeignKey("RecordFileDocumentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Batch");
+
+                    b.Navigation("Document");
+
+                    b.Navigation("RecordFile");
                 });
 
             modelBuilder.Entity("RecordRoom.Api.Domain.IssueLine", b =>
@@ -1402,6 +1568,11 @@ namespace RecordRoom.Api.Migrations
             modelBuilder.Entity("RecordRoom.Api.Domain.BulkImportJob", b =>
                 {
                     b.Navigation("Rows");
+                });
+
+            modelBuilder.Entity("RecordRoom.Api.Domain.DigitalHandoverBatch", b =>
+                {
+                    b.Navigation("Items");
                 });
 
             modelBuilder.Entity("RecordRoom.Api.Domain.Employee", b =>
