@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Abstractions;
@@ -8,6 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 using RecordRoom.Api.Application;
 using RecordRoom.Api.Application.Services;
 using RecordRoom.Api.Infrastructure.Features;
+using RecordRoom.Api.Infrastructure.Auth;
 
 namespace RecordRoom.Api.Tests;
 
@@ -207,6 +209,75 @@ public class FeatureSwitchTests
         Assert.Equal(admin.Length - 1, off.Length);
 
         Assert.Equal(admin, AuthService.WithFeatures(admin, barcodeEnabled: true));
+    }
+
+
+    private static AuthorizationFilterContext PermissionContext(Role role, bool barcodeOn = false)
+    {
+        var services = new ServiceCollection()
+            .AddSingleton<IFeatureFlags>(new Flags(barcodeOn))
+            .BuildServiceProvider();
+        var http = new DefaultHttpContext { RequestServices = services };
+        http.User = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.Role, role.ToString())], authenticationType: "test"));
+        return new AuthorizationFilterContext(
+            new ActionContext(http, new RouteData(), new ActionDescriptor()),
+            new List<IFilterMetadata>());
+    }
+
+    [Theory]
+    [InlineData(Role.Admin, "files.documentDelete", true)]
+    [InlineData(Role.Admin, "custody.manage", true)]
+    [InlineData(Role.Supervisor, "custody.manage", true)]
+    [InlineData(Role.Supervisor, "users.view", true)]
+    [InlineData(Role.Operator, "files.create", true)]
+    [InlineData(Role.Operator, "issue.issue", true)]
+    [InlineData(Role.Operator, "custody.view", true)]
+    [InlineData(Role.Employee, "files.view", true)]
+    [InlineData(Role.Employee, "custody.view", true)]
+    [InlineData(Role.Employee, "custody.manage", false)]
+    [InlineData(Role.Operator, "files.documentDelete", false)]
+    [InlineData(Role.Supervisor, "users.edit", false)]
+    [InlineData(Role.Employee, "issue.issue", false)]
+    [InlineData(Role.Employee, "employees.view", false)]
+    public async Task Server_permission_filter_enforces_the_capability_matrix(
+        Role role, string permission, bool expected)
+    {
+        var context = PermissionContext(role);
+        await new RequirePermissionAttribute(permission).OnAuthorizationAsync(context);
+
+        if (expected)
+            Assert.Null(context.Result);
+        else
+        {
+            var result = Assert.IsType<ObjectResult>(context.Result);
+            Assert.Equal(StatusCodes.Status403Forbidden, result.StatusCode);
+        }
+    }
+
+    [Fact]
+    public async Task Barcode_capability_is_rejected_by_server_when_barcode_module_is_hidden()
+    {
+        var context = PermissionContext(Role.Admin, barcodeOn: false);
+        await new RequirePermissionAttribute("barcodes.print").OnAuthorizationAsync(context);
+        var result = Assert.IsType<ObjectResult>(context.Result);
+        Assert.Equal(StatusCodes.Status403Forbidden, result.StatusCode);
+    }
+
+    [Fact]
+    public async Task Unauthenticated_users_receive_401_from_permission_filter()
+    {
+        var services = new ServiceCollection()
+            .AddSingleton<IFeatureFlags>(new Flags(false))
+            .BuildServiceProvider();
+        var http = new DefaultHttpContext { RequestServices = services };
+        var context = new AuthorizationFilterContext(
+            new ActionContext(http, new RouteData(), new ActionDescriptor()),
+            new List<IFilterMetadata>());
+
+        await new RequirePermissionAttribute("files.view").OnAuthorizationAsync(context);
+
+        Assert.IsType<UnauthorizedResult>(context.Result);
     }
 
     [Fact]
