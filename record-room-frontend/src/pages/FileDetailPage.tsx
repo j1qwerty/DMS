@@ -541,6 +541,13 @@ export function FileDetailPage() {
                         <StatusBadge status={scan.status} />
                       </div>
                       {scan.note && <p className="muted mb-2 text-[11px]">{scan.note}</p>}
+                      {scan.ocrStatus && (
+                        <p className="muted mb-2 text-[11px]">
+                          OCR: {scan.ocrStatus}
+                          {scan.hasOcrText ? ' · searchable text available' : ''}
+                          {scan.ocrLanguage ? ` · ${scan.ocrLanguage}` : ''}
+                        </p>
+                      )}
                       <DocumentUploadActions
                         filename={scan.filename}
                         version={scan.version}
