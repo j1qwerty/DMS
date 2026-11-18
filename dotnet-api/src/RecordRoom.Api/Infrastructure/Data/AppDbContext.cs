@@ -265,9 +265,13 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.RecordedBy).HasMaxLength(64);
             e.Property(x => x.SignedOffBy).HasMaxLength(64);
             e.Property(x => x.Remarks).HasMaxLength(500);
+            e.Property(x => x.ReconciledBy).HasMaxLength(64);
             e.HasIndex(x => x.RecordedAt);
             e.HasIndex(x => x.Department);
             e.HasIndex(x => x.Direction);
+            e.HasIndex(x => x.ParentEventId);
+            e.HasOne(x => x.ParentEvent).WithMany(x => x.ReturnEvents)
+                .HasForeignKey(x => x.ParentEventId).OnDelete(DeleteBehavior.Restrict);
         });
 
 

@@ -356,7 +356,12 @@ public sealed record CustodyEventDto(
     DateTime RecordedAt,
     string? SignedOffBy,
     DateTime? SignedOffAt,
-    string Remarks);
+    string Remarks,
+    long? ParentEventId = null,
+    string? ReconciledBy = null,
+    DateTime? ReconciledAt = null,
+    int ReturnedCount = 0,
+    int RemainingCount = 0);
 
 public sealed record CustodyQuery(
     string? Direction = null,
@@ -374,6 +379,7 @@ public sealed record CustodyRecordInput(
 
 public sealed record CustodyReconcileInput(int ReconciledCount, string Remarks = "");
 public sealed record CustodySignOffInput(string SignedOffBy = "");
+public sealed record CustodyReturnInput(int FileCount, string SignedOffBy = "", string Remarks = "");
 
 // Uploads ---------------------------------------------------------------------
 

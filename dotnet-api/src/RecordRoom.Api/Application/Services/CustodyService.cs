@@ -1,3 +1,4 @@
+using System.Data;
 using Microsoft.EntityFrameworkCore;
 using RecordRoom.Api.Application.Contracts;
 using RecordRoom.Api.Domain;
@@ -18,6 +19,7 @@ public interface ICustodyService
     Task<Result<CustodyEventDto>> RecordAsync(CustodyRecordInput input, CancellationToken ct = default);
     Task<Result<CustodyEventDto>> ReconcileAsync(long id, CustodyReconcileInput input, CancellationToken ct = default);
     Task<Result<CustodyEventDto>> SignOffAsync(long id, CustodySignOffInput input, CancellationToken ct = default);
+    Task<Result<CustodyEventDto>> RecordReturnAsync(long intakeId, CustodyReturnInput input, CancellationToken ct = default);
 }
 
 public sealed class CustodyService(
@@ -27,10 +29,14 @@ public sealed class CustodyService(
 {
     private const int MaxPageSize = 100;
 
-    private static CustodyEventDto ToDto(CustodyEvent e) => new(
+    private static CustodyEventDto ToDto(CustodyEvent e, int returnedCount = 0) => new(
         e.Id, Display.Custody(e.Direction), e.BatchRef, e.Department, e.Vendor,
         e.FileCount, e.ReconciledCount, e.RecordedBy, e.RecordedAt,
-        e.SignedOffBy, e.SignedOffAt, e.Remarks);
+        e.SignedOffBy, e.SignedOffAt, e.Remarks, e.ParentEventId,
+        e.ReconciledBy, e.ReconciledAt, returnedCount,
+        e.Direction == CustodyDirection.In && e.ReconciledCount is int total
+            ? Math.Max(0, total - returnedCount)
+            : 0);
 
     public async Task<PagedResult<CustodyEventDto>> ListAsync(CustodyQuery query, CancellationToken ct = default)
     {
@@ -60,10 +66,16 @@ public sealed class CustodyService(
             .Take(pageSize)
             .ToListAsync(ct);
 
-        // The register is small, so collectionTotal is the true filtered size —
-        // the UI shows "1-N of total" honestly, with no legacy fallback figure.
+        var returnedByIntake = await db.CustodyEvents.AsNoTracking()
+            .Where(item => item.ParentEventId != null)
+            .GroupBy(item => item.ParentEventId!.Value)
+            .Select(group => new { IntakeId = group.Key, Count = group.Sum(item => item.FileCount) })
+            .ToDictionaryAsync(item => item.IntakeId, item => item.Count, ct);
+
+        // The register is small, so collectionTotal is the true filtered size.
         return new PagedResult<CustodyEventDto>(
-            items.Select(ToDto).ToArray(), total, page, pageSize, total);
+            items.Select(item => ToDto(item, returnedByIntake.GetValueOrDefault(item.Id))).ToArray(),
+            total, page, pageSize, total);
     }
 
     public async Task<Result<CustodyEventDto>> RecordAsync(CustodyRecordInput input, CancellationToken ct = default)
@@ -120,6 +132,8 @@ public sealed class CustodyService(
 
         var before = $"counted {(custody.ReconciledCount?.ToString() ?? "not yet")}";
         custody.ReconciledCount = input.ReconciledCount;
+        custody.ReconciledBy = current.User?.DisplayName ?? current.UserName;
+        custody.ReconciledAt = DateTime.UtcNow;
         if (!string.IsNullOrWhiteSpace(input.Remarks)) custody.Remarks = input.Remarks.Trim();
 
         await audit.LogAsync(
@@ -132,6 +146,59 @@ public sealed class CustodyService(
             RealtimeChannels.Digitization, "custody.reconciled", custody.Id.ToString(),
             $"Intake · {custody.Department} · counted {input.ReconciledCount} of {custody.FileCount}");
         return Result<CustodyEventDto>.Ok(ToDto(custody));
+    }
+
+    public async Task<Result<CustodyEventDto>> RecordReturnAsync(
+        long intakeId, CustodyReturnInput input, CancellationToken ct = default)
+    {
+        await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+        var intake = await db.CustodyEvents.FirstOrDefaultAsync(item => item.Id == intakeId, ct);
+        if (intake is null) return Result<CustodyEventDto>.Fail("Intake event not found.");
+        if (intake.Direction != CustodyDirection.In)
+            return Result<CustodyEventDto>.Fail("Returns can only be recorded against an intake event.", "intakeId");
+        if (intake.SignedOffAt is null || intake.ReconciledCount is null)
+            return Result<CustodyEventDto>.Fail("Count and sign off the intake before recording its return.", "intakeId");
+        if (input.FileCount < 1)
+            return Result<CustodyEventDto>.Fail("Return count must be at least 1.", "fileCount");
+
+        var returnedSoFar = await db.CustodyEvents
+            .Where(item => item.ParentEventId == intakeId)
+            .SumAsync(item => (int?)item.FileCount, ct) ?? 0;
+        var remaining = intake.ReconciledCount.Value - returnedSoFar;
+        if (input.FileCount > remaining)
+            return Result<CustodyEventDto>.Fail(
+                $"Only {remaining} of {intake.ReconciledCount} file(s) remain to be returned for this batch.",
+                "fileCount");
+
+        var actor = current.User?.DisplayName ?? current.UserName;
+        var now = DateTime.UtcNow;
+        var returned = new CustodyEvent
+        {
+            Direction = CustodyDirection.Out,
+            ParentEventId = intake.Id,
+            BatchRef = intake.BatchRef,
+            Department = intake.Department,
+            Vendor = intake.Vendor,
+            FileCount = input.FileCount,
+            ReconciledCount = input.FileCount,
+            ReconciledBy = actor,
+            ReconciledAt = now,
+            RecordedBy = actor,
+            RecordedAt = now,
+            SignedOffBy = string.IsNullOrWhiteSpace(input.SignedOffBy) ? actor : input.SignedOffBy.Trim(),
+            SignedOffAt = now,
+            Remarks = input.Remarks.Trim(),
+        };
+        db.CustodyEvents.Add(returned);
+        await audit.LogAsync(db, AuditAction.Create, "CustodyEvent", "pending", "-",
+            $"Return · {intake.BatchRef} · {input.FileCount} file(s)",
+            $"{actor} recorded return of {input.FileCount} file(s) for intake {intake.Id} ({intake.BatchRef}); signed off by {returned.SignedOffBy}.",
+            ct);
+        await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+        await audit.AnnounceAsync(RealtimeChannels.Digitization, "custody.return-recorded",
+            returned.Id.ToString(), $"Return · {intake.BatchRef} · {input.FileCount} file(s)");
+        return Result<CustodyEventDto>.Ok(ToDto(returned));
     }
 
     public async Task<Result<CustodyEventDto>> SignOffAsync(long id, CustodySignOffInput input, CancellationToken ct = default)

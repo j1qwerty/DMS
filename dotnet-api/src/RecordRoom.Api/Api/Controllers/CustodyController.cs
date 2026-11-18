@@ -43,6 +43,12 @@ public class CustodyController(ICustodyService custody) : ControllerBase
     public async Task<IResult> Reconcile(long id, CustodyReconcileInput input, CancellationToken ct) =>
         ApiResults.FromResult(await custody.ReconcileAsync(id, input, ct));
 
+    /// <summary>Records a whole or partial return against a signed-off intake batch.</summary>
+    [RequirePermission("custody.manage")]
+    [HttpPost("{id:long}/return")]
+    public async Task<IResult> RecordReturn(long id, CustodyReturnInput input, CancellationToken ct) =>
+        ApiResults.FromResult(await custody.RecordReturnAsync(id, input, ct));
+
     /// <summary>Closes an event with a sign-off; closed events become read-only.</summary>
     [RequirePermission("custody.manage")]
     [HttpPost("{id:long}/sign-off")]

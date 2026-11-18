@@ -308,6 +308,16 @@ namespace RecordRoom.Api.Migrations
                     b.Property<DateTime>("RecordedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<string>("ReconciledBy")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTime?>("ReconciledAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<long?>("ParentEventId")
+                        .HasColumnType("bigint");
+
                     b.Property<string>("RecordedBy")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -335,10 +345,24 @@ namespace RecordRoom.Api.Migrations
                     b.HasIndex("Department");
 
                     b.HasIndex("Direction");
+ 
+                    b.HasIndex("ParentEventId");
 
                     b.HasIndex("RecordedAt");
 
+                    b.HasOne("RecordRoom.Api.Domain.CustodyEvent", "ParentEvent")
+                        .WithMany("ReturnEvents")
+                        .HasForeignKey("ParentEventId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.ToTable("CustodyEvents", (string)null);
+                });
+
+            modelBuilder.Entity("RecordRoom.Api.Domain.CustodyEvent", b =>
+                {
+                    b.HasOne("RecordRoom.Api.Domain.CustodyEvent", "ParentEvent")
+                        .WithMany("ReturnEvents")
+                        .HasForeignKey("ParentEventId");
                 });
 
             modelBuilder.Entity("RecordRoom.Api.Domain.Employee", b =>

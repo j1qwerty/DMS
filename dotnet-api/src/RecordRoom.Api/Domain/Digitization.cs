@@ -142,6 +142,10 @@ public class CustodyEvent
 {
     public long Id { get; set; }
     public CustodyDirection Direction { get; set; } = CustodyDirection.In;
+    /// <summary>Links a return event to the department intake it partially or fully closes.</summary>
+    public long? ParentEventId { get; set; }
+    public CustodyEvent? ParentEvent { get; set; }
+    public List<CustodyEvent> ReturnEvents { get; set; } = [];
     /// <summary>Free-text digitization batch / reference the handover is tied to.</summary>
     public string BatchRef { get; set; } = string.Empty;
     public required string Department { get; set; }
@@ -150,6 +154,8 @@ public class CustodyEvent
     public int FileCount { get; set; }
     /// <summary>Files actually counted; null until the intake side is reconciled.</summary>
     public int? ReconciledCount { get; set; }
+    public string? ReconciledBy { get; set; }
+    public DateTime? ReconciledAt { get; set; }
     public string RecordedBy { get; set; } = string.Empty;
     public DateTime RecordedAt { get; set; } = DateTime.UtcNow;
     public string? SignedOffBy { get; set; }
