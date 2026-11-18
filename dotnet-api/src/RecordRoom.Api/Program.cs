@@ -158,6 +158,7 @@ builder.Services.AddScoped<ICurrentUserAccessor, CurrentUserAccessor>();
 builder.Services.AddScoped<ILocationsService, LocationsService>();
 builder.Services.AddScoped<IFilesService, FilesService>();
 builder.Services.AddScoped<IRecordFileDocumentsService, RecordFileDocumentsService>();
+builder.Services.AddScoped<IScanPdfCompositionService, ScanPdfCompositionService>();
 builder.Services.AddSingleton<IPrivateDocumentStore, PrivateDocumentStore>();
 builder.Services.AddScoped<IIssuesService, IssuesService>();
 builder.Services.AddScoped<IFileScansService, FileScansService>();
