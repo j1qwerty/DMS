@@ -146,3 +146,47 @@ public class CustodyEvent
     public DateTime? SignedOffAt { get; set; }
     public string Remarks { get; set; } = string.Empty;
 }
+
+/// <summary>
+/// Immutable digital deliverables handover. The manifest snapshots the file
+/// identity, final-PDF version, page count and SHA-256 values at preparation.
+/// Later file edits cannot silently rewrite what was handed to the Department.
+/// </summary>
+public class DigitalHandoverBatch
+{
+    public long Id { get; set; }
+    public required string BatchRef { get; set; }
+    public required string Department { get; set; }
+    public string Notes { get; set; } = string.Empty;
+    public string Status { get; set; } = "Prepared";
+    public required string ManifestJson { get; set; }
+    public required string ManifestSha256 { get; set; }
+    public required string PreparedBy { get; set; }
+    public DateTime PreparedAt { get; set; } = DateTime.UtcNow;
+    public string? DeliveredBy { get; set; }
+    public DateTime? DeliveredAt { get; set; }
+    public string? AcceptedBy { get; set; }
+    public DateTime? AcceptedAt { get; set; }
+    public string DecisionNotes { get; set; } = string.Empty;
+    public List<DigitalHandoverItem> Items { get; set; } = [];
+}
+
+/// <summary>A checksum-protected final PDF included in a prepared handover.</summary>
+public class DigitalHandoverItem
+{
+    public long Id { get; set; }
+    public long DigitalHandoverBatchId { get; set; }
+    public int RecordFileId { get; set; }
+    public long RecordFileDocumentId { get; set; }
+    public required string FileNumber { get; set; }
+    public required string Department { get; set; }
+    public required string FileName { get; set; }
+    public int Version { get; set; }
+    public required string ContentType { get; set; }
+    public long SizeBytes { get; set; }
+    public int? PageCount { get; set; }
+    public required string Sha256 { get; set; }
+    public DigitalHandoverBatch? Batch { get; set; }
+    public RecordFile? RecordFile { get; set; }
+    public RecordFileDocument? Document { get; set; }
+}
