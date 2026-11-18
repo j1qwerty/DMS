@@ -52,7 +52,8 @@ public partial class AddFilesFullTextIndex : Migration
                     WITH CHANGE_TRACKING AUTO;
                 END;
             END;
-            """);
+            """,
+            suppressTransaction: true);
     }
 
     protected override void Down(MigrationBuilder migrationBuilder)
@@ -81,6 +82,7 @@ public partial class AddFilesFullTextIndex : Migration
             BEGIN
                 DROP FULLTEXT CATALOG [FTC_Files];
             END;
-            """);
+            """,
+            suppressTransaction: true);
     }
 }
