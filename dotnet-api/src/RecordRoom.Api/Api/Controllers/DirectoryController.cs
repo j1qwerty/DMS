@@ -4,12 +4,14 @@ using RecordRoom.Api.Application;
 using RecordRoom.Api.Application.Contracts;
 using RecordRoom.Api.Application.Services;
 using RecordRoom.Api.Infrastructure.Features;
+using RecordRoom.Api.Infrastructure.Auth;
 
 namespace RecordRoom.Api.Api.Controllers;
 
 [ApiController]
 [Route("api/employees")]
 [Authorize]
+[RequirePermission("employees.view")]
 [Produces("application/json")]
 [Tags("Employees")]
 public class EmployeesController(IEmployeesService employees) : ControllerBase
@@ -36,7 +38,7 @@ public class EmployeesController(IEmployeesService employees) : ControllerBase
         return employee is null ? Results.NotFound() : Results.Ok(ApiResponse<EmployeeDto>.Ok(employee));
     }
 
-    [Authorize(Roles = "Admin,Supervisor")]
+    [RequirePermission("employees.edit")]
     [HttpPost]
     public async Task<IResult> Create(EmployeeInput input, CancellationToken ct) =>
         ApiResults.FromResult(await employees.CreateAsync(input, ct));
@@ -54,7 +56,8 @@ public class EmployeesController(IEmployeesService employees) : ControllerBase
 
 [ApiController]
 [Route("api/users")]
-[Authorize(Roles = "Admin")]
+[Authorize]
+[RequirePermission("users.view")]
 [Produces("application/json")]
 [Tags("Users")]
 public class UsersController(IUsersService users) : ControllerBase
@@ -67,6 +70,7 @@ public class UsersController(IUsersService users) : ControllerBase
             roles = Enum.GetNames<Domain.Role>(),
         }));
 
+    [RequirePermission("users.edit")]
     [HttpPost]
     public async Task<IResult> Create([FromBody] CreateUserRequest request, CancellationToken ct) =>
         ApiResults.FromResult(await users.CreateAsync(
@@ -74,10 +78,12 @@ public class UsersController(IUsersService users) : ControllerBase
                 request.EmployeeCode, request.Active),
             request.Password, ct));
 
+    [RequirePermission("users.edit")]
     [HttpPut("{id:int}")]
     public async Task<IResult> Update(int id, UserInput input, CancellationToken ct) =>
         ApiResults.FromResult(await users.UpdateAsync(id, input, ct));
 
+    [RequirePermission("users.edit")]
     [HttpDelete("{id:int}")]
     public async Task<IResult> Delete(int id, CancellationToken ct) =>
         ApiResults.FromResult(await users.DeleteAsync(id, ct));
