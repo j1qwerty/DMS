@@ -1,3 +1,5 @@
+> **Scope alignment:** engineering library selections and feasibility notes in this file support the final proposal but do not change its scope. The binding acceptance checklist is [`../ZILA_PANCHAYAT_CODEX.MD`](../ZILA_PANCHAYAT_CODEX.MD). OCR, FTS, scan quality, PDF composition and handover work must follow the tracker and its department approval gates.
+
 # Record Room — feature inventory and roadmap
 
 Inventory of what the platform **ships today (v1)** and what is **planned (v2)**,
