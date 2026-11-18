@@ -82,12 +82,19 @@ writes the audit row, the movement event and the changed entity together, then
 publishes to SignalR after commit. There is no path that changes data without
 leaving a trace.
 
-**The API is the authorization boundary.** The current implementation still
-uses role-based `[Authorize(Roles = ...)]` policies for most endpoints, while
-the frontend permission matrix is UX gating. This does not yet satisfy the
-final requirement for a fully server-enforced, editable capability matrix.
-Track the policy migration and direct-call permission tests in
-`../ZILA_PANCHAYAT_CODEX.MD`. Frontend hiding is never treated as security.
+**The API is the authorization boundary.** Protected controllers now use
+`RequirePermissionAttribute` against the server-owned four-role capability
+matrix in `AuthService.PermissionsForRole`. Controller/action permissions
+cover registry, file creation/editing, issue/return, location editing,
+digitization upload/review, employees, users, audit, reports, document delete
+and custody. The same permission names are mirrored in the frontend for
+navigation only. Unit tests and the HTTP smoke harness cover direct API
+denials; the frontend is never treated as the security boundary.
+
+The matrix is intentionally static for this proposal; a database-editable
+permission editor is a retained/deferred enhancement, not part of the current
+department scope. The clause-by-clause status remains in
+`../ZILA_PANCHAYAT_CODEX.MD`.
 
 **No `EnableRetryOnFailure`.** EF Core's retrying execution strategy cannot be
 combined with user-initiated transactions, and issue/return and location writes
