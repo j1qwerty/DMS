@@ -165,8 +165,8 @@ public class DigitalHandoverBatch
     public DateTime PreparedAt { get; set; } = DateTime.UtcNow;
     public string? DeliveredBy { get; set; }
     public DateTime? DeliveredAt { get; set; }
-    public string? AcceptedBy { get; set; }
-    public DateTime? AcceptedAt { get; set; }
+    public string? SignedOffBy { get; set; }
+    public DateTime? SignedOffAt { get; set; }
     public string DecisionNotes { get; set; } = string.Empty;
     public List<DigitalHandoverItem> Items { get; set; } = [];
 }
