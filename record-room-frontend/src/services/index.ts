@@ -23,7 +23,6 @@ import { bulkService } from './impl/bulk';
 import { dashboardService } from './impl/dashboard';
 import { scansService } from './impl/scans';
 import { custodyService } from './impl/custody';
-import { digitalHandoverService } from './impl/digital-handovers';
 import { employeesService } from './impl/employees';
 import { filesService } from './impl/files';
 import { issuesService } from './impl/issues';
@@ -46,7 +45,6 @@ import {
   httpInquiriesService,
   httpIssuesService,
   httpCustodyService,
-  httpDigitalHandoverService,
   httpLocationsService,
   httpMediaService,
   httpMovementsService,
@@ -67,7 +65,6 @@ const localService: RecordRoomService = {
   employees: employeesService,
   digitization: scansService,
   custody: custodyService,
-  digitalHandovers: digitalHandoverService,
   uploads: uploadsService,
   bulk: bulkService,
   audit: auditService,
@@ -92,7 +89,6 @@ const httpService: RecordRoomService = {
   employees: httpEmployeesService,
   digitization: httpDigitizationService,
   custody: httpCustodyService,
-  digitalHandovers: httpDigitalHandoverService,
   uploads: httpUploadsService,
   bulk: httpBulkService,
   audit: httpAuditService,
