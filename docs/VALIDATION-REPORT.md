@@ -1,3 +1,5 @@
+> **Historical validation snapshot:** this report predates the final proposal and current branch changes. Do not reuse its pass/completion statements as final acceptance. Current implementation and test status are maintained in [`../ZILA_PANCHAYAT_CODEX.MD`](../ZILA_PANCHAYAT_CODEX.MD).
+
 # Validation report
 
 ## Corrected dependency failure
