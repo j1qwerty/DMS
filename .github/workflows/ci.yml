@@ -48,6 +48,27 @@ jobs:
   api:
     name: .NET API checks
     runs-on: ubuntu-latest
+    services:
+      sqlserver:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: "Y"
+          MSSQL_PID: Developer
+          MSSQL_SA_PASSWORD: "${{ format('Dms_{0}_CiAa!', github.run_id) }}"
+        ports:
+          - 1433:1433
+    env:
+      ConnectionStrings__Default: "Server=127.0.0.1,1433;Database=DmsCi;User Id=sa;Password=${{ format('Dms_{0}_CiAa!', github.run_id) }};TrustServerCertificate=True;Encrypt=False"
+      Jwt__SigningKey: "ZilaPanchayat-CI-Only-Signing-Key-At-Least-32-Characters"
+      Database__MigrateOnStartup: "true"
+      Database__SeedOnStartup: "true"
+      Hangfire__EnableScheduling: "false"
+      RateLimiting__Enabled: "false"
+      Features__BarcodeEnabled: "false"
+      Features__MovementEnabled: "false"
+      Features__SupportEnabled: "false"
+      Features__BulkImportEnabled: "false"
+      Scope__ExpectedPageCount: "100"
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -60,5 +81,49 @@ jobs:
       - name: Build API
         run: dotnet build dotnet-api/src/RecordRoom.Api/RecordRoom.Api.csproj --configuration Release
 
+      - name: Wait for SQL Server
+        shell: bash
+        run: |
+          container_id="$(docker ps -q --filter ancestor=mcr.microsoft.com/mssql/server:2022-latest | head -n 1)"
+          if [ -z "$container_id" ]; then
+            echo "SQL Server service container was not found"
+            exit 1
+          fi
+          ready=0
+          for attempt in $(seq 1 90); do
+            if docker logs "$container_id" 2>&1 | grep -q "SQL Server is now ready for client connections"; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" -ne 1 ]; then
+            docker logs "$container_id"
+            echo "SQL Server did not become ready"
+            exit 1
+          fi
+
       - name: Test API logic
         run: dotnet test dotnet-api/tests/RecordRoom.Api.Tests/RecordRoom.Api.Tests.csproj --configuration Release
+
+      - name: Start API for live SQL Server smoke tests
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/dms-documents"
+          export FileStorage__RootPath="$RUNNER_TEMP/dms-documents"
+          nohup dotnet run --project dotnet-api/src/RecordRoom.Api/RecordRoom.Api.csproj --configuration Release --no-build --urls http://127.0.0.1:5199 > "$RUNNER_TEMP/dms-api.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/dms-api.pid"
+          for attempt in $(seq 1 90); do
+            if curl --silent --show-error --fail http://127.0.0.1:5199/api/health > "$RUNNER_TEMP/dms-health.json"; then
+              cat "$RUNNER_TEMP/dms-health.json"
+              exit 0
+            fi
+            sleep 2
+          done
+          cat "$RUNNER_TEMP/dms-api.log"
+          echo "DMS API failed to start"
+          exit 1
+
+      - name: Run end-to-end HTTP smoke harness
+        shell: pwsh
+        run: ./dotnet-api/scripts/test-api.ps1 -BaseUrl http://127.0.0.1:5199
