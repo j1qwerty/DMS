@@ -102,7 +102,7 @@ export function DigitizationPage() {
                   <div className="min-w-0">
                     <p className="break-all font-semibold">{scan.filename}</p>
                     <p className="muted mt-1 text-[11px]">
-                      Page {scan.pageNo} · v{scan.version} · {scan.documentSize} · uploaded{' '}
+                      Page {scan.pageNo} · {scan.side ?? 'Front'} · v{scan.version} · {scan.documentSize} · uploaded{' '}
                       {scan.uploadedAt} by {scan.uploadedBy}
                     </p>
                     <p className="muted mt-1 text-[11px]">
