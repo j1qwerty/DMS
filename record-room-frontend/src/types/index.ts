@@ -320,6 +320,11 @@ export interface FileScan {
   pageCount?: number;
   /** 1-based page inside a multi-page PDF that this row represents. */
   pageIndex?: number;
+  ocrStatus?: 'NotProcessed' | 'Completed' | 'Failed';
+  hasOcrText?: boolean;
+  ocrLanguage?: string;
+  ocrEngine?: string;
+  ocrUpdatedAt?: string;
 }
 
 export type CustodyDirection = 'Intake' | 'Return';
