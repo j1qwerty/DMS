@@ -68,6 +68,10 @@ public class RecordFileDocument
     public required string Sha256 { get; set; }
     /// <summary>Pages in the stored PDF; null for images or an unreadable page tree.</summary>
     public int? PageCount { get; set; }
+    /// <summary>Attachment or generated final scan PDF.</summary>
+    public string DocumentKind { get; set; } = "Attachment";
+    /// <summary>JSON manifest of the approved scan versions used to create this derivative.</summary>
+    public string SourceManifest { get; set; } = string.Empty;
     public DateTime UploadedAt { get; set; } = DateTime.UtcNow;
     public required string UploadedBy { get; set; }
     public RecordFile? RecordFile { get; set; }
