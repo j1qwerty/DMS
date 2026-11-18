@@ -103,6 +103,27 @@ jobs:
             exit 1
           fi
 
+      - name: Create SQL Server test database
+        shell: pwsh
+        run: |
+          $clientAssembly = Join-Path $PWD 'dotnet-api/src/RecordRoom.Api/bin/Release/net10.0/Microsoft.Data.SqlClient.dll'
+          if (-not (Test-Path -LiteralPath $clientAssembly)) {
+            throw "Microsoft.Data.SqlClient was not found in the API build output."
+          }
+          Add-Type -Path $clientAssembly
+          $builder = [Microsoft.Data.SqlClient.SqlConnectionStringBuilder]::new($env:ConnectionStrings__Default)
+          $builder.InitialCatalog = 'master'
+          $connection = [Microsoft.Data.SqlClient.SqlConnection]::new($builder.ConnectionString)
+          try {
+            $connection.Open()
+            $command = $connection.CreateCommand()
+            $command.CommandText = "IF DB_ID(N'DmsCi') IS NULL CREATE DATABASE [DmsCi];"
+            [void]$command.ExecuteNonQuery()
+          }
+          finally {
+            $connection.Dispose()
+          }
+
       - name: Test API logic
         run: dotnet test dotnet-api/tests/RecordRoom.Api.Tests/RecordRoom.Api.Tests.csproj --configuration Release
 
