@@ -114,6 +114,33 @@ describe('barcode feature switch', () => {
   });
 });
 
+
+describe('optional movement report visibility', () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it('does not list the standalone movement report when disabled', async () => {
+    await freshFeatures();
+    const { reportsService } = await import('../src/services/impl/reports');
+    const definitions = await reportsService.definitions();
+    expect(definitions.some((item) => item.key === 'movement-log')).toBe(false);
+  });
+
+  it('refuses to build the standalone movement report when disabled', async () => {
+    await freshFeatures();
+    const { reportsService } = await import('../src/services/impl/reports');
+    await expect(reportsService.build('movement-log')).rejects.toThrow(
+      'Movement history is not enabled.',
+    );
+  });
+
+  it('restores the movement report when its feature flag is explicitly enabled', async () => {
+    await freshFeatureSet({ VITE_ENABLE_MOVEMENT: 'true' });
+    const { reportsService } = await import('../src/services/impl/reports');
+    const definitions = await reportsService.definitions();
+    expect(definitions.some((item) => item.key === 'movement-log')).toBe(true);
+  });
+});
+
 describe('finding a file from typed text', () => {
   beforeEach(async () => {
     await service.reset();
