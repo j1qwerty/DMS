@@ -24,7 +24,7 @@ public interface IReadService
     Task<ActivityDto[]> ActivityAsync(int limit, CancellationToken ct = default);
 }
 
-public sealed class ReadService(AppDbContext db, ICacheService cache, IFileRefs fileRefs, IFeatureFlags flags) : IReadService
+public sealed class ReadService(AppDbContext db, ICacheService cache, IFileRefs fileRefs, IFeatureFlags flags, IConfiguration configuration) : IReadService
 {
     private static MovementDto ToMovement(MovementEvent m) => new(
         m.Id, Display.Movement(m.Kind), m.RecordFileId, m.Barcode, m.Subject, m.From, m.To,
@@ -137,30 +137,45 @@ public sealed class ReadService(AppDbContext db, ICacheService cache, IFileRefs 
     public Task<DashboardStatsDto> DashboardStatsAsync(CancellationToken ct) =>
         cache.GetOrCreateAsync(CacheKeys.DashboardStats, TimeSpan.FromSeconds(30), async () =>
         {
+            var now = DateTime.UtcNow;
             var issued = await db.Files.CountAsync(f => f.Status == RecordStatus.Issued, ct);
-            var overdue = await db.Issues.CountAsync(i => i.Status == IssueStatus.Overdue, ct);
-            var dueToday = await db.Issues.CountAsync(
-                i => i.Status != IssueStatus.Returned && i.DueAt <= DateTime.UtcNow.AddDays(1), ct);
+            // The proposal asks for files due, not receipt count. A multi-file
+            // receipt therefore contributes one due item for each unreturned line.
+            var dueToday = await db.IssueLines.CountAsync(
+                line => line.ReturnedAt == null && line.IssueReceipt != null
+                    && line.IssueReceipt.DueAt <= now.AddDays(1), ct);
+            var overdue = await db.IssueLines.CountAsync(
+                line => line.ReturnedAt == null && line.IssueReceipt != null
+                    && line.IssueReceipt.DueAt < now, ct);
             var borrowers = await db.Issues.AsNoTracking()
                 .Where(i => i.Status != IssueStatus.Returned)
                 .Select(i => i.BorrowerEmployeeCode).Distinct().CountAsync(ct);
             var pending = await db.ScanPages.CountAsync(p => p.Status == PageStatus.PendingReview, ct);
             var rooms = await db.Rooms.CountAsync(ct);
-            var pageCount = await db.ScanPages.CountAsync(ct);
             var approved = await db.ScanPages.CountAsync(p => p.Status == PageStatus.Approved, ct);
 
-            // Mirrors the frontend's honesty rule: the registry total is the
-            // legacy collection size, never the loaded page count.
+            // Mapping is physical placement on an identified shelf, not merely
+            // existence in SQL. The denominator remains the agreed legacy registry.
             const long total = 2_478_450;
-            var loaded = await db.Files.CountAsync(ct);
-            var mapped = Math.Round((double)loaded / total * 100, 1);
+            var mappedFiles = await db.Files.CountAsync(f => f.ShelfId != null, ct);
+            var mapped = Math.Round((double)mappedFiles / total * 100, 1);
+
+            // The department must finalize the total page volume before production.
+            // Without that baseline the percentage is deliberately 0, not a
+            // misleading approval-rate ratio based only on uploaded pages.
+            var expectedPages = int.TryParse(configuration["Scope:ExpectedPageCount"], out var configuredPages)
+                ? Math.Max(configuredPages, 0)
+                : 0;
+            var digitizationPercent = expectedPages == 0
+                ? 0
+                : Math.Min(100, Math.Round((double)approved / expectedPages * 100, 1));
 
             return new DashboardStatsDto(
                 total,
                 mapped,
                 issued,
                 dueToday,
-                pageCount == 0 ? 0 : Math.Round((double)approved / pageCount * 100, 1),
+                digitizationPercent,
                 overdue,
                 rooms,
                 borrowers,
