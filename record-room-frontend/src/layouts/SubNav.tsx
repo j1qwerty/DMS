@@ -1,7 +1,6 @@
 import { NavLink, useLocation } from 'react-router-dom';
 import { cn } from '../lib/utils';
 import { useSession } from '../hooks/useService';
-import { useFeatures } from '../lib/features';
 import type { Permission } from '../services/permissions';
 import { useFeatures, type Features } from '../lib/features';
 
@@ -53,7 +52,10 @@ export function SubNav() {
   const group = GROUPS.find((item) => item.match.some((prefix) => pathname.startsWith(prefix)));
   if (!group) return null;
   const tabs = group.tabs.filter(
-    (tab) => (!tab.barcode || features.barcode) && (!tab.feature || features[tab.feature]) && (!tab.permission || allowed(tab.permission)),
+    (tab) =>
+      (!tab.barcode || features.barcode) &&
+      (!tab.feature || features[tab.feature]) &&
+      (!tab.permission || allowed(tab.permission)),
   );
   if (tabs.length < 2) return null;
 
