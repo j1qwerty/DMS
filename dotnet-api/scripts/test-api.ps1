@@ -923,10 +923,9 @@ $scanList = Invoke-Api -Path "/api/files/$newFileId/documents" -Token $admin
 Assert-Equal 200 $scanList.Status 'GET /api/files/{id}/documents responds'
 
 if (-not $SkipDestructive) {
-    # Invoke-WebRequest on Windows PowerShell 5.1 cannot post a multipart form,
-    # so the upload goes through curl.exe. A minimal one-page PDF is enough:
-    # this section exercises the version row lifecycle, not pdf parsing.
-    $scanPdf = Join-Path $env:TEMP 'rr-smoke-scan.pdf'
+    # A minimal one-page PDF is enough to exercise private storage and the
+    # version row lifecycle without depending on PDF content parsing.
+    $scanPdf = Join-Path ([System.IO.Path]::GetTempPath()) 'rr-smoke-scan.pdf'
     [IO.File]::WriteAllBytes($scanPdf, [Text.Encoding]::ASCII.GetBytes(
         "%PDF-1.4`n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj`n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj`n" +
         "3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj`ntrailer<</Size 4/Root 1 0 R>>`n%%EOF"))
@@ -1272,17 +1271,13 @@ $scanList = Invoke-Api -Path "/api/files/$newFileId/documents" -Token $admin
 Assert-Equal 200 $scanList.Status 'GET /api/files/{id}/documents responds'
 
 if (-not $SkipDestructive) {
-    # Invoke-WebRequest on Windows PowerShell 5.1 cannot post a multipart form,
-    # so the upload goes through curl.exe. A minimal one-page PDF is enough:
-    # this section exercises the version row lifecycle, not pdf parsing.
-    $scanPdf = Join-Path $env:TEMP 'rr-smoke-scan.pdf'
+    # A minimal one-page PDF is enough to exercise private storage and the
+    # version row lifecycle without depending on PDF content parsing.
+    $scanPdf = Join-Path ([System.IO.Path]::GetTempPath()) 'rr-smoke-scan.pdf'
     [IO.File]::WriteAllBytes($scanPdf, [Text.Encoding]::ASCII.GetBytes(
         "%PDF-1.4`n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj`n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj`n" +
         "3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj`ntrailer<</Size 4/Root 1 0 R>>`n%%EOF"))
-    $raw = curl.exe -s -X POST "$BaseUrl/api/files/$newFileId/documents" `
-        -H "Authorization: Bearer $admin" `
-        -F "document=@$scanPdf;type=application/pdf"
-    $uploaded = $raw | ConvertFrom-Json
+    $uploaded = Invoke-MultipartUpload -Path "/api/files/$newFileId/documents" -Token $admin -FilePath $scanPdf -ContentType 'application/pdf'
     Assert-True ([bool]$uploaded.success) 'a scan version is uploaded'
     $scanId = $uploaded.data.id
     Assert-True ($scanId -gt 0) 'the upload returns the stored version id'
