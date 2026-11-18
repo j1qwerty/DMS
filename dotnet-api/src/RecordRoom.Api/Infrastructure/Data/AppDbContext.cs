@@ -185,6 +185,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.Sha256).HasMaxLength(64);
             e.Property(x => x.DocumentSize).HasMaxLength(8);
             e.Property(x => x.Side).HasMaxLength(8);
+            e.Property(x => x.OcrStatus).HasMaxLength(16);
+            e.Property(x => x.OcrLanguage).HasMaxLength(24);
+            e.Property(x => x.OcrEngine).HasMaxLength(64);
+            e.Property(x => x.OcrError).HasMaxLength(400);
+            e.Property(x => x.OcrUpdatedBy).HasMaxLength(256);
             e.HasIndex(x => new { x.Barcode, x.PageNo, x.Side, x.Version }).IsUnique();
             e.HasIndex(x => x.Status);
             e.HasOne(x => x.RecordFile).WithMany(x => x.ScanPages).HasForeignKey(x => x.Barcode)
