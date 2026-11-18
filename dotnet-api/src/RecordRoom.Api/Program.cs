@@ -232,6 +232,7 @@ builder.Services.AddSwaggerGen(c =>
 });
 
 var app = builder.Build();
+string? startupMigrationError = null;
 
 // -------------------------------------------------------------- migrate + seed
 using (var scope = app.Services.CreateScope())
@@ -248,8 +249,10 @@ using (var scope = app.Services.CreateScope())
         }
         catch (Exception ex)
         {
-            // A database that is not reachable must not crash the process.
-            // /api/health reports the degradation and the app still starts.
+            // Keep the API process alive, but expose the actual migration error
+            // in /api/health so deployments do not mistake a listening port for
+            // a usable schema.
+            startupMigrationError = ex.GetBaseException().Message;
             logger.LogError(ex, "Database migration failed. The API starts but data endpoints will error.");
         }
     }
@@ -355,6 +358,12 @@ app.MapGet("/api/health", async (AppDbContext db, ICacheService cache) =>
     {
         dbOk = false;
         dbError = ex.Message;
+    }
+
+    if (!string.IsNullOrWhiteSpace(startupMigrationError))
+    {
+        dbOk = false;
+        dbError = $"Migration failed: {startupMigrationError}";
     }
 
     return Results.Ok(new HealthDto(
