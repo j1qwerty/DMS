@@ -22,9 +22,6 @@ export const dashboardService: DashboardApi = {
       return days <= 0;
     }).length;
 
-    const pages = state.scanPages;
-    const approvedPages = pages.filter((page) => page.status === 'Approved').length;
-
     // Local mode uses only the complete in-memory sample. It must never
     // advertise a historical district volume that was not loaded here.
     const registered = state.files.length;
