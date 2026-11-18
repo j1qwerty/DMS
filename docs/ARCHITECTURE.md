@@ -1,3 +1,5 @@
+> **Final scope authority:** this architecture describes the current application shape. The final proposal additionally requires OCR/FTS, e-office transfer, scan/PDF quality workflows and digital handover. Their target architecture and status are tracked in [`../ZILA_PANCHAYAT_CODEX.MD`](../ZILA_PANCHAYAT_CODEX.MD).
+
 # Architecture
 
 ## Frontend
