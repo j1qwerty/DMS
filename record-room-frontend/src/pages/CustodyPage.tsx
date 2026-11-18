@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { DownloadSimple, MagnifyingGlass, Plus, Scales, SealCheck } from '@phosphor-icons/react';
+import { DownloadSimple, Eye, MagnifyingGlass, Plus, Scales, SealCheck } from '@phosphor-icons/react';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
@@ -54,7 +54,13 @@ function CountedCell({ event, inline = false }: { event: CustodyEvent; inline?: 
 
 function StateCell({ event }: { event: CustodyEvent }) {
   if (event.signedOffAt) {
-    return <Badge tone="success">Signed off</Badge>;
+    return (
+      <div className="space-y-1">
+        <Badge tone="success">Signed off</Badge>
+        <p className="text-xs font-semibold">{event.signedOffBy || 'Signer not recorded'}</p>
+        <p className="muted text-[11px]">{event.signedOffAt}</p>
+      </div>
+    );
   }
   return <Badge tone="warning">Open</Badge>;
 }
@@ -65,7 +71,7 @@ function StateCell({ event }: { event: CustodyEvent }) {
  * actually counted (the reconciliation), a return records the handover back.
  * Rows are immutable, so the only actions are record, count and sign off.
  */
-export function CustodyPage() {
+export function CustodyPage({ embedded = false }: { embedded?: boolean } = {}) {
   const service = useService();
   const { allowed, user } = useSession();
   const { success, danger } = useFlash();
@@ -75,6 +81,8 @@ export function CustodyPage() {
   const [recording, setRecording] = useState(false);
   const [counting, setCounting] = useState<CustodyEvent | null>(null);
   const [signing, setSigning] = useState<CustodyEvent | null>(null);
+  const [returning, setReturning] = useState<CustodyEvent | null>(null);
+  const [viewing, setViewing] = useState<CustodyEvent | null>(null);
 
   const mayWrite = allowed('custody.manage');
   const { data: departments } = useQuery(() => service.employees.departments(), [], [] as string[]);
@@ -113,6 +121,10 @@ export function CustodyPage() {
       'Counted files',
       'Variance',
       'Recorded by',
+      'Reconciled by',
+      'Reconciled at',
+      'Returned files',
+      'Remaining files',
       'Signed off by',
       'Signed off at',
       'Remarks',
@@ -127,6 +139,10 @@ export function CustodyPage() {
       event.reconciledCount ?? '',
       varianceOf(event) ?? '',
       event.recordedBy,
+      event.reconciledBy ?? '',
+      event.reconciledAt ?? '',
+      event.returnedCount ?? 0,
+      event.remainingCount ?? 0,
       event.signedOffBy ?? '',
       event.signedOffAt ?? '',
       event.remarks,
@@ -139,18 +155,25 @@ export function CustodyPage() {
 
   return (
     <div className="space-y-7">
-      <PageHeader
-        kicker="Digitization"
-        title="Custody register"
-        description="The custody chain both ways: what each department handed over and what was actually counted, plus the return handover sign-off. Rows are never edited — a correction is a new row."
-        actions={
-          mayWrite && (
-            <Button icon={<Plus size={17} />} onClick={() => setRecording(true)}>
-              Record handover…
-            </Button>
-          )
-        }
-      />
+      {!embedded && (
+        <PageHeader
+          kicker="Digitization"
+          title="Custody register"
+          description="Track the intake of department files, count and sign-off, then record one or more partial returns against the same batch."
+          actions={
+            mayWrite && (
+              <Button icon={<Plus size={17} />} onClick={() => setRecording(true)}>
+                Record handover…
+              </Button>
+            )
+          }
+        />
+      )}
+      {embedded && mayWrite && (
+        <div className="flex justify-end">
+          <Button icon={<Plus size={17} />} onClick={() => setRecording(true)}>Record handover…</Button>
+        </div>
+      )}
 
       <Card padding={false} className="overflow-hidden">
         <div className="flex flex-col gap-3 border-b border-base p-4 sm:flex-row sm:items-center">
@@ -210,7 +233,7 @@ export function CustodyPage() {
             {/* md and up: the full register table; below md the same rows as
                 cards, so a phone never scrolls sideways. */}
             <div className="hidden overflow-x-auto md:block">
-              <table className="w-full min-w-[880px] text-left text-sm">
+              <table className="w-full min-w-[1040px] text-left text-sm">
                 <thead className="sticky top-0 z-10 bg-[var(--rr-bg)] text-xs uppercase tracking-wider muted">
                   <tr>
                     <th className="px-4 py-3">Recorded</th>
@@ -219,7 +242,8 @@ export function CustodyPage() {
                     <th className="px-4 py-3">Batch / vendor</th>
                     <th className="px-4 py-3">Declared</th>
                     <th className="px-4 py-3">Counted</th>
-                    <th className="px-4 py-3">State</th>
+                    <th className="px-4 py-3">Returned / remaining</th>
+                    <th className="px-4 py-3">Signed off</th>
                     <th className="px-4 py-3">
                       <span className="sr-only">Actions</span>
                     </th>
@@ -251,13 +275,28 @@ export function CustodyPage() {
                       <td className="px-4 py-3.5">
                         <CountedCell event={event} />
                       </td>
+                      <td className="px-4 py-3.5 text-[13px]">
+                        {event.direction === 'Intake' ? (
+                          <div>
+                            <p className="font-mono">{event.returnedCount ?? 0} / {event.reconciledCount ?? event.fileCount}</p>
+                            <p className="muted text-xs">{event.remainingCount ?? Math.max(0, (event.reconciledCount ?? 0) - (event.returnedCount ?? 0))} remaining</p>
+                          </div>
+                        ) : (
+                          <span className="font-mono">{event.fileCount} returned</span>
+                        )}
+                      </td>
                       <td className="px-4 py-3.5">
                         <StateCell event={event} />
                       </td>
                       <td className="px-4 py-3">
-                        {mayWrite && (
-                          <RowActions event={event} onCount={setCounting} onSign={setSigning} />
-                        )}
+                        <RowActions
+                          event={event}
+                          canWrite={mayWrite}
+                          onView={setViewing}
+                          onCount={setCounting}
+                          onSign={setSigning}
+                          onReturn={setReturning}
+                        />
                       </td>
                     </tr>
                   ))}
@@ -283,13 +322,22 @@ export function CustodyPage() {
                   <p className="muted mt-1 flex flex-wrap items-center gap-2 text-xs">
                     <span>Declared {event.fileCount}</span>
                     <CountedCell event={event} inline />
+                    {event.direction === 'Intake' && (
+                      <span>{event.returnedCount ?? 0} returned · {event.remainingCount ?? 0} remaining</span>
+                    )}
                   </p>
                   {event.remarks && <p className="muted mt-1 text-xs leading-5">{event.remarks}</p>}
-                  {mayWrite && (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <RowActions event={event} onCount={setCounting} onSign={setSigning} compact />
-                    </div>
-                  )}
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <RowActions
+                      event={event}
+                      canWrite={mayWrite}
+                      onView={setViewing}
+                      onCount={setCounting}
+                      onSign={setSigning}
+                      onReturn={setReturning}
+                      compact
+                    />
+                  </div>
                 </li>
               ))}
             </ul>
@@ -313,6 +361,57 @@ export function CustodyPage() {
             if (saved) setRecording(false);
           }}
         />
+      </Modal>
+
+      <Modal
+        open={viewing !== null}
+        onClose={() => setViewing(null)}
+        title={`Custody details · ${viewing?.batchRef ?? ''}`}
+        description="Full record of who entered, counted and signed off this custody event."
+      >
+        {viewing && (
+          <dl className="grid gap-3 sm:grid-cols-2">
+            <Detail label="Direction" value={viewing.direction} />
+            <Detail label="Department" value={viewing.department} />
+            <Detail label="Batch reference" value={viewing.batchRef || '—'} />
+            <Detail label="Vendor / agency" value={viewing.vendor || '—'} />
+            <Detail label="Declared files" value={String(viewing.fileCount)} />
+            <Detail label="Counted files" value={viewing.reconciledCount == null ? 'Not counted' : String(viewing.reconciledCount)} />
+            <Detail label="Recorded by" value={viewing.recordedBy} />
+            <Detail label="Recorded at" value={viewing.recordedAt} />
+            <Detail label="Counted by" value={viewing.reconciledBy || 'Not recorded'} />
+            <Detail label="Counted at" value={viewing.reconciledAt || 'Not recorded'} />
+            <Detail label="Signed off by" value={viewing.signedOffBy || 'Not signed off'} />
+            <Detail label="Signed off at" value={viewing.signedOffAt || 'Not signed off'} />
+            {viewing.parentEventId && <Detail label="Parent intake" value={viewing.parentEventId} />}
+            <Detail label="Returned files" value={String(viewing.returnedCount ?? 0)} />
+            <Detail label="Remaining files" value={String(viewing.remainingCount ?? 0)} />
+            <div className="sm:col-span-2">
+              <Detail label="Remarks" value={viewing.remarks || '—'} />
+            </div>
+          </dl>
+        )}
+      </Modal>
+
+      <Modal
+        open={returning !== null}
+        onClose={() => setReturning(null)}
+        title={`Record return · ${returning?.batchRef ?? ''}`}
+        description="Record a whole or partial return against this intake. The API prevents returning more than the outstanding count."
+      >
+        {returning && (
+          <ReturnForm
+            remaining={returning.remainingCount ?? Math.max(0, (returning.reconciledCount ?? 0) - (returning.returnedCount ?? 0))}
+            defaultSigner={user?.displayName ?? ''}
+            onDone={async (fileCount, signer, note) => {
+              const saved = await apply(
+                service.custody.recordReturn(returning.id, { fileCount, signedOffBy: signer, remarks: note }),
+                `Return of ${fileCount} file(s) recorded for ${returning.batchRef}.`,
+              );
+              if (saved) setReturning(null);
+            }}
+          />
+        )}
       </Modal>
 
       <Modal
@@ -561,27 +660,108 @@ function makeBatchReference(): string {
 
 const defaultBatchReference = makeBatchReference;
 
+function Detail({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg bg-[var(--rr-bg)] p-3">
+      <dt className="muted text-[10px] font-semibold uppercase tracking-wider">{label}</dt>
+      <dd className="mt-1 break-words text-sm font-medium">{value}</dd>
+    </div>
+  );
+}
+
+function ReturnForm({
+  remaining,
+  defaultSigner,
+  onDone,
+}: {
+  remaining: number;
+  defaultSigner: string;
+  onDone: (fileCount: number, signer: string, note: string) => Promise<void>;
+}) {
+  const [fileCount, setFileCount] = useState(String(remaining));
+  const [signer, setSigner] = useState(defaultSigner);
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const count = Number(fileCount);
+  const valid = Number.isInteger(count) && count > 0 && count <= remaining;
+
+  return (
+    <form
+      className="space-y-4"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!valid || busy) return;
+        setBusy(true);
+        void onDone(count, signer.trim(), note.trim()).finally(() => setBusy(false));
+      }}
+    >
+      <div className="rounded-lg bg-accent-soft p-3 text-sm">
+        <p className="font-semibold">{remaining} file(s) outstanding for this intake.</p>
+        <p className="muted mt-1 text-xs">Enter the number returned now. You can record the remaining files in a later partial return.</p>
+      </div>
+      <Field label="Files returned now" htmlFor="custody-return-count" required>
+        <TextInput
+          id="custody-return-count"
+          type="number"
+          min={1}
+          max={remaining}
+          value={fileCount}
+          onChange={(event) => setFileCount(event.target.value)}
+        />
+      </Field>
+      <Field label="Signed off by" htmlFor="custody-return-signer" required>
+        <TextInput
+          id="custody-return-signer"
+          value={signer}
+          onChange={(event) => setSigner(event.target.value)}
+        />
+      </Field>
+      <Field label="Remarks" htmlFor="custody-return-remarks">
+        <TextArea id="custody-return-remarks" value={note} onChange={(event) => setNote(event.target.value)} />
+      </Field>
+      <Button type="submit" disabled={!valid || !signer.trim() || busy} className="w-full">
+        {busy ? 'Saving return…' : 'Record return'}
+      </Button>
+    </form>
+  );
+}
+
 function RowActions({
   event,
+  canWrite,
+  onView,
   onCount,
   onSign,
+  onReturn,
   compact = false,
 }: {
   event: CustodyEvent;
+  canWrite: boolean;
+  onView: (event: CustodyEvent) => void;
   onCount: (event: CustodyEvent) => void;
   onSign: (event: CustodyEvent) => void;
+  onReturn: (event: CustodyEvent) => void;
   compact?: boolean;
 }) {
-  const closed = event.signedOffAt !== null;
-  const canCount = event.direction === 'Intake' && !closed;
-  const canSign = !closed;
-
-  if (closed || (!canCount && !canSign)) {
-    return <span className="muted text-xs">Closed</span>;
-  }
+  const closed = Boolean(event.signedOffAt);
+  const canCount = canWrite && event.direction === 'Intake' && !closed;
+  const remaining = event.remainingCount ?? Math.max(0, (event.reconciledCount ?? 0) - (event.returnedCount ?? 0));
+  const canReturn = canWrite && event.direction === 'Intake' && closed && remaining > 0;
+  const canSign = canWrite && !closed;
 
   return (
     <>
+      <Button
+        variant="ghost"
+        size="sm"
+        className={compact ? 'min-h-8 px-2 text-xs' : undefined}
+        icon={<Eye size={compact ? 14 : 16} />}
+        onClick={() => onView(event)}
+        aria-label={`View custody event ${event.id}`}
+        title="View full custody details"
+      >
+        {!compact && 'View'}
+      </Button>
       {canCount && (
         <Button
           variant="ghost"
@@ -593,15 +773,27 @@ function RowActions({
           Count…
         </Button>
       )}
-      <Button
-        variant="ghost"
-        size="sm"
-        className={compact ? 'min-h-8 px-3 text-xs' : undefined}
-        icon={<SealCheck size={compact ? 14 : 16} />}
-        onClick={() => onSign(event)}
-      >
-        Sign off…
-      </Button>
+      {canSign && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className={compact ? 'min-h-8 px-3 text-xs' : undefined}
+          icon={<SealCheck size={compact ? 14 : 16} />}
+          onClick={() => onSign(event)}
+        >
+          Sign off…
+        </Button>
+      )}
+      {canReturn && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className={compact ? 'min-h-8 px-3 text-xs' : undefined}
+          onClick={() => onReturn(event)}
+        >
+          Record return
+        </Button>
+      )}
     </>
   );
 }
