@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { CheckCircle, Scan, WarningCircle, XCircle } from '@phosphor-icons/react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
+import { CustodyPage } from './CustodyPage';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
@@ -19,6 +20,14 @@ import type { FileScan } from '../types';
 export function DigitizationPage() {
   const service = useService();
   const { allowed } = useSession();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState<'review' | 'custody'>(
+    searchParams.get('tab') === 'custody' ? 'custody' : 'review',
+  );
+  const selectTab = (tab: 'review' | 'custody') => {
+    setActiveTab(tab);
+    setSearchParams(tab === 'custody' ? { tab: 'custody' } : {});
+  };
 
   const [search, setSearch] = useState('');
   const [busyId, setBusyId] = useState('');
@@ -55,10 +64,33 @@ export function DigitizationPage() {
     <div className="space-y-7">
       <PageHeader
         kicker="Digitization"
-        title="Scan review queue"
+        title="Digitization"
         description="Every page scan awaiting review, across all files. Pages are added from their file; approving here marks the page complete for the registry."
       />
 
+      <nav className="flex gap-1 border-b border-base" aria-label="Digitization sections" role="tablist">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'review'}
+          onClick={() => selectTab('review')}
+          className={`-mb-px rounded-t-lg border-b-2 px-4 py-3 text-sm font-semibold transition ${activeTab === 'review' ? 'border-[var(--rr-accent)] bg-[var(--rr-accent)] !text-white dark:!text-[#0d1420]' : 'border-transparent muted hover:text-[var(--rr-text)]'}`}
+        >
+          Scan review queue
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'custody'}
+          onClick={() => selectTab('custody')}
+          className={`-mb-px rounded-t-lg border-b-2 px-4 py-3 text-sm font-semibold transition ${activeTab === 'custody' ? 'border-[var(--rr-accent)] bg-[var(--rr-accent)] !text-white dark:!text-[#0d1420]' : 'border-transparent muted hover:text-[var(--rr-text)]'}`}
+        >
+          Custody register
+        </button>
+      </nav>
+
+      {activeTab === 'review' ? (
+      <>
       <div className="grid gap-4 md:grid-cols-2">
         <Metric icon={<Scan />} label="In queue" value={String(queue.length)} />
         <Metric
@@ -157,6 +189,10 @@ export function DigitizationPage() {
           />
         )}
       </Modal>
+      </>
+      ) : (
+        <CustodyPage embedded />
+      )}
     </div>
   );
 }

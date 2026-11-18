@@ -658,7 +658,7 @@ export const httpEmployeesService: EmployeesApi = {
   },
 
   async departments() {
-    return list(await get<string[]>('/api/employees/departments'), str);
+    return list(await get<Dto[]>(`/api/departments${qs({ includeInactive: false })}`), (dto) => str(dto.name));
   },
 
   async listDepartments(includeInactive = true) {
