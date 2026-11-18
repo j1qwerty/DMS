@@ -74,7 +74,13 @@ public sealed class RecordFileDocumentsService(
             .FirstOrDefaultAsync(d => d.Id == documentId && d.RecordFileId == fileId, ct);
         if (row?.RecordFile is null) return null;
         var stream = await documentStore.OpenReadAsync(row.StorageKey, ct);
-        return stream is null ? null : new PrivateDocumentContent(row.OriginalFileName, row.ContentType, row.SizeBytes, row.Sha256, stream);
+        if (stream is null) return null;
+
+        await audit.LogAsync(db, AuditAction.Access, "RecordFileDocument", row.Id.ToString(),
+            "not accessed", $"opened version {row.Version}",
+            $"Viewed {row.OriginalFileName} v{row.Version} for file {row.RecordFile.FileNumber}", ct);
+        await db.SaveChangesAsync(ct);
+        return new PrivateDocumentContent(row.OriginalFileName, row.ContentType, row.SizeBytes, row.Sha256, stream);
     }
 
     /// <summary>Removes one stored scan version. Admin-only (enforced by the controller).</summary>
