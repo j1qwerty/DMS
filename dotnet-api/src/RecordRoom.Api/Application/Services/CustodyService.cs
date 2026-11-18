@@ -142,6 +142,9 @@ public sealed class CustodyService(
         if (custody.SignedOffAt is not null)
             return Result<CustodyEventDto>.Fail("This event is already signed off.");
 
+        if (custody.Direction == CustodyDirection.In && custody.ReconciledCount is null)
+            return Result<CustodyEventDto>.Fail("An intake must be counted and reconciled before sign-off.", "reconciledCount");
+
         custody.SignedOffBy = string.IsNullOrWhiteSpace(input.SignedOffBy)
             ? current.User?.DisplayName ?? current.UserName
             : input.SignedOffBy.Trim();
