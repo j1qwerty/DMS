@@ -58,6 +58,7 @@ const ACTION_ORDER: AuditAction[] = [
   'Approve',
   'Reject',
   'Export',
+  'Access',
 ];
 
 export const auditService: AuditApi = {
