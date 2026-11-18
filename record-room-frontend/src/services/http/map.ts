@@ -470,6 +470,8 @@ export function toStats(dto: Record<string, unknown>): DashboardStats {
     roomCount: num(dto.roomCount),
     activeBorrowers: num(dto.activeBorrowers),
     pendingApprovals: num(dto.pendingApprovals),
+    mappedBaselineConfigured: dto.mappedBaselineConfigured === true,
+    digitizationBaselineConfigured: dto.digitizationBaselineConfigured === true,
   };
 }
 
