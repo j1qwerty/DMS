@@ -410,7 +410,7 @@ export function FileDetailPage() {
                         onChange={(event) => setSizeDraft(event.target.value)}
                       >
                         <option value="">Inherit file size</option>
-                        {['A0', 'A1', 'A2', 'A3', 'A4', 'Other'].map((size) => (
+                        {['A0', 'A1', 'A2', 'A3', 'A4', 'Legal', 'Other'].map((size) => (
                           <option key={size} value={size}>
                             {size}
                           </option>
