@@ -1,4 +1,4 @@
-> **Superseded for final acceptance:** this phase sketch predates the final Zila Panchayat proposal. Use [`../ZILA_PANCHAYAT_CODEX.MD`](../ZILA_PANCHAYAT_CODEX.MD) for the binding 1.1–1.4 scope and implementation status. In particular, movement tracking, barcode center, support/inquiry, media manager and bulk import are retained but hidden by default. OCR, e-office transfer, scan-quality gates, PDF composition and digital handover are required pending work, not optional advanced-phase extras.
+> **Superseded for final acceptance:** this phase sketch predates the final Zila Panchayat proposal. Use [`../ZILA_PANCHAYAT_CODEX.MD`](../ZILA_PANCHAYAT_CODEX.MD) for the binding 1.1–1.4 scope and implementation status. In particular, movement tracking, barcode center, support/inquiry, media manager and bulk import are retained but hidden by default. OCR, e-office transfer, scan-quality gates and PDF composition are required pending work, not optional advanced-phase extras. Department application handover is a final project delivery/acceptance gate documented separately; it is not a user-facing app module.
 
 # Phased frontend and product scope
 
