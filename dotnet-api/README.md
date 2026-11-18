@@ -192,10 +192,9 @@ When barcode is **off**:
 Rows that carry only the internal id also carry `fileNumber` (issue lines, movements, digitization pages, map
 pages), and map pages carry `fileId`, so screens never need a barcode lookup.
 
-**Proposal gaps remain:** app-side storage and an e-office reference field do not
-constitute an e-office transfer. OCR extraction/full-text search, final PDF
-composition, measurable image-quality gates, per-side tracking and digital
-handover are still open. See the tracker before making any completion claim.
+**Digitisation output:** `POST /api/files/{fileId}/digitization/final-pdf` composes the latest approved scan version for each page side into a new private `FinalPdf` document version. Source scans remain unchanged; each generated document stores SHA-256 and a JSON source manifest. The endpoint requires `digitization.review`. The current composition path imports approved PDF pages and places supported JPEG/PNG/GIF scan images on their selected paper size; it does not yet provide reorder/rotation tooling, quality gates, OCR text layers or PDF/A certification.
+
+**Proposal gaps remain:** app-side storage and an e-office reference field do not constitute an e-office transfer. OCR extraction/indexing, image quality gates, digital handover/sign-off and final departmental PDF acceptance are still open. See the tracker before making any completion claim.
 
 ## Rooms
 
