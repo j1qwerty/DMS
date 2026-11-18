@@ -843,6 +843,55 @@ if (-not $SkipDestructive) {
         $packageStream.Dispose()
     }
 
+    $handoverAudit = Invoke-Api -Path "/api/audit?action=Export&entity=DigitalHandoverBatch&search=$($handover.Data.data.id)" -Token $admin
+    Assert-Equal 200 $handoverAudit.Status 'digital handover package export is auditable'
+    Assert-True (@($handoverAudit.Data.data.entries).Count -gt 0) 'downloading the package writes an Export audit entry'
+
+    # Exercise a real Department rejection separately from the acceptance flow.
+    $wrongDepartmentHandover = Invoke-Api -Method POST -Path '/api/digital-handovers' -Token $admin -Body @{
+        batchRef = "$handoverRef-WRONG-DEPT"
+        department = 'Different Department'
+        fileIds = @($newFileId)
+    }
+    Assert-Equal 400 $wrongDepartmentHandover.Status 'a handover cannot include a file from another Department'
+    $rejectedHandoverRef = "$handoverRef-REJECT"
+    $rejectedHandover = Invoke-Api -Method POST -Path '/api/digital-handovers' -Token $admin -Body @{
+        batchRef = $rejectedHandoverRef
+        department = $createdFile.Data.data.department
+        fileIds = @($newFileId)
+        notes = 'Smoke test rejection workflow.'
+    }
+    Assert-Equal 200 $rejectedHandover.Status 'a second handover can be prepared for rejection testing'
+    $rejectedDelivery = Invoke-Api -Method POST -Path "/api/digital-handovers/$($rejectedHandover.Data.data.id)/deliver" -Token $admin -Body @{}
+    Assert-Equal 200 $rejectedDelivery.Status 'the rejection-test package can be marked delivered'
+    $actualRejection = Invoke-Api -Method POST -Path "/api/digital-handovers/$($rejectedHandover.Data.data.id)/sign-off" -Token $admin -Body @{
+        decision = 'Rejected'; signedOffBy = 'Department Nodal Officer'; notes = 'One file needs rescanning.'
+    }
+    Assert-Equal 200 $actualRejection.Status 'the Department can reject a delivered digital handover'
+    Assert-Equal 'Rejected' $actualRejection.Data.data.status 'the rejection state is recorded'
+    Assert-Equal 'Department Nodal Officer' $actualRejection.Data.data.signedOffBy 'the rejecting representative is persisted'
+    Assert-True ($null -ne $actualRejection.Data.data.signedOffAt) 'the rejection is timestamped'
+    $rejectedAgain = Invoke-Api -Method POST -Path "/api/digital-handovers/$($rejectedHandover.Data.data.id)/sign-off" -Token $admin -Body @{
+        decision = 'Accepted'; signedOffBy = 'Department Nodal Officer'; notes = 'Changed mind'
+    }
+    Assert-Equal 400 $rejectedAgain.Status 'a rejected handover cannot be re-signed as accepted'
+    $rejectedPackage = Invoke-Download -Path "/api/digital-handovers/$($rejectedHandover.Data.data.id)/package" -Token $admin
+    Assert-Equal 200 $rejectedPackage.Status 'a rejected handover package remains downloadable'
+    $rejectedZipStream = [System.IO.MemoryStream]::new($rejectedPackage.Bytes)
+    $rejectedZip = [System.IO.Compression.ZipArchive]::new($rejectedZipStream, [System.IO.Compression.ZipArchiveMode]::Read, $true)
+    try {
+        $receiptStream = $rejectedZip.GetEntry('handover-receipt.json').Open()
+        $receiptReader = [System.IO.StreamReader]::new($receiptStream)
+        try { $rejectedReceipt = $receiptReader.ReadToEnd() }
+        finally { $receiptReader.Dispose(); $receiptStream.Dispose() }
+        Assert-True ($rejectedReceipt -match '"status":"Rejected"') 'the exported receipt records Department rejection'
+        Assert-True ($rejectedReceipt -match 'Department Nodal Officer') 'the exported receipt identifies the rejecting representative'
+    }
+    finally {
+        $rejectedZip.Dispose()
+        $rejectedZipStream.Dispose()
+    }
+
     $supRemoveApproved = Invoke-Api -Method DELETE -Path "/api/scans/$($page2.Data.data.id)" -Token $supervisorToken
     Assert-Equal 400 $supRemoveApproved.Status 'a supervisor cannot remove an approved scan'
     $adminRemoveApproved = Invoke-Api -Method DELETE -Path "/api/scans/$($page2.Data.data.id)" -Token $admin
