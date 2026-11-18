@@ -72,10 +72,12 @@ public sealed class FileScansService(
         if (file is null) return Result<FileScanPageDto>.Fail("File not found.", "fileId");
         if (input.PageNo < 1) return Result<FileScanPageDto>.Fail("Page number starts at 1.", "pageNo");
 
-        var size = input.DocumentSize is { Length: > 0 } given
-            ? given.Trim().ToUpperInvariant()
-            : file.DocumentSize;
-        if (!DocumentSizes.Contains(size))
+        var requestedSize = string.IsNullOrWhiteSpace(input.DocumentSize)
+            ? file.DocumentSize
+            : input.DocumentSize.Trim();
+        var size = DocumentSizes.FirstOrDefault(candidate =>
+            candidate.Equals(requestedSize, StringComparison.OrdinalIgnoreCase));
+        if (size is null)
             return Result<FileScanPageDto>.Fail("Choose one of A0, A1, A2, A3, A4, Legal or Other.", "documentSize");
 
         var side = string.IsNullOrWhiteSpace(input.Side) ? "Front" : input.Side.Trim();
