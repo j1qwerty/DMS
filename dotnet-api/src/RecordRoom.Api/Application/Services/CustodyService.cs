@@ -83,6 +83,10 @@ public sealed class CustodyService(
         var department = input.Department.Trim();
         if (department.Length == 0)
             return Result<CustodyEventDto>.Fail("Department is required.", "department");
+        if (Display.ParseCustody(input.Direction) is { } requestedDirection
+            && requestedDirection == CustodyDirection.In
+            && !await db.Departments.AnyAsync(item => item.Active && item.Name == department, ct))
+            return Result<CustodyEventDto>.Fail("Choose an active department from the department directory.", "department");
 
         if (input.FileCount < 1)
             return Result<CustodyEventDto>.Fail("File count must be at least 1.", "fileCount");

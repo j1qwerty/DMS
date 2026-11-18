@@ -57,6 +57,28 @@ public static class DatabaseSeeder
         }
         await db.SaveChangesAsync(ct);
 
+        // The directory is a master for future file, employee and custody entries.
+        // Seed it before the rest of the demo records so all forms use the same
+        // department codes rather than continuing to infer names from transactions.
+        var departmentNames = await db.Employees.AsNoTracking()
+            .Select(employee => employee.Department).Distinct().OrderBy(name => name).ToArrayAsync(ct);
+        for (var index = 0; index < departmentNames.Length; index++)
+        {
+            var name = departmentNames[index];
+            if (!await db.Departments.AnyAsync(department => department.Name == name, ct))
+            {
+                db.Departments.Add(new Department
+                {
+                    Code = $"DEPT-{index + 1:D6}",
+                    Name = name,
+                    Active = true,
+                    CreatedAt = DateTime.UtcNow,
+                    ModifiedAt = DateTime.UtcNow,
+                });
+            }
+        }
+        await db.SaveChangesAsync(ct);
+
         foreach (var (userName, display, role, empCode, active) in new[]
         {
             ("admin", "Farida Begum", Role.Admin, "EMP0006", true),

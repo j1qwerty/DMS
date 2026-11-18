@@ -93,6 +93,8 @@ public sealed class DepartmentsService(AppDbContext db, IAuditWriter audit) : ID
             }
             var custody = await db.CustodyEvents.Where(item => item.Department == previousName).ToListAsync(ct);
             foreach (var item in custody) item.Department = name;
+            var issues = await db.Issues.Where(item => item.Department == previousName).ToListAsync(ct);
+            foreach (var item in issues) item.Department = name;
         }
 
         await audit.LogAsync(db, AuditAction.Update, "Department", id.ToString(), before,

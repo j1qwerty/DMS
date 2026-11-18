@@ -293,7 +293,8 @@ public sealed class FilesService(
     }
 
     public async Task<string[]> DepartmentsAsync(CancellationToken ct = default) =>
-        await db.Files.AsNoTracking().Select(f => f.Department).Distinct().OrderBy(d => d).ToArrayAsync(ct);
+        await db.Departments.AsNoTracking().Where(department => department.Active)
+            .OrderBy(department => department.Name).Select(department => department.Name).ToArrayAsync(ct);
 
     public async Task<int> CountAsync(CancellationToken ct = default) => await db.Files.CountAsync(ct);
 
@@ -327,8 +328,11 @@ public sealed class FilesService(
             errors.Add(new FieldError("Subject is required.", "subject"));
         if (!string.IsNullOrWhiteSpace(input.EOfficeReference) && input.EOfficeReference.Trim().Length > 200)
             errors.Add(new FieldError("E-office reference must be 200 characters or fewer.", "eOfficeReference"));
-        if (string.IsNullOrWhiteSpace(input.Department))
+        var departmentName = input.Department?.Trim() ?? string.Empty;
+        if (departmentName.Length == 0)
             errors.Add(new FieldError("Department is required.", "department"));
+        else if (!await db.Departments.AnyAsync(department => department.Active && department.Name == departmentName, ct))
+            errors.Add(new FieldError("Select an active department from the department directory.", "department"));
         if (input.Year is < 1800 or > 2200)
             errors.Add(new FieldError("Enter a four-digit year.", "year"));
 

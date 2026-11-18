@@ -89,6 +89,10 @@ public sealed class EmployeesService(AppDbContext db, IAuditWriter audit) : IEmp
             return Result<EmployeeDto>.Fail("Employee name is required.", "name");
         if (!string.IsNullOrWhiteSpace(input.Mobile) && !Regex.IsMatch(input.Mobile.Trim(), @"^\d{10}$"))
             return Result<EmployeeDto>.Fail("Mobile must be 10 digits.", "mobile");
+        var departmentName = input.Department?.Trim() ?? string.Empty;
+        if (departmentName.Length == 0 || !await db.Departments.AnyAsync(
+            department => department.Active && department.Name == departmentName, ct))
+            return Result<EmployeeDto>.Fail("Choose an active department from the department directory.", "department");
 
         var now = DateTime.UtcNow;
         var employee = new Employee
@@ -136,6 +140,11 @@ public sealed class EmployeesService(AppDbContext db, IAuditWriter audit) : IEmp
         }
         if (!string.IsNullOrWhiteSpace(input.Mobile) && !Regex.IsMatch(input.Mobile.Trim(), @"^\d{10}$"))
             return Result<EmployeeDto>.Fail("Mobile must be 10 digits.", "mobile");
+        var departmentName = input.Department?.Trim() ?? employee.Department;
+        if (!string.Equals(departmentName, employee.Department, StringComparison.Ordinal)
+            && (departmentName.Length == 0 || !await db.Departments.AnyAsync(
+                department => department.Active && department.Name == departmentName, ct)))
+            return Result<EmployeeDto>.Fail("Choose an active department from the department directory.", "department");
 
         var before = $"{employee.EmployeeCode} - {employee.Status}";
         employee.EmployeeCode = code;
