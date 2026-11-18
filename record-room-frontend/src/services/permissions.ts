@@ -17,6 +17,9 @@ export const PERMISSIONS = [
   'files.create',
   'files.edit',
   'files.bulkImport',
+  'files.documentDelete',
+  'custody.view',
+  'custody.manage',
   'issue.issue',
   'issue.return',
   'locations.view',
@@ -47,6 +50,8 @@ const matrix: Record<Role, readonly Permission[]> = {
     'issue.return',
     'locations.view',
     'locations.edit',
+    'custody.view',
+    'custody.manage',
     'digitization.view',
     'digitization.upload',
     'digitization.review',
@@ -63,6 +68,7 @@ const matrix: Record<Role, readonly Permission[]> = {
     'files.create',
     'issue.issue',
     'issue.return',
+    'custody.view',
     'locations.view',
     'digitization.view',
     'digitization.upload',
@@ -70,7 +76,7 @@ const matrix: Record<Role, readonly Permission[]> = {
     'reports.view',
     'barcodes.print',
   ],
-  Employee: ['files.view', 'digitization.view', 'reports.view'],
+  Employee: ['files.view', 'digitization.view', 'reports.view', 'custody.view'],
 };
 
 export function can(role: Role | undefined, permission: Permission): boolean {
