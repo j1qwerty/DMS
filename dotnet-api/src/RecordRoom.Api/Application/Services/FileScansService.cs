@@ -46,7 +46,7 @@ public sealed class FileScansService(
     IFileRefs fileRefs,
     ILogger<FileScansService> logger) : IFileScansService
 {
-    private static readonly string[] DocumentSizes = ["A0", "A1", "A2", "A3", "A4", "Other"];
+    private static readonly string[] DocumentSizes = ["A0", "A1", "A2", "A3", "A4", "Legal", "Other"];
 
     private static FileScanPageDto ToPage(FileScanPage p, int fileId) => new(
         p.Id, fileId, p.Barcode, p.FileName, p.PageNo, p.Version, p.DocumentSize,
@@ -76,7 +76,7 @@ public sealed class FileScansService(
             ? given.Trim().ToUpperInvariant()
             : file.DocumentSize;
         if (!DocumentSizes.Contains(size))
-            return Result<FileScanPageDto>.Fail("Choose one of A0, A1, A2, A3, A4 or Other.", "documentSize");
+            return Result<FileScanPageDto>.Fail("Choose one of A0, A1, A2, A3, A4, Legal or Other.", "documentSize");
 
         // Legacy duplicate-page rule, kept per file: the same file and page
         // re-scanned becomes the next version rather than overwriting an
