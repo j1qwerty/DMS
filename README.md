@@ -6,9 +6,14 @@ an *additional section inside the same app* for the physical files behind the
 documents: issue / return / movement, rooms and shelves, and barcodes. It is built
 for ~25 lakh files.
 
-Barcode features belong to the Record Room section only and can be switched off with
-one setting (default on). See `docs/BARCODE-SWITCH.md`. Open work, including the
-API changes still to do, is tracked in `docs/TODO-DMS-RECORDROOM.md`.
+The final Zila Panchayat proposal is the acceptance authority for this branch.
+The clause-by-clause work plan, implemented gaps, pending integrations, department
+inputs and tests are tracked in `ZILA_PANCHAYAT_CODEX.MD`. Current scope is not
+complete: e-office transfer, OCR search, scan PDF composition, quality gates,
+server permission-matrix enforcement and digital handover remain open.
+
+Barcode and other retained non-scope modules are hidden by default, not deleted.
+See `docs/BARCODE-SWITCH.md` and the final-scope tracker.
 
 ## Repository layout
 
@@ -17,7 +22,8 @@ API changes still to do, is tracked in `docs/TODO-DMS-RECORDROOM.md`.
 | `record-room-frontend/` | Complete React + TypeScript frontend, API-backed in `http` mode |
 | `jhs_digitization-og-php-app/` | Legacy CodeIgniter PHP app — reference-only, do not edit |
 | `dotnet-api/` | .NET 10 + SQL Server backend implementing the frontend service contract |
-| `docs/` | PRD, scope, architecture, data model, frontend spec, QA, security, gap report |
+| `ZILA_PANCHAYAT_CODEX.MD` | Final proposal traceability, implementation status, missing features, dependencies and acceptance tests |
+| `docs/` | PRD, architecture, data model, frontend spec, QA, security and engineering notes (read with the final-scope tracker) |
 
 ## Where to start
 
