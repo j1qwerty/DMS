@@ -268,7 +268,8 @@ export type AuditAction =
   | 'Relocate'
   | 'Approve'
   | 'Reject'
-  | 'Export';
+  | 'Export'
+  | 'Access';
 
 export interface AuditEntry {
   id: string;
