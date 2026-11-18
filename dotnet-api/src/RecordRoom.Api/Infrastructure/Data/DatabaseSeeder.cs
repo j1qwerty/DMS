@@ -62,20 +62,27 @@ public static class DatabaseSeeder
         // department codes rather than continuing to infer names from transactions.
         var departmentNames = await db.Employees.AsNoTracking()
             .Select(employee => employee.Department).Distinct().OrderBy(name => name).ToArrayAsync(ct);
-        for (var index = 0; index < departmentNames.Length; index++)
+        var nextDepartmentCode = 1;
+        foreach (var name in departmentNames)
         {
-            var name = departmentNames[index];
-            if (!await db.Departments.AnyAsync(department => department.Name == name, ct))
+            if (await db.Departments.AnyAsync(department => department.Name == name, ct))
+                continue;
+
+            string code;
+            do
             {
-                db.Departments.Add(new Department
-                {
-                    Code = $"DEPT-{index + 1:D6}",
-                    Name = name,
-                    Active = true,
-                    CreatedAt = DateTime.UtcNow,
-                    ModifiedAt = DateTime.UtcNow,
-                });
+                code = $"DEPT-{nextDepartmentCode++:D6}";
             }
+            while (await db.Departments.AnyAsync(department => department.Code == code, ct));
+
+            db.Departments.Add(new Department
+            {
+                Code = code,
+                Name = name,
+                Active = true,
+                CreatedAt = DateTime.UtcNow,
+                ModifiedAt = DateTime.UtcNow,
+            });
         }
         await db.SaveChangesAsync(ct);
 
