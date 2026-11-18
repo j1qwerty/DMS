@@ -60,6 +60,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasIndex(x => x.Name).IsUnique();
             e.Property(x => x.Code).HasMaxLength(32).IsRequired();
             e.Property(x => x.Name).HasMaxLength(128).IsRequired();
+            e.Property(x => x.Active).HasDefaultValue(true);
         });
 
         b.Entity<LoginHistoryEntry>(e =>

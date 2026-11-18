@@ -44,9 +44,6 @@ const ScanPage = lazy(() => import('./pages/ScanPage').then((m) => ({ default: m
 const DigitizationPage = lazy(() =>
   import('./pages/DigitizationPage').then((m) => ({ default: m.DigitizationPage })),
 );
-const CustodyPage = lazy(() =>
-  import('./pages/CustodyPage').then((m) => ({ default: m.CustodyPage })),
-);
 const ReportsPage = lazy(() =>
   import('./pages/ReportsPage').then((m) => ({ default: m.ReportsPage })),
 );
@@ -63,9 +60,6 @@ const EmployeesPage = lazy(() =>
 );
 const DepartmentsPage = lazy(() =>
   import('./admin/DepartmentsPage').then((m) => ({ default: m.DepartmentsPage })),
-);
-const LocationsPage = lazy(() =>
-  import('./admin/LocationsPage').then((m) => ({ default: m.LocationsPage })),
 );
 const BulkImportPage = lazy(() =>
   import('./admin/BulkImportPage').then((m) => ({ default: m.BulkImportPage })),
