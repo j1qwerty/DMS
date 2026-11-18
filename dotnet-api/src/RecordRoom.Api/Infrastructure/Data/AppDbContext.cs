@@ -182,7 +182,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.ContentType).HasMaxLength(100);
             e.Property(x => x.Sha256).HasMaxLength(64);
             e.Property(x => x.DocumentSize).HasMaxLength(8);
-            e.HasIndex(x => new { x.Barcode, x.PageNo, x.Version }).IsUnique();
+            e.Property(x => x.Side).HasMaxLength(8);
+            e.HasIndex(x => new { x.Barcode, x.PageNo, x.Side, x.Version }).IsUnique();
             e.HasIndex(x => x.Status);
             e.HasOne(x => x.RecordFile).WithMany(x => x.ScanPages).HasForeignKey(x => x.Barcode)
                 .HasPrincipalKey(x => x.Barcode).OnDelete(DeleteBehavior.Restrict);
