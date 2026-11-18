@@ -138,6 +138,7 @@ public class UploadsController(IUploadsService uploads) : ControllerBase
 
 [ApiController]
 [Route("api/bulk")]
+[RequireOptionalFeature(OptionalProductFeature.BulkImport)]
 [Authorize]
 [Produces("application/json")]
 [Tags("Bulk")]
