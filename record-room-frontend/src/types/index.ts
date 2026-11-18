@@ -377,8 +377,8 @@ export interface DigitalHandoverBatch {
   preparedAt: string;
   deliveredBy?: string | null;
   deliveredAt?: string | null;
-  acceptedBy?: string | null;
-  acceptedAt?: string | null;
+  signedOffBy?: string | null;
+  signedOffAt?: string | null;
   decisionNotes: string;
   items: DigitalHandoverItem[];
 }
