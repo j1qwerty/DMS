@@ -364,7 +364,7 @@ public sealed class DigitalHandoverService(
     private static string Csv(string value)
     {
         var safe = value.Replace("\r", " ").Replace("\n", " ");
-        return $"\\\"{safe.Replace("\\\"", "\\\"\\\"")}\\\"";
+        return $"\"{safe.Replace("\"", "\"\"")}\";
     }
 
     private static string SafePart(string value)
