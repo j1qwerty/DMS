@@ -34,7 +34,7 @@ A route, button, database field, or mock adapter alone is not evidence that an e
 | Document-open audit events | DONE / TEST NOT RUN | Opening file attachments, digitisation scan content and map scan content writes an `Access` audit event. New enum value `Access = 11` is appended without renumbering existing values. |
 | Intake reconciliation before sign-off | DONE / TEST NOT RUN | An inbound custody event cannot be signed off until a reconciliation count exists. |
 | Legal document-size option | DONE / TEST NOT RUN | Legal added alongside A0/A1/A2/A3/A4/Other in the file and scan size validation/UI. |
-| Dashboard metric corrections | PARTIAL / TEST ADDED | Mapped percentage counts files with a shelf placement; due counts count outstanding file-lines, not receipts; digitisation percentage counts approved PDF pages against an agreed expected-page baseline. The denominator remains to be finalized and configured. |
+| Dashboard metric corrections | PARTIAL / TEST ADDED | Mapped percentage counts files with a shelf placement; due counts count outstanding file-lines, not receipts; digitisation percentage counts approved PDF pages against an agreed expected-page baseline. The denominator remains to be finalized and configured. |\n| Metadata full-text search | PARTIAL / TEST ADDED | Added a SQL Server Full-Text catalog/index migration for registry metadata; API uses `CONTAINS` when the index is active and falls back to the existing search if Full-Text Search is unavailable. |
 | Automated and live verification | PENDING | The GitHub source changes were committed through repository access. A clean local checkout, .NET build/test, pnpm checks, live SQL Server API harness and API-contract test have not yet been observed as passing on this branch. |
 
 ## 3. Final proposal 1.1 — DMS software
@@ -55,7 +55,7 @@ A route, button, database field, or mock adapter alone is not evidence that an e
 | 1.1.12 | Upload digitized documents to e-office | App-side private document storage, versioning, SHA-256 and content view/download exist. File metadata includes optional e-office reference, searchable/filterable in the registry. There is no real e-office transfer/API integration yet. | PARTIAL / BLOCKED | Department to supply interface specs, endpoint/network access, authentication, file-size/type rules, acknowledgement ID, retry policy, and test environment. Then implement real upload, transfer state, idempotency and reconciliation. An e-office reference field alone is not an upload. |
 | 1.1.13 | Retain reference copy in this application | Private versioned file storage retains the original upload with content metadata/hash. | DONE for in-app copy | Verify backup/restore, storage encryption, access policy, retention, and consistency between SQL metadata and blob storage. |
 | 1.1.14 | Provide/configure/integrate digitized files into the DMS | Registry metadata, file-level document attachments, scan pages and content endpoints exist. | PARTIAL | Complete the scan-to-document workflow, generated PDF, metadata links, review approval and secure in-app reader. Confirm production storage location, maximum volume, backup and migration procedures. |
-| 1.1.15 | Search digitized data | Registry search currently covers indexed metadata such as file number, subject, department, location, holder and e-office reference. | PARTIAL | Add SQL Server full-text search over approved metadata fields, relevance ranking, pagination, filters and query plans suitable for 25-lakh-scale registry. |
+| 1.1.15 | Search digitized data | Registry search now has a conditional SQL Server Full-Text catalog/index over file number, subject, department, location, area, e-office reference, property fields, holder and description. The API uses `CONTAINS` with bounded prefix terms when the index is active; if Full-Text Search is not installed, the prior metadata search remains available. | PARTIAL | Execute/verify the migration on the target SQL Server with Full-Text Search installed; confirm indexing/population and Hindi-English relevance with the Department; add relevance ranking and realistic 25-lakh-row query/load tests. Date metadata remains to be agreed and added if needed. |
 | 1.1.16 | Search OCR text of digitized documents | OCR text extraction and indexing are not implemented. Existing search does not search PDF/image contents. | PENDING / BLOCKED | Complete OCR engine POC on approximately 100 representative departmental scans (including faded/stamped/carbon-copy records), get approval, persist OCR text with page/source references, and include it in permission-filtered full-text search. No cloud OCR without written government approval. |
 | 1.1.17 | Audit access/change/upload and timestamps | Change/upload writes are audited; file, scan and map content opening now writes `Access`. | PARTIAL / TEST ADDED | Verify every read path, report/export, image preview, download and bulk operation. Access audit must identify actor, document ID/version, action and timestamp. |
 
@@ -150,7 +150,7 @@ Implementation rules:
 | Audit integrity | PARTIAL | Protect audit data against user update/delete; verify all CRUD, access and export actions. |
 | SQL Server data integrity | PARTIAL | Verify migrations, unique constraints, transaction handling and concurrency for issue/return, file upload/version and custody/handover. |
 | Private storage | PARTIAL | Verify encryption, file type/size validation, malware scanning, backup/restore and DB/blob consistency. |
-| Search scale | PENDING | SQL Server FTS, query-plan review and realistic load test against agreed volume. |
+| Search scale | PARTIAL | Metadata SQL Server FTS index/query path implemented with fallback; OCR-text indexing, ranking/query-plan review and realistic load test remain. |
 | OCR | PENDING | POC on real representative scans, on-prem deployment and permission-filtered indexing. |
 | PDF generation | PENDING | Ordered scan pages to PDF with page count, render validation and versioned derivative. |
 | Image quality | PENDING | DPI, skew, contrast, blur, blank-page, crop and orientation checks. |
@@ -169,7 +169,7 @@ Implementation rules:
 | Disabled optional feature filter returns 404; enabled one passes | `FeatureSwitchTests.cs` | TEST ADDED / NOT RUN |
 | Access audit action appended without changing existing enum values | `FeatureSwitchTests.cs` | TEST ADDED / NOT RUN |
 | Opening a digitisation scan writes an Access audit event | `scripts/test-api.ps1` | TEST ADDED / NOT RUN |
-| Opening a file attachment writes an Access audit event | `scripts/test-api.ps1` | TEST ADDED / NOT RUN |
+| Opening a file attachment writes an Access audit event | `scripts/test-api.ps1` | TEST ADDED / NOT RUN |\n| Plain user input is safely tokenized into bounded SQL Server full-text prefix terms | `dotnet-api/tests/RecordRoom.Api.Tests/FullTextSearchConditionTests.cs` | TEST ADDED / NOT RUN |
 | Intake sign-off before reconciliation is rejected | `scripts/test-api.ps1` | TEST ADDED / NOT RUN |
 | Legal-size scan page accepted and size retained | `scripts/test-api.ps1` | TEST ADDED / NOT RUN |\n| Front and Back sides accepted independently at the same page number; invalid sides rejected; version numbers are independent | `scripts/test-api.ps1`, `record-room-frontend/tests/features-and-rooms.test.ts` | TEST ADDED / NOT RUN |
 | E-office-linked file can be found via link filter and reference search | `scripts/test-api.ps1` | TEST ADDED / NOT RUN |
@@ -181,7 +181,7 @@ Implementation rules:
 | Test group | Required scenarios |
 |---|---|
 | Permission matrix | For every endpoint/action, Admin/Supervisor/Operator/Employee allowed and denied matrix; direct HTTP calls; file read/download/export; no role escalation; disabled account; no self-lockout. |
-| Search | Metadata search, exact file number, department/date filters, OCR body-text search after OCR is added, pagination, permissions, SQL FTS query plan and large-volume performance. |
+| Search | Metadata search, exact file number, department/date filters, OCR body-text search after OCR is added, pagination, permissions, SQL FTS index availability/fallback, Hindi-English matching, query plan and large-volume performance. |
 | e-office | Successful transfer, credential failure, timeout, duplicate/retry idempotency, partial failure, provider rejection, receipt/reference persistence, source checksum match. |
 | Scanning | A0/A1/A2/A3/A4/Legal; front/back side identity and separate versioning; image and PDF uploads; page order; duplicate/rescan versions; corrupted/unsupported/oversized file rejection. |
 | Scan Studio/PDF | Reorder, rotate, replace, insert, delete, preserve original, compose PDF, check page count, alignment/crop, PDF open/render, derivative version. |
@@ -234,7 +234,7 @@ pnpm vitest run tests/api-contract.test.ts
 | P1 | Scan page-side and manifest | Front/back side, unique page-side identity, batch item manifest and physical exceptions | Page manifest reconciles with intake file count and page-side counts. |
 | P1 | Digital handover | Delivery batches, metadata export, checksums and department sign-off | Signed end-to-end acceptance on a sample batch. |
 | P1 | e-office integration | External transfer, acknowledgement and retries | Interface access/approval supplied; successful and failure-path integration tests. |
-| P1 | Metadata search + SQL FTS | Approved metadata and scale-ready indexing | Search acceptance on agreed dataset and query performance. |
+| P1 | Complete metadata search acceptance | Confirm metadata dictionary/date fields, SQL FTS active on target SQL Server, relevance and 25-lakh-row performance | Search acceptance on agreed dataset and query performance. |
 | P2 | OCR POC and production pipeline | On-prem OCR, representative sample, searchable text | Department-approved POC and OCR accuracy threshold. |
 | P2 | Scan Studio and PDF composition | Image gallery, page operations, original preservation, PDF output | End-to-end sample PDF accepted. |
 | P2 | Image quality gates | DPI, skew, contrast, blur, blank-page, crop and orientation checks | Measured criteria approved; failed images require correction/rescan. |
