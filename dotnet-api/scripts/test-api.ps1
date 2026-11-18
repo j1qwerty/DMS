@@ -723,7 +723,15 @@ if (-not $SkipDestructive) {
     Assert-Equal 200 $finalPdf.Status 'approved page-side images can be composed into a final PDF'
     Assert-Equal 'FinalPdf' $finalPdf.Data.data.documentKind 'the derivative is identified separately from source attachments'
     Assert-Equal 2 $finalPdf.Data.data.pageCount 'the final PDF contains the approved Front and Back sides'
-    Assert-True ($finalPdf.Data.data.sha256 -match '^[A-Fa-f0-9]{64}
+    Assert-True ($finalPdf.Data.data.sha256 -match '^[A-Fa-f0-9]{64}$') 'the final PDF stores a SHA-256 checksum'
+
+    $finalContent = Invoke-Api -Path "/api/files/$newFileId/documents/$($finalPdf.Data.data.id)/content" -Token $admin -Raw
+    Assert-Equal 200 $finalContent.Status 'the final PDF is available through authenticated document content'
+    $sourceAfterCompose = Invoke-Api -Path "/api/files/$newFileId/scans" -Token $admin
+    Assert-True (@($sourceAfterCompose.Data.data | Where-Object { $_.id -eq $page2.Data.data.id -and $_.hasDocument }).Count -eq 1) 'the Front source scan remains stored after composition'
+    Assert-True (@($sourceAfterCompose.Data.data | Where-Object { $_.id -eq $backPage1.Data.data.id -and $_.hasDocument }).Count -eq 1) 'the Back source scan remains stored after composition'
+
+    $supRemoveApproved = Invoke-Api -Method DELETE -Path "/api/scans/$($page2.Data.data.id)" -Token $supervisorToken
     Assert-Equal 400 $supRemoveApproved.Status 'a supervisor cannot remove an approved scan'
     $adminRemoveApproved = Invoke-Api -Method DELETE -Path "/api/scans/$($page2.Data.data.id)" -Token $admin
     Assert-Equal 200 $adminRemoveApproved.Status 'an admin can remove an approved scan'
