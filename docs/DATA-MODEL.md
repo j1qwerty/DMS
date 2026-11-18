@@ -1,3 +1,5 @@
+> **Final scope authority:** the current entity model is not yet the complete final proposal data model. Front/back page-side identity, item-level custody manifests, OCR text/page references and digital handover package/sign-off records remain to be implemented as detailed in [`../ZILA_PANCHAYAT_CODEX.MD`](../ZILA_PANCHAYAT_CODEX.MD).
+
 # Data model
 
 ## Core entities
