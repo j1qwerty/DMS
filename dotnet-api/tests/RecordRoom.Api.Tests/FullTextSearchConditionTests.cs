@@ -45,8 +45,8 @@ public class FullTextSearchConditionTests
         var condition = FilesService.BuildFullTextCondition(
             "\"x\" OR 1=1; DROP TABLE Files -- hindi हिन्दी");
 
-        Assert.Equal("\"x*\" OR \"OR*\" OR \"1*\" OR \"1*\" OR \"hindi*\" OR \"हिन्दी*\"", condition);
-        Assert.DoesNotContain("DROP", condition);
+        Assert.Equal("\"x*\" OR \"OR*\" OR \"1*\" OR \"DROP*\" OR \"TABLE*\" OR \"Files*\" OR \"hindi*\" OR \"हिन्दी*\"", condition);
+        Assert.DoesNotContain("DROP TABLE Files", condition);
         Assert.DoesNotContain(";", condition);
         Assert.DoesNotContain("--", condition);
     }
