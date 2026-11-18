@@ -1,7 +1,9 @@
+using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using RecordRoom.Api.Application.Contracts;
 using RecordRoom.Api.Domain;
 using RecordRoom.Api.Infrastructure.Auth;
+using RecordRoom.Api.Infrastructure.Cache;
 using RecordRoom.Api.Infrastructure.Data;
 using RecordRoom.Api.Infrastructure.Features;
 
@@ -45,9 +47,50 @@ public sealed class FilesService(
     ICurrentUserAccessor current,
     IPrivateDocumentStore documentStore,
     IFeatureFlags flags,
+    ICacheService cache,
     ILogger<FilesService> logger) : IFilesService
 {
     private const int MaxPosition = 100;
+    private static readonly Regex SearchTokenPattern = new(@"[\p{L}\p{Nd}]+", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// Creates a safe CONTAINS condition from plain user input. Terms are
+    /// treated as prefixes and OR-combined; raw SQL full-text syntax is never accepted.
+    /// </summary>
+    public static string? BuildFullTextCondition(string? search)
+    {
+        if (string.IsNullOrWhiteSpace(search)) return null;
+        var terms = SearchTokenPattern.Matches(search.Trim())
+            .Select(match => match.Value)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(12)
+            .ToArray();
+        return terms.Length == 0
+            ? null
+            : string.Join(" OR ", terms.Select(term => $"\"{term}*\""));
+    }
+
+    private async Task<bool> IsFullTextIndexReadyAsync(CancellationToken ct)
+    {
+        var connection = db.Database.GetDbConnection();
+        var cacheKey = $"Search:FullTextReady:{connection.DataSource}:{connection.Database}";
+        return await cache.GetOrCreateAsync(cacheKey, TimeSpan.FromMinutes(10), async () =>
+        {
+            try
+            {
+                return await db.Database.SqlQueryRaw<bool>(
+                    "SELECT CONVERT(bit, CASE WHEN FULLTEXTSERVICEPROPERTY('IsFullTextInstalled') = 1 " +
+                    "AND OBJECTPROPERTYEX(OBJECT_ID(N'dbo.Files'), N'TableHasActiveFulltextIndex') = 1 " +
+                    "THEN 1 ELSE 0 END) AS [Value]")
+                    .SingleAsync(ct);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "SQL Server full-text search is unavailable; using the metadata fallback.");
+                return false;
+            }
+        });
+    }
 
     private static string Stamp(DateTime value) =>
         value.ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture);
@@ -92,23 +135,42 @@ public sealed class FilesService(
 
         if (!string.IsNullOrWhiteSpace(q.Search))
         {
-            // D1 (work plan §2.1): case-insensitivity comes from the database
-            // collation, not from LOWER(column) — wrapping the column side in a
-            // function disables every IX_Files_* seek. Identity tokens
-            // (barcode, file number, e-office reference) match as a prefix so
-            // the indexes can serve a seek; free-text columns (subject,
-            // department, location, area, holder) keep substring semantics
-            // until the full-text index takes them over (§3.1).
             var needle = q.Search.Trim();
-            query = query.Where(f =>
-                f.Barcode.StartsWith(needle)
-                || f.FileNumber.StartsWith(needle)
-                || f.Subject.Contains(needle)
-                || f.Department.Contains(needle)
-                || f.LocationDisplay.Contains(needle)
-                || f.Area.Contains(needle)
-                || (f.EOfficeReference != null && f.EOfficeReference.StartsWith(needle))
-                || (f.Holder != null && f.Holder.Contains(needle)));
+            var fullTextCondition = BuildFullTextCondition(needle);
+            var fullTextReady = fullTextCondition is not null && await IsFullTextIndexReadyAsync(ct);
+
+            if (fullTextReady)
+            {
+                // Identity prefixes remain seekable. Descriptive metadata uses
+                // the SQL Server linguistic full-text index.
+                query = query.Where(f =>
+                    f.Barcode.StartsWith(needle)
+                    || f.FileNumber.StartsWith(needle)
+                    || (f.EOfficeReference != null && f.EOfficeReference.StartsWith(needle))
+                    || EF.Functions.Contains(f.FileNumber, fullTextCondition!)
+                    || EF.Functions.Contains(f.Subject, fullTextCondition!)
+                    || EF.Functions.Contains(f.Department, fullTextCondition!)
+                    || EF.Functions.Contains(f.LocationDisplay, fullTextCondition!)
+                    || EF.Functions.Contains(f.Area, fullTextCondition!)
+                    || (f.EOfficeReference != null && EF.Functions.Contains(f.EOfficeReference, fullTextCondition!))
+                    || (f.Holder != null && EF.Functions.Contains(f.Holder, fullTextCondition!))
+                    || EF.Functions.Contains(f.Description, fullTextCondition!));
+            }
+            else
+            {
+                // SQL Server Express/instances without the optional Full-Text
+                // component retain the existing metadata search behavior.
+                query = query.Where(f =>
+                    f.Barcode.StartsWith(needle)
+                    || f.FileNumber.StartsWith(needle)
+                    || f.Subject.Contains(needle)
+                    || f.Department.Contains(needle)
+                    || f.LocationDisplay.Contains(needle)
+                    || f.Area.Contains(needle)
+                    || (f.EOfficeReference != null && f.EOfficeReference.StartsWith(needle))
+                    || (f.Holder != null && f.Holder.Contains(needle))
+                    || f.Description.Contains(needle));
+            }
         }
 
         if (!string.IsNullOrWhiteSpace(q.Department) && q.Department != "All")
