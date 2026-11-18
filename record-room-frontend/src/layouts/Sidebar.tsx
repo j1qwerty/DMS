@@ -6,19 +6,14 @@ import {
   Files,
   Gauge,
   Gear,
-  Handshake,
-  MapTrifold,
-  Question,
   ShieldCheck,
-  SignOut,
-  Stack,
   X,
 } from '@phosphor-icons/react';
 import type { Icon } from '@phosphor-icons/react';
 import { cn } from '../lib/utils';
 import { useSession } from '../hooks/useService';
 import { can, type Permission } from '../services/permissions';
-import { APP_NAME, RECORD_ROOM_SECTION } from '../lib/brand';
+import { APP_NAME } from '../lib/brand';
 import { useFeatures, type Features } from '../lib/features';
 
 interface NavItem {
@@ -38,47 +33,36 @@ interface NavItem {
  * section in the same menu. Related screens are reached from tabs on the page itself,
  * so the menu stays short.
  */
-const groups: Array<{ title: string; items: NavItem[] }> = [
+export const navigationGroups: Array<{ title: string; items: NavItem[] }> = [
+  { title: 'Overview', items: [{ label: 'Overview', to: '/overview', icon: Gauge }] },
   {
     title: 'Document management',
     items: [
       { label: 'Documents', to: '/files', icon: Files, also: ['/search'] },
-      { label: 'Maps', to: '/maps', icon: MapTrifold, permission: 'files.view' },
-      { label: 'Scan review', to: '/digitization', icon: Archive, also: ['/custody'] },
-      { label: 'Custody register', to: '/custody', icon: Handshake, permission: 'custody.view' },
-      { label: 'Reports', to: '/reports', icon: ChartBar, permission: 'reports.view' },
-    ],
-  },
-  {
-    title: RECORD_ROOM_SECTION,
-    items: [
+      { label: 'Digitization', to: '/digitization', icon: Archive, also: ['/custody'] },
       {
         label: 'Issue & return',
         to: '/issue',
         icon: ClipboardText,
         also: ['/return', '/movement', '/scan'],
       },
-      { label: 'Rooms & shelves', to: '/rooms', icon: Stack, also: ['/barcodes'] },
+      { label: 'Reports', to: '/reports', icon: ChartBar, permission: 'reports.view' },
     ],
   },
   {
     title: 'Manage',
     items: [
-      { label: 'Overview', to: '/overview', icon: Gauge },
       {
         label: 'Administration',
         to: '/admin',
         icon: ShieldCheck,
-        anyOf: ['users.view', 'employees.view', 'locations.view', 'files.bulkImport', 'audit.view'],
+        anyOf: ['users.view', 'employees.view', 'departments.manage', 'audit.view'],
       },
     ],
   },
 ];
 
-const footerLinks: NavItem[] = [
-  { label: 'Help & support', to: '/support', icon: Question, feature: 'support' },
-  { label: 'Settings', to: '/settings', icon: Gear },
-];
+const footerLinks: NavItem[] = [{ label: 'Settings', to: '/settings', icon: Gear }];
 
 export function BrandMark({ size = 36 }: { size?: number }) {
   return (
@@ -93,7 +77,7 @@ export function BrandMark({ size = 36 }: { size?: number }) {
 
 export function Sidebar({ mobileOpen, onClose }: { mobileOpen: boolean; onClose: () => void }) {
   const location = useLocation();
-  const { user, signOut } = useSession();
+  const { user } = useSession();
   const features = useFeatures();
 
   const permitted = (item: NavItem) =>
@@ -101,7 +85,7 @@ export function Sidebar({ mobileOpen, onClose }: { mobileOpen: boolean; onClose:
       ? item.anyOf.some((permission) => can(user?.role, permission))
       : !item.permission || can(user?.role, item.permission);
 
-  const visibleGroups = groups
+  const visibleGroups = navigationGroups
     .map((group) => ({
       ...group,
       items: group.items.filter((item) => (!item.feature || features[item.feature]) && permitted(item)),
@@ -123,7 +107,7 @@ export function Sidebar({ mobileOpen, onClose }: { mobileOpen: boolean; onClose:
         className={cn(
           'focus-ring flex min-h-11 items-center gap-3 rounded-lg px-3 text-[15px] transition',
           active
-            ? 'bg-accent-soft font-semibold text-accent'
+            ? 'bg-[var(--rr-accent)] font-semibold !text-white dark:!text-[#0d1420]'
             : 'muted hover:bg-[var(--rr-surface-2)] hover:text-[var(--rr-text)]',
         )}
       >
@@ -179,26 +163,7 @@ export function Sidebar({ mobileOpen, onClose }: { mobileOpen: boolean; onClose:
           <div className="space-y-0.5">{footerLinks
               .filter((item) => !item.feature || features[item.feature])
               .map(link)}</div>
-          <div className="mt-3 flex items-center gap-3 rounded-lg bg-[var(--rr-bg)] p-2.5">
-            <div className="grid size-9 shrink-0 place-items-center rounded-full bg-[var(--rr-accent)] text-sm font-bold text-white dark:text-[#0d1420]">
-              {(user?.displayName ?? '?').slice(0, 1).toUpperCase()}
-            </div>
-            <div className="min-w-0 flex-1 leading-tight">
-              <p className="truncate text-[13px] font-semibold">
-                {user?.displayName ?? 'Signed out'}
-              </p>
-              <p className="muted truncate text-xs">{user?.role}</p>
-            </div>
-            <button
-              type="button"
-              onClick={signOut}
-              className="focus-ring muted grid size-9 place-items-center rounded-lg transition-colors hover:bg-[var(--rr-danger)] hover:text-white"
-              aria-label="Sign out"
-              title="Sign out"
-            >
-              <SignOut size={18} />
-            </button>
-          </div>
+
         </div>
       </aside>
     </>

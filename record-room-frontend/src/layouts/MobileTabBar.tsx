@@ -4,8 +4,7 @@ import {
   ClipboardText,
   DotsThree,
   Files,
-  MapTrifold,
-  ScanSmiley,
+  Gauge,
 } from '@phosphor-icons/react';
 import type { Icon } from '@phosphor-icons/react';
 import { cn } from '../lib/utils';
@@ -23,10 +22,9 @@ interface Tab {
 }
 
 const tabs: Tab[] = [
+  { label: 'Overview', to: '/overview', icon: Gauge },
   { label: 'Documents', to: '/files', icon: Files },
-  { label: 'Maps', to: '/maps', icon: MapTrifold, permission: 'files.view' },
-  { label: 'Scan', to: '/scan', icon: ScanSmiley, barcode: 'on' },
-  { label: 'Review', to: '/digitization', icon: Archive, barcode: 'off' },
+  { label: 'Digitization', to: '/digitization', icon: Archive },
   { label: 'Issue', to: '/issue', icon: ClipboardText, permission: 'issue.issue' },
 ];
 

@@ -7,18 +7,18 @@
 
 .DESCRIPTION
     No browser involved. Starts nothing itself: point -BaseUrl at a running API
-    (dotnet run) or let it use http://localhost:5199.
+    (dotnet run) or let it use http://localhost:5198.
 
     Exits non-zero on the first failed assertion so CI can gate on it.
 
 .EXAMPLE
     pwsh scripts/test-api.ps1
 .EXAMPLE
-    pwsh scripts/test-api.ps1 -BaseUrl http://localhost:5199 -Verbose
+    pwsh scripts/test-api.ps1 -BaseUrl http://localhost:5198 -Verbose
 #>
 [CmdletBinding()]
 param(
-    [string] $BaseUrl = 'http://localhost:5199',
+    [string] $BaseUrl = 'http://localhost:5198',
     [string] $AdminUser = 'admin',
     [string] $AdminPassword = 'Demo@12345',
     [switch] $SkipDestructive

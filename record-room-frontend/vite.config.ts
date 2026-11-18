@@ -27,7 +27,7 @@ export default defineConfig({
     }),
   ],
   server: {
-    port: 5173,
+    port: 5172,
     strictPort: true,
     // Dev-only convenience: proxying /api and /hubs to the deployed API keeps the
     // browser on one origin, so a developer does not need the API to list

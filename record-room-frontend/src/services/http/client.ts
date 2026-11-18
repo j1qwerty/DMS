@@ -15,7 +15,7 @@
 
 import { err, ok, type FieldIssue, type Result } from '../contracts';
 
-const BASE = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5199').replace(/\/+$/, '');
+const BASE = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5198').replace(/\/+$/, '');
 const TOKEN_KEY = 'rr-token';
 
 /** Thrown for transport-level failures and non-2xx responses. */

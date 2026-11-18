@@ -7,7 +7,7 @@ import { useFeatures } from '../lib/features';
 const adminNav: Array<{ to: string; label: string; permission: Permission }> = [
   { to: '/admin/users', label: 'Users & roles', permission: 'users.view' },
   { to: '/admin/employees', label: 'Employees', permission: 'employees.view' },
-  { to: '/admin/locations', label: 'Room layout', permission: 'locations.view' },
+  { to: '/admin/departments', label: 'Departments', permission: 'departments.manage' },
   { to: '/admin/bulk-import', label: 'Bulk import', permission: 'files.bulkImport' },
   { to: '/admin/audit', label: 'Audit & logins', permission: 'audit.view' },
 ];
@@ -40,7 +40,7 @@ export function AdminLayout() {
                 cn(
                   'focus-ring -mb-px min-h-11 shrink-0 rounded-t-lg border-b-2 px-4 text-sm font-semibold leading-[44px] transition',
                   isActive
-                    ? 'border-[var(--rr-accent)] text-accent'
+                    ? 'border-[var(--rr-accent)] bg-[var(--rr-accent)] !text-white dark:!text-[#0d1420]'
                     : 'muted border-transparent hover:text-[var(--rr-text)]',
                 )
               }
