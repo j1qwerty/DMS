@@ -9,8 +9,15 @@ import { findFileByInput } from '../src/lib/fileKey';
 
 async function freshFeatures(env?: string) {
   vi.resetModules();
-  if (env === undefined) vi.unstubAllEnvs();
-  else vi.stubEnv('VITE_ENABLE_BARCODE', env);
+  vi.unstubAllEnvs();
+  if (env !== undefined) vi.stubEnv('VITE_ENABLE_BARCODE', env);
+  return import('../src/lib/features');
+}
+
+async function freshFeatureSet(values: Record<string, string>) {
+  vi.resetModules();
+  vi.unstubAllEnvs();
+  for (const [key, value] of Object.entries(values)) vi.stubEnv(key, value);
   return import('../src/lib/features');
 }
 
@@ -20,9 +27,29 @@ describe('barcode feature switch', () => {
     vi.unstubAllGlobals();
   });
 
-  it('is on by default', async () => {
+  it('keeps all retained optional modules hidden by default', async () => {
     const { getFeatures } = await freshFeatures();
-    expect(getFeatures().barcode).toBe(true);
+    expect(getFeatures()).toEqual({
+      barcode: false,
+      movement: false,
+      support: false,
+      bulkImport: false,
+    });
+  });
+
+  it('can explicitly enable retained features independently', async () => {
+    const { getFeatures } = await freshFeatureSet({
+      VITE_ENABLE_BARCODE: 'true',
+      VITE_ENABLE_MOVEMENT: '1',
+      VITE_ENABLE_SUPPORT: 'false',
+      VITE_ENABLE_BULK_IMPORT: 'on',
+    });
+    expect(getFeatures()).toEqual({
+      barcode: true,
+      movement: true,
+      support: false,
+      bulkImport: true,
+    });
   });
 
   it.each(['false', '0', 'off', 'no', 'disabled', 'FALSE', ' Off '])(
@@ -38,14 +65,29 @@ describe('barcode feature switch', () => {
     expect(getFeatures().barcode).toBe(true);
   });
 
-  it('lets the API setting override the build-time value', async () => {
-    const { getFeatures, loadRuntimeFeatures } = await freshFeatures('true');
+  it('lets every API feature setting override the build-time value', async () => {
+    const { getFeatures, loadRuntimeFeatures } = await freshFeatureSet({
+      VITE_ENABLE_BARCODE: 'false',
+      VITE_ENABLE_MOVEMENT: 'false',
+      VITE_ENABLE_SUPPORT: 'true',
+      VITE_ENABLE_BULK_IMPORT: 'false',
+    });
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue({ ok: true, json: async () => ({ features: { barcode: false } }) }),
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          features: { barcode: true, movement: true, support: false, bulkImport: true },
+        }),
+      }),
     );
     await loadRuntimeFeatures('http://api.test/');
-    expect(getFeatures().barcode).toBe(false);
+    expect(getFeatures()).toEqual({
+      barcode: true,
+      movement: true,
+      support: false,
+      bulkImport: true,
+    });
     expect(fetch).toHaveBeenCalledWith('http://api.test/api/config', expect.anything());
   });
 
