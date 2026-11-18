@@ -395,6 +395,10 @@ Assert-Equal 200 $createdFile.Status 'a valid file is created'
 $newFileId = $createdFile.Data.data.id
 Assert-Equal $newBarcode $createdFile.Data.data.fileBarcode 'the created file keeps its barcode'
 Assert-Equal 'Available' $createdFile.Data.data.status 'a new file starts Available'
+Assert-Equal 'ZP-EFILE-SMOKE-001' $createdFile.Data.data.eOfficeReference 'the optional e-office reference is saved'
+$eOfficeLinked = Invoke-Api -Path '/api/files?eOfficeStatus=Linked&search=ZP-EFILE-SMOKE-001' -Token $admin
+Assert-Equal 200 $eOfficeLinked.Status 'the file register can filter e-office-linked records'
+Assert-True (@($eOfficeLinked.Data.data.items | Where-Object { $_.id -eq $newFileId }).Count -eq 1) 'the e-office-linked filter returns the referenced file'
 
 $relocated = Invoke-Api -Method POST -Path "/api/files/$newFileId/relocate" -Token $admin -Body @{
     shelfId = $activeShelf.id; position = 30; reason = 'Smoke test relocation'
@@ -555,6 +559,14 @@ $badSize = Invoke-Api -Method POST -Path "/api/files/$newFileId/scans" -Token $a
 Assert-Equal 400 $badSize.Status 'an unknown document size is refused'
 
 if (-not $SkipDestructive) {
+    $legalPage = Invoke-Api -Method POST -Path "/api/files/$newFileId/scans" -Token $admin -Body @{
+        fileName = ''; pageNo = 4; documentSize = 'Legal'
+    }
+    Assert-Equal 200 $legalPage.Status 'Legal-size pages are accepted for scanning'
+    Assert-Equal 'Legal' $legalPage.Data.data.documentSize 'Legal size is preserved in scan metadata'
+}
+
+if (-not $SkipDestructive) {
     # Pages are registered as metadata rows; the scanned image follows as its
     # own version. The re-scan of the same page becomes the next version.
     $page1 = Invoke-Api -Method POST -Path "/api/files/$newFileId/scans" -Token $admin -Body @{
@@ -632,7 +644,7 @@ if (-not $SkipDestructive) {
         decision = 'Approved'; note = ''
     }
     Assert-Equal 200 $reviewAll.Status 'every pending page of a file can be approved at once'
-    Assert-Equal 1 $reviewAll.Data.data 'the bulk review reports how many pages moved'
+    Assert-Equal 2 $reviewAll.Data.data 'the bulk review reports each pending page, including the Legal-size page'
     $reviewAllAgain = Invoke-Api -Method POST -Path "/api/files/$newFileId/scans/review-all" -Token $admin -Body @{
         decision = 'Approved'; note = ''
     }
