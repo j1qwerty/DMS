@@ -22,6 +22,7 @@ import type {
   BarcodeSubject,
   BulkImportJob,
   CustodyEvent,
+  DigitalHandoverBatch,
   DashboardStats,
   Employee,
   FileCreateInput,
@@ -374,6 +375,25 @@ export interface CustodyApi {
   signOff(id: string, signedOffBy?: string): Promise<Result<CustodyEvent>>;
 }
 
+/** API workflow for immutable digital deliverables and Department acceptance. */
+export interface DigitalHandoverApi {
+  list(): Promise<DigitalHandoverBatch[]>;
+  prepare(input: {
+    batchRef: string;
+    department: string;
+    fileIds: number[];
+    notes?: string;
+  }): Promise<Result<DigitalHandoverBatch>>;
+  markDelivered(id: string): Promise<Result<DigitalHandoverBatch>>;
+  signOff(
+    id: string,
+    decision: 'Accepted' | 'Rejected',
+    signedOffBy: string,
+    notes?: string,
+  ): Promise<Result<DigitalHandoverBatch>>;
+  packageBlob(id: string): Promise<Blob>;
+}
+
 // ----------------------------------------------------------------- upload map
 
 export interface UploadsApi {
@@ -496,6 +516,7 @@ export interface RecordRoomService {
   employees: EmployeesApi;
   digitization: ScanApi;
   custody: CustodyApi;
+  digitalHandovers: DigitalHandoverApi;
   uploads: UploadsApi;
   bulk: BulkApi;
   audit: AuditApi;
