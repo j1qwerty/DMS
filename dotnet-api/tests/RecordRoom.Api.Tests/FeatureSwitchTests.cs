@@ -10,6 +10,7 @@ using RecordRoom.Api.Application;
 using RecordRoom.Api.Application.Services;
 using RecordRoom.Api.Infrastructure.Features;
 using RecordRoom.Api.Infrastructure.Auth;
+using RecordRoom.Api.Domain;
 
 namespace RecordRoom.Api.Tests;
 
