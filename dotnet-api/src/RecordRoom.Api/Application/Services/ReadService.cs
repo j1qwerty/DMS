@@ -159,21 +159,28 @@ public sealed class ReadService(AppDbContext db, ICacheService cache, IFileRefs 
                 .Where(p => p.Status == PageStatus.Approved)
                 .SumAsync(p => (int?)(p.PageCount ?? 1), ct) ?? 0;
 
-            // Mapping is physical placement on an identified shelf, not merely
-            // existence in SQL. The denominator remains the agreed legacy registry.
-            const long total = 2_478_450;
+            // The Department must approve this denominator. Until then, a
+            // percentage would imply a completed volume survey that has not happened.
+            var expectedFiles = long.TryParse(configuration["Scope:ExpectedFileCount"], out var configuredFiles)
+                ? Math.Max(configuredFiles, 0)
+                : 0;
+            var loadedFiles = await db.Files.LongCountAsync(ct);
+            var total = expectedFiles > 0 ? expectedFiles : loadedFiles;
             var mappedFiles = await db.Files.CountAsync(f => f.ShelfId != null, ct);
-            var mapped = Math.Round((double)mappedFiles / total * 100, 1);
+            var mappedBaselineConfigured = expectedFiles > 0;
+            var mapped = mappedBaselineConfigured
+                ? Math.Min(100, Math.Round((double)mappedFiles / expectedFiles * 100, 1))
+                : 0;
 
-            // The department must finalize the total page volume before production.
-            // Without that baseline the percentage is deliberately 0, not a
-            // misleading approval-rate ratio based only on uploaded pages.
-            var expectedPages = int.TryParse(configuration["Scope:ExpectedPageCount"], out var configuredPages)
+            // The Department must also finalize the total page volume. Uploaded
+            // PDFs contribute their parsed physical page count, not one row.
+            var expectedPages = long.TryParse(configuration["Scope:ExpectedPageCount"], out var configuredPages)
                 ? Math.Max(configuredPages, 0)
                 : 0;
-            var digitizationPercent = expectedPages == 0
-                ? 0
-                : Math.Min(100, Math.Round((double)approved / expectedPages * 100, 1));
+            var digitizationBaselineConfigured = expectedPages > 0;
+            var digitizationPercent = digitizationBaselineConfigured
+                ? Math.Min(100, Math.Round((double)approved / expectedPages * 100, 1))
+                : 0;
 
             return new DashboardStatsDto(
                 total,
@@ -184,7 +191,9 @@ public sealed class ReadService(AppDbContext db, ICacheService cache, IFileRefs 
                 overdue,
                 rooms,
                 borrowers,
-                pending);
+                pending,
+                mappedBaselineConfigured,
+                digitizationBaselineConfigured);
         });
 
     public Task<ActivityDto[]> ActivityAsync(int limit, CancellationToken ct) =>
