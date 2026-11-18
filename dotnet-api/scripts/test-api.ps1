@@ -712,6 +712,19 @@ if (-not $SkipDestructive) {
     Assert-Equal $ocrText $ocrRead.Data.data.text 'the OCR text is stored without losing Unicode characters'
     $ocrSearch = Invoke-Api -Path '/api/files?search=ZPOCRSMOKE2026A&pageSize=10' -Token $admin
     Assert-True (@($ocrSearch.Data.data.items | Where-Object { $_.id -eq $newFileId }).Count -eq 1) 'registry search can find a file through its completed page OCR text'
+    $ocrFailed = Invoke-Api -Method PUT -Path "/api/scans/$($page2.Data.data.id)/ocr" -Token $admin -Body @{
+        status = 'Failed'; error = 'Test extraction timeout'
+    }
+    Assert-Equal 200 $ocrFailed.Status 'an OCR retry failure can be recorded'
+    $ocrAfterFailure = Invoke-Api -Path "/api/scans/$($page2.Data.data.id)/ocr" -Token $admin
+    Assert-Equal 'Failed' $ocrAfterFailure.Data.data.status 'failed retry status is visible'
+    Assert-Equal $ocrText $ocrAfterFailure.Data.data.text 'a failed OCR retry does not delete the last successful text'
+    $ocrSearchAfterFailure = Invoke-Api -Path '/api/files?search=ZPOCRSMOKE2026A&pageSize=10' -Token $admin
+    Assert-Equal 0 $ocrSearchAfterFailure.Data.data.total 'failed OCR results are not used for registry search'
+    $ocrRetried = Invoke-Api -Method PUT -Path "/api/scans/$($page2.Data.data.id)/ocr" -Token $admin -Body @{
+        status = 'Completed'; text = $ocrText; language = 'hin+eng'; engine = 'verified-import-test'
+    }
+    Assert-Equal 200 $ocrRetried.Status 'a successful OCR retry restores searchable status'
     $ocrAccessAudit = Invoke-Api -Path "/api/audit?action=Access&entity=FileScanPageOcr&search=$($page2.Data.data.id)" -Token $admin
     Assert-Equal 200 $ocrAccessAudit.Status 'OCR text access audit can be queried'
     Assert-True (@($ocrAccessAudit.Data.data.entries).Count -gt 0) 'opening OCR text writes an access audit event'
