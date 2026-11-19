@@ -144,12 +144,12 @@ public sealed class FileScansService(
     /// through tesseract, so the upload request stores the document, marks the
     /// page "Processing" and returns immediately. The job rasterizes and OCRs
     /// the stored bytes, writes the text and lands the page on its real status
-    /// (`targetStatus`, captured here because a rescan can be a duplicate).
-    /// The UI hears "page.processed" on the digitization channel and refreshes.
+    /// (duplicate when an active version of the page exists, pending review
+    /// otherwise). The UI hears "page.processed" on the digitization channel
+    /// and refreshes.
     /// </summary>
-    private void QueueOcr(FileScanPage page, PageStatus targetStatus) =>
-        backgroundJobs.Enqueue<ScanProcessingJobs>(
-            job => job.ExtractOcrAsync(page.Id, (int)targetStatus));
+    private void QueueOcr(FileScanPage page) =>
+        backgroundJobs.Enqueue<ScanProcessingJobs>(job => job.ExtractOcrAsync(page.Id));
 
     public async Task<Result<FileScanPageDto>> AddDocumentAsync(
         long scanId, Microsoft.AspNetCore.Http.IFormFile? document, CancellationToken ct = default)
@@ -187,10 +187,8 @@ public sealed class FileScansService(
             page.Sha256 = stored.Sha256;
             page.PageCount = stored.PageCount;
             page.Dpi = stored.Dpi;
-            // The page keeps whatever status it was registered with, shows
-            // "Processing" while the background OCR pass runs, and lands back
-            // on that status when the pass finishes.
-            var existingTargetStatus = page.Status;
+            // "Processing" while the background OCR pass runs; it lands back on
+            // the page's real status when the pass finishes.
             page.Status = PageStatus.Processing;
             await audit.LogAsync(db, AuditAction.Update, "FileScanPage", page.Id.ToString(),
                 beforeFile,
@@ -206,7 +204,7 @@ public sealed class FileScansService(
             catch { await TryDeleteAsync(stored.StorageKey); throw; }
             await audit.AnnounceAsync(RealtimeChannels.Digitization, "page.added", page.Id.ToString(),
                 $"{stored.OriginalFileName} attached to {page.Barcode} page {page.PageNo}");
-            QueueOcr(page, existingTargetStatus);
+            QueueOcr(page);
             var fileForRow = await db.Files.AsNoTracking().FirstAsync(f => f.Barcode == page.Barcode, ct);
             return Result<FileScanPageDto>.Ok(
                 (await fileRefs.EnrichAsync(new[] { ToPage(page, fileForRow.Id) }, ct))[0]);
@@ -215,9 +213,6 @@ public sealed class FileScansService(
         var version = (await db.ScanPages.AsNoTracking()
             .Where(p => p.Barcode == page.Barcode && p.PageNo == page.PageNo)
             .Select(p => (int?)p.Version).MaxAsync(ct) ?? 0) + 1;
-        var hasActive = await db.ScanPages.AnyAsync(p =>
-            p.Barcode == page.Barcode && p.PageNo == page.PageNo && p.Status == PageStatus.Active, ct);
-        var targetStatus = version > 1 && hasActive ? PageStatus.Duplicate : PageStatus.PendingReview;
         var rescan = new FileScanPage
         {
             Barcode = page.Barcode, FileName = stored.OriginalFileName,
@@ -244,7 +239,7 @@ public sealed class FileScansService(
         catch { await TryDeleteAsync(stored.StorageKey); throw; }
         await audit.AnnounceAsync(RealtimeChannels.Digitization, "page.added", rescan.Id.ToString(),
             $"{stored.OriginalFileName} added as version {version}");
-        QueueOcr(rescan, targetStatus);
+        QueueOcr(rescan);
         var fileId = await db.Files.AsNoTracking().Where(f => f.Barcode == page.Barcode)
             .Select(f => (int?)f.Id).FirstOrDefaultAsync(ct) ?? 0;
         return Result<FileScanPageDto>.Ok((await fileRefs.EnrichAsync(new[] { ToPage(rescan, fileId) }, ct))[0]);

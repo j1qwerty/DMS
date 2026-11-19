@@ -38,10 +38,17 @@ const PDF_OPTIONS = {
   cMapUrl: '/cmaps/',
   standardFontDataUrl: '/standard_fonts/',
   wasmUrl: '/wasm/',
+  verbosity: 0,
 } as const;
 
-/** Filmstrip thumbnails get expensive past this many pages; numbers take over. */
-const THUMB_LIMIT = 80;
+function isPdfFile(name: string, mime?: string): boolean {
+  if (mime) {
+    if (mime.includes('pdf')) return true;
+    if (mime.startsWith('image/')) return false;
+  }
+  const ext = name.split('.').pop()?.toLowerCase();
+  return ext !== 'png' && ext !== 'jpg' && ext !== 'jpeg' && ext !== 'gif' && ext !== 'webp';
+}
 
 interface SearchHit {
   page: number;
@@ -84,6 +91,7 @@ export function PageOcrViewer({
   const [currentPage, setCurrentPage] = useState(1);
   const [scale, setScale] = useState(1);
   const [showOcr, setShowOcr] = useState(false);
+  const [isPdf, setIsPdf] = useState(true);
 
   const [query, setQuery] = useState('');
   const [searching, setSearching] = useState(false);
@@ -93,12 +101,6 @@ export function PageOcrViewer({
 
   const pdfRef = useRef<PDFDocumentProxy | null>(null);
   const textCache = useRef(new Map<number, string>());
-
-  useEffect(() => {
-    const onResize = () => setWide(window.innerWidth >= 768);
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, []);
 
   const [prevDocKey, setPrevDocKey] = useState(docKey);
   if (prevDocKey !== docKey) {
@@ -110,6 +112,12 @@ export function PageOcrViewer({
     setResults(null);
   }
 
+  useEffect(() => {
+    const onResize = () => setWide(window.innerWidth >= 768);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
   // Blob lifecycle: one object URL per docKey, revoked on change/unmount.
   useEffect(() => {
     let live = true;
@@ -119,10 +127,15 @@ export function PageOcrViewer({
     load()
       .then((blob) => {
         if (!live) return;
+        const pdf = isPdfFile(filename, blob.type);
+        setIsPdf(pdf);
         created = URL.createObjectURL(
-          blob.type ? blob : new Blob([blob], { type: 'application/pdf' }),
+          blob.type ? blob : new Blob([blob], { type: pdf ? 'application/pdf' : 'image/jpeg' }),
         );
         setUrl(created);
+        if (!pdf) {
+          setNumPages(1);
+        }
       })
       .catch(() => {
         if (live) setFailed(true);
@@ -132,7 +145,7 @@ export function PageOcrViewer({
       if (created) URL.revokeObjectURL(created);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [docKey]);
+  }, [docKey, filename]);
 
   // OCR text per rendered page: several scan rows can carry one PDF page range;
   // the latest version wins, page order follows pageIndex ?? pageNo.
@@ -209,7 +222,6 @@ export function PageOcrViewer({
     setScale((current) => Math.min(2.5, Math.max(0.5, Math.round((current + delta) * 10) / 10)));
 
   const pageLabel = numPages > 0 ? `${currentPage} / ${numPages}` : '—';
-  const showThumbs = numPages > 0 && numPages <= THUMB_LIMIT;
   const ocrTextOfCurrent = ocrByPage.get(currentPage)?.trim() ?? '';
 
   const thumbButton = (pageNo: number, children: ReactNode) => (
@@ -226,16 +238,6 @@ export function PageOcrViewer({
       )}
     >
       {children}
-      <span
-        className={cn(
-          'absolute bottom-0.5 right-0.5 rounded px-1 text-[10px] font-bold',
-          currentPage === pageNo
-            ? 'bg-[var(--rr-accent-fill)] text-white'
-            : 'bg-[var(--rr-surface)] text-[var(--rr-muted)]',
-        )}
-      >
-        {pageNo}
-      </span>
     </button>
   );
 
@@ -251,21 +253,10 @@ export function PageOcrViewer({
       {Array.from({ length: numPages }, (_, index) => index + 1).map((pageNo) =>
         thumbButton(
           pageNo,
-          showThumbs ? (
-            <div className="h-[86px] w-[64px] overflow-hidden rounded bg-[var(--rr-surface-2)]">
-              <Page
-                pageNumber={pageNo}
-                width={62}
-                renderTextLayer={false}
-                renderAnnotationLayer={false}
-                className="!mx-auto !my-0"
-              />
-            </div>
-          ) : (
-            <span className="grid h-10 w-10 place-items-center text-sm font-semibold">
-              {pageNo}
-            </span>
-          ),
+          <div className="flex h-12 w-14 flex-col items-center justify-center rounded bg-[var(--rr-surface-2)]">
+            <span className="text-[9px] uppercase tracking-wider text-[var(--rr-muted)]">Page</span>
+            <span className="text-sm font-bold text-[var(--rr-text)]">{pageNo}</span>
+          </div>,
         ),
       )}
     </div>
@@ -472,6 +463,15 @@ export function PageOcrViewer({
             {!url ? (
               <div className="grid h-72 w-full max-w-sm animate-pulse place-items-center rounded-xl bg-[var(--rr-bg)] text-xs muted">
                 Loading document…
+              </div>
+            ) : !isPdf ? (
+              <div className="grid min-h-[400px] w-full place-items-center overflow-auto">
+                <img
+                  src={url}
+                  alt={filename}
+                  style={{ transform: `scale(${scale})`, transformOrigin: 'top center' }}
+                  className="max-h-[80vh] max-w-full rounded shadow-sm object-contain transition-transform"
+                />
               </div>
             ) : (
               <Document

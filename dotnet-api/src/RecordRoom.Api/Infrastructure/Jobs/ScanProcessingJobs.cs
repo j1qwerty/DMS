@@ -24,12 +24,13 @@ public class ScanProcessingJobs(
     ILogger<ScanProcessingJobs> logger)
 {
     /// <summary>
-    /// Extracts the text of one stored scan page. `targetStatus` is the status
-    /// the page should land on when the pass finishes — captured at enqueue
-    /// time because a rescan can be a duplicate, not a pending review.
+    /// Extracts the text of one stored scan page. The status the page lands on
+    /// follows the same rule as the upload path: a duplicate when an active
+    /// version of the same page exists, pending review otherwise — recomputed
+    /// here so the job is self-contained.
     /// </summary>
     [Hangfire.DisableConcurrentExecution(timeoutInSeconds: 600)]
-    public async Task ExtractOcrAsync(long scanId, int targetStatusValue, CancellationToken ct = default)
+    public async Task ExtractOcrAsync(long scanId, CancellationToken ct = default)
     {
         using var scope = services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -59,8 +60,15 @@ public class ScanProcessingJobs(
             }
         }
 
+        // Duplicate when an active version of the same page exists; pending
+        // review otherwise. Same rule the upload path applied when it marked
+        // the page Processing.
+        var hasActiveSibling = await db.ScanPages.AnyAsync(
+            p => p.Barcode == page.Barcode && p.PageNo == page.PageNo
+                && p.Status == PageStatus.Active && p.Id != page.Id, ct);
+
         page.OcrText = text;
-        page.Status = (PageStatus)targetStatusValue;
+        page.Status = hasActiveSibling ? PageStatus.Duplicate : PageStatus.PendingReview;
         await db.SaveChangesAsync(ct);
 
         try

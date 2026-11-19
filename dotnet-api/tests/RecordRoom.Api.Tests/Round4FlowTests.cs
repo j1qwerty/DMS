@@ -1,3 +1,5 @@
+using Hangfire;
+using Hangfire.MemoryStorage;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Data.Sqlite;
@@ -98,23 +100,6 @@ public sealed class Round4FlowTests
             Task.FromResult(Result<(byte[], string)>.Ok((source, $"{operation} (test)")));
     }
 
-    private sealed class SynchronousBackgroundJobs(IServiceProvider services) : Hangfire.IBackgroundJobClient
-    {
-        public string Create(Hangfire.Common.Job job, Hangfire.States.IState state)
-        {
-            if (job.Type == typeof(ScanProcessingJobs) && job.Method.Name == nameof(ScanProcessingJobs.ExtractOcrAsync))
-            {
-                var processor = new ScanProcessingJobs(services, NullLogger<ScanProcessingJobs>.Instance);
-                var scanId = (long)job.Args[0];
-                var targetStatus = (int)job.Args[1];
-                processor.ExtractOcrAsync(scanId, targetStatus).GetAwaiter().GetResult();
-            }
-            return Guid.NewGuid().ToString("N");
-        }
-
-        public bool ChangeState(string jobId, Hangfire.States.IState state, string? expectedState) => true;
-    }
-
     private sealed class TestEnvironment(string contentRoot) : IHostEnvironment
     {
         public string ApplicationName { get; set; } = "RecordRoom.Api.Tests";
@@ -146,6 +131,12 @@ public sealed class Round4FlowTests
         public IFileScansService Scans { get; }
         public IScanStudioService Studio { get; }
 
+        /// <summary>
+        /// Plays the Hangfire worker in tests: ScanProcessingJobs resolves
+        /// everything it needs from this provider.
+        /// </summary>
+        private readonly ServiceProvider _provider;
+
         public Harness(IOcrService? ocr = null)
         {
             Connection.Open();
@@ -172,29 +163,48 @@ public sealed class Round4FlowTests
             var flags = new FeatureFlags(configuration);
             var fileRefs = new FileRefs(Db, flags);
 
-            var services = new ServiceCollection()
-                .AddSingleton(Db)
-                .AddSingleton(ocr ?? new FakeOcr())
-                .AddSingleton(audit)
+            // The scan pipeline OCRs in the background: uploads enqueue through
+            // a real job client (memory storage, no worker) and the tests call
+            // ProcessBackgroundScansAsync to play the worker. The provider
+            // carries exactly what ScanProcessingJobs resolves from its scope.
+            _provider = new ServiceCollection()
+                .AddSingleton<AppDbContext>(Db)
+                .AddSingleton<IOcrService>(ocr ?? new FakeOcr())
+                .AddSingleton<IAuditWriter>(audit)
                 .AddSingleton<IConfiguration>(configuration)
                 .BuildServiceProvider();
-            var backgroundJobs = new SynchronousBackgroundJobs(services);
 
             Files = new FilesService(Db, audit, User, store, flags, configuration,
                 NullLogger<FilesService>.Instance);
             Issues = new IssuesService(Db, audit, User, fileRefs);
             Custody = new CustodyService(Db, audit, User);
             Scans = new FileScansService(Db, audit, User, store, fileRefs, configuration,
-                NullLogger<FileScansService>.Instance, backgroundJobs);
+                NullLogger<FileScansService>.Instance, new BackgroundJobClient(new MemoryStorage()));
             Studio = new ScanStudioService(Db, audit, User, store, new FakeEnhancer(), fileRefs,
                 new ConsoleLogger<ScanStudioService>());
         }
 
         public void Dispose()
         {
+            _provider.Dispose();
             Db.Dispose();
             Connection.Dispose();
             try { Directory.Delete(StoreRoot, recursive: true); } catch { /* temp cleanup is best-effort */ }
+        }
+
+        /// <summary>
+        /// Runs the background OCR pass for every page still marked
+        /// "Processing" — the test stand-in for the Hangfire worker picking up
+        /// the jobs the upload enqueued.
+        /// </summary>
+        public async Task ProcessBackgroundScansAsync()
+        {
+            var jobs = new ScanProcessingJobs(_provider, NullLogger<ScanProcessingJobs>.Instance);
+            var pending = await Db.ScanPages
+                .Where(p => p.Status == PageStatus.Processing)
+                .ToListAsync();
+            foreach (var page in pending)
+                await jobs.ExtractOcrAsync(page.Id);
         }
 
         /// <summary>A room → section → almirah → shelf chain, as the location designer would write it.</summary>
@@ -419,11 +429,13 @@ public sealed class Round4FlowTests
 
         var withDoc = await h.Scans.AddDocumentAsync(added.Value.Id, PngFile("scan-1.png"));
         Assert.True(withDoc.IsSuccess, string.Join("; ", withDoc.Errors.Select(e => e.Message)));
+        // The upload returns immediately; the background pass lands the text.
+        await h.ProcessBackgroundScansAsync();
 
         var row = await h.Db.ScanPages.FirstAsync(p => p.Id == added.Value.Id);
         Assert.NotNull(row.StorageKey);
         Assert.Equal(Png.Length, row.SizeBytes);
-        Assert.Equal(FakeOcr.Text, row.OcrText); // the OCR pipeline ran on upload
+        Assert.Equal(FakeOcr.Text, row.OcrText); // the background OCR pass landed the text
 
         // The bytes are really on disk under the private store, and round-trip.
         var storedPath = Path.Combine(h.StoreRoot, row.StorageKey!);
@@ -448,6 +460,7 @@ public sealed class Round4FlowTests
             Assert.True(added.IsSuccess);
             var withDoc = await h.Scans.AddDocumentAsync(added.Value.Id, PngFile($"scan-{pageNo}.png"));
             Assert.True(withDoc.IsSuccess, string.Join("; ", withDoc.Errors.Select(e => e.Message)));
+            await h.ProcessBackgroundScansAsync(); // review needs the pass finished
             var reviewed = await h.Scans.ReviewAsync(added.Value.Id, new PageReviewInput("Approved"));
             Assert.True(reviewed.IsSuccess);
             scanIds.Add(added.Value.Id);
@@ -522,6 +535,7 @@ public sealed class Round4FlowTests
             var added = await h.Scans.AddAsync(file.Id, new ScanAddInput($"page-{pageNo}.png", pageNo, "A4"));
             Assert.True(added.IsSuccess);
             Assert.True((await h.Scans.AddDocumentAsync(added.Value.Id, PngFile($"scan-{pageNo}.png"))).IsSuccess);
+            await h.ProcessBackgroundScansAsync(); // the pass finishes before review
             Assert.True((await h.Scans.ReviewAsync(added.Value.Id, new PageReviewInput("Approved"))).IsSuccess);
             scanIds.Add(added.Value.Id);
         }
@@ -547,15 +561,20 @@ public sealed class Round4FlowTests
         var first = await h.Scans.AddAsync(file.Id, new ScanAddInput("page-1.png", 1, "A4"));
         Assert.True(first.IsSuccess);
         Assert.True((await h.Scans.AddDocumentAsync(first.Value.Id, PngFile("scan-1.png"))).IsSuccess);
+        await h.ProcessBackgroundScansAsync(); // the pass finishes before review
         Assert.True((await h.Scans.ReviewAsync(first.Value.Id, new PageReviewInput("Approved"))).IsSuccess);
 
         // Attaching another document to the same page is a rescan: the next
         // version, which awaits review like any new scan; the approved v1 is
         // untouched (the Duplicate flag is reserved for legacy Active rows).
+        // The upload itself answers "Processing"; the background OCR pass
+        // lands the page on pending review right after.
         var rescan = await h.Scans.AddDocumentAsync(first.Value.Id, PngFile("scan-1-retry.png"));
         Assert.True(rescan.IsSuccess, string.Join("; ", rescan.Errors.Select(e => e.Message)));
         Assert.Equal(2, rescan.Value.Version);
-        Assert.Equal("Pending review", rescan.Value.Status);
+        Assert.Equal("Processing", rescan.Value.Status);
+
+        await h.ProcessBackgroundScansAsync();
 
         var rows = await h.Db.ScanPages.Where(p => p.Barcode == file.Barcode && p.PageNo == 1)
             .OrderBy(p => p.Version).ToListAsync();
@@ -579,6 +598,7 @@ public sealed class Round4FlowTests
         var added = await h.Scans.AddAsync(file.Id, new ScanAddInput("page-1.png", 1, "A4"));
         Assert.True(added.IsSuccess);
         Assert.True((await h.Scans.AddDocumentAsync(added.Value.Id, PngFile("scan-hindi.png"))).IsSuccess);
+        await h.ProcessBackgroundScansAsync(); // the Hindi OCR lands in the background
         Assert.True((await h.Scans.ReviewAsync(added.Value.Id, new PageReviewInput("Approved"))).IsSuccess);
 
         var build = await h.Studio.BuildPdfAsync(file.Id, new DeliverablePdfInput(null));

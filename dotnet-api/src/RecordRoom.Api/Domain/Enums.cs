@@ -85,6 +85,7 @@ public enum PageStatus
     Rejected = 2,
     Duplicate = 3,
     Active = 4,
+    /// <summary>Set while the background OCR pass runs; lands on the real status when it finishes.</summary>
     Processing = 5,
 }
 

@@ -55,6 +55,24 @@ class RealtimeClient {
   /** What is currently subscribed, so a re-subscribe is idempotent. */
   private joined = new Set<Channel>();
 
+  constructor() {
+    if (typeof window !== 'undefined') {
+      const handleWake = () => {
+        if (document.visibilityState === 'visible' && isHttpMode()) {
+          if (!this.connection || this.connection.state === 'Disconnected') {
+            this.connection = null;
+            this.starting = null;
+            void this.ensure();
+          }
+        }
+      };
+
+      document.addEventListener('visibilitychange', handleWake);
+      window.addEventListener('pageshow', handleWake);
+      document.addEventListener('resume', handleWake);
+    }
+  }
+
   get connected(): boolean {
     return this.connection?.state === 'Connected';
   }
@@ -127,6 +145,11 @@ class RealtimeClient {
         const channels = [...this.joined];
         this.joined.clear();
         void this.join(channels.length > 0 ? channels : ALL);
+      });
+
+      connection.onclose(() => {
+        this.connection = null;
+        this.starting = null;
       });
 
       try {

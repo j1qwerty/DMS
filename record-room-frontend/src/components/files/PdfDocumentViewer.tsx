@@ -35,6 +35,7 @@ const PDF_OPTIONS = {
   cMapUrl: '/cmaps/',
   standardFontDataUrl: '/standard_fonts/',
   wasmUrl: '/wasm/',
+  verbosity: 0,
 } as const;
 
 const MIN_SCALE = 0.5;
