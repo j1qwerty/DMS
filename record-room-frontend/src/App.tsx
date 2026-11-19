@@ -9,6 +9,8 @@ import { LoginPage } from './pages/LoginPage';
 import { RequireFeature } from './components/RequireFeature';
 import { loadRuntimeFeatures } from './lib/features';
 import { apiBase } from './services/http/client';
+import { service } from './services';
+import { session } from './services/impl/session';
 
 /**
  * Routes are code-split so an operator opening the issue desk does not
@@ -25,9 +27,6 @@ const RoomDetailPage = lazy(() =>
   import('./pages/RoomDetailPage').then((m) => ({ default: m.RoomDetailPage })),
 );
 const FilesPage = lazy(() => import('./pages/FilesPage').then((m) => ({ default: m.FilesPage })));
-const FileViewerPage = lazy(() =>
-  import('./pages/FileViewerPage').then((m) => ({ default: m.FileViewerPage })),
-);
 const FileDetailPage = lazy(() =>
   import('./pages/FileDetailPage').then((m) => ({ default: m.FileDetailPage })),
 );
@@ -47,9 +46,6 @@ const BarcodesPage = lazy(() =>
 const ScanPage = lazy(() => import('./pages/ScanPage').then((m) => ({ default: m.ScanPage })));
 const DigitizationPage = lazy(() =>
   import('./pages/DigitizationPage').then((m) => ({ default: m.DigitizationPage })),
-);
-const ScanStudioPage = lazy(() =>
-  import('./pages/ScanStudioPage').then((m) => ({ default: m.ScanStudioPage })),
 );
 const ReportsPage = lazy(() =>
   import('./pages/ReportsPage').then((m) => ({ default: m.ReportsPage })),
@@ -112,7 +108,12 @@ const guarded = (
 export function App() {
   // In http mode the API says which features are on; the build-time flag is the fallback.
   useEffect(() => {
-    if (import.meta.env.VITE_API_MODE === 'http') void loadRuntimeFeatures(apiBase());
+    if (import.meta.env.VITE_API_MODE === 'http') {
+      void loadRuntimeFeatures(apiBase());
+      if (session.get()) {
+        void service.users.permissionsMatrix().catch(() => undefined);
+      }
+    }
   }, []);
 
   return (
@@ -150,9 +151,10 @@ export function App() {
             <Route path="/files" element={<KeyedFilesPage />} />
             <Route path="/files/new" element={guarded(NewFilePage, 'files.create')} />
             <Route path="/files/:fileId" element={<FileDetailPage />} />
-            <Route path="/files/:fileId/studio" element={guarded(ScanStudioPage, 'studio.use')} />
-            <Route path="/files/:fileId/scan" element={<FileViewerPage />} />
-            <Route path="/files/:fileId/map" element={<FileViewerPage />} />
+            <Route path="/files/:fileId/details" element={<FileDetailPage />} />
+            <Route path="/files/:fileId/scan" element={<FileDetailPage />} />
+            <Route path="/files/:fileId/studio" element={guarded(FileDetailPage, 'studio.use')} />
+            <Route path="/files/:fileId/map" element={<FileDetailPage />} />
             <Route
               path="/maps"
               element={

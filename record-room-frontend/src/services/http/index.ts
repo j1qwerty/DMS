@@ -88,6 +88,7 @@ import type {
   MediaLinkRecord,
 } from '../impl/inquiries';
 import { session } from '../impl/session';
+import { permissionsStore } from '../permissionsStore';
 
 type Dto = Record<string, unknown>;
 
@@ -109,6 +110,7 @@ export const httpAuthService: AuthApi = {
     setToken(str(data.token));
     const user = toAppUser(data.user as Dto);
     session.set(user);
+    void httpUsersService.permissionsMatrix().catch(() => undefined);
     return ok(user);
   },
 
@@ -667,11 +669,11 @@ export const httpEmployeesService: EmployeesApi = {
 
 export const httpDigitizationService: ScanApi = {
   async list(fileId) {
-    return (await get<Dto[]>(`/api/files/${fileId}/scans`)).map(toFileScan);
+    return (await get<Dto[]>(`/api/files/${toApiId(fileId, 'file')}/scans`)).map(toFileScan);
   },
 
   async add(fileId, input) {
-    const result = await attempt<Dto>('POST', `/api/files/${fileId}/scans`, {
+    const result = await attempt<Dto>('POST', `/api/files/${toApiId(fileId, 'file')}/scans`, {
       fileName: input.filename,
       pageNo: input.pageNo,
       documentSize: input.documentSize,
@@ -683,16 +685,16 @@ export const httpDigitizationService: ScanApi = {
   async addDocument(scanId, file) {
     const body = new FormData();
     body.append('document', file, file.name);
-    const result = await attemptForm<Dto>(`/api/scans/${scanId}/document`, body);
+    const result = await attemptForm<Dto>(`/api/scans/${toApiId(scanId, 'scan')}/document`, body);
     return result.ok ? ok(toFileScan(result.value)) : result;
   },
 
   async remove(scanId) {
-    return wrapTrue(await attempt<Dto>('DELETE', `/api/scans/${scanId}`));
+    return wrapTrue(await attempt<Dto>('DELETE', `/api/scans/${toApiId(scanId, 'scan')}`));
   },
 
   async review(scanId, decision, note) {
-    const result = await attempt<Dto>('POST', `/api/scans/${scanId}/review`, {
+    const result = await attempt<Dto>('POST', `/api/scans/${toApiId(scanId, 'scan')}/review`, {
       decision,
       note,
     });
@@ -701,10 +703,14 @@ export const httpDigitizationService: ScanApi = {
 
   async reviewAll(fileId, decision, note) {
     // The API answers with the number of pages that moved, not a row.
-    const result = await attempt<number>('POST', `/api/files/${fileId}/scans/review-all`, {
-      decision,
-      note,
-    });
+    const result = await attempt<number>(
+      'POST',
+      `/api/files/${toApiId(fileId, 'file')}/scans/review-all`,
+      {
+        decision,
+        note,
+      },
+    );
     return result.ok ? ok(result.value) : result;
   },
 
@@ -1024,7 +1030,9 @@ export const httpUsersService: UsersApi = {
     );
     const matrix: Record<string, string[]> = {};
     for (const row of body.roles) matrix[row.role] = row.permissions;
-    return matrix as unknown as RolePermissionMatrix;
+    const typed = matrix as unknown as RolePermissionMatrix;
+    permissionsStore.replace(typed, true);
+    return typed;
   },
 
   async setPermission(role, permission, granted) {

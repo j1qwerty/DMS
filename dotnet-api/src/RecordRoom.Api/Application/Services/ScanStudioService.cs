@@ -218,7 +218,9 @@ public sealed class ScanStudioService(
     public async Task<PrivateDocumentContent?> OpenDocumentAsync(long scanId, bool processed, CancellationToken ct)
     {
         var page = await db.ScanPages.AsNoTracking().FirstOrDefaultAsync(p => p.Id == scanId, ct);
-        var key = processed ? page?.ProcessedStorageKey : page?.StorageKey;
+        var key = (processed && !string.IsNullOrWhiteSpace(page?.ProcessedStorageKey))
+            ? page.ProcessedStorageKey
+            : page?.StorageKey;
         if (page is null || key is null || page.ContentType is null || page.Sha256 is null) return null;
 
         // Served as an image when the processed copy is requested, whatever the

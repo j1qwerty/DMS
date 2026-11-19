@@ -35,12 +35,14 @@ export function DigitizationPage() {
   const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
   const { allowed } = useSession();
-  const tab = params.get('tab') === 'custody' ? 'custody' : 'queue';
+  const rawTab = params.get('tab');
+  const tab: 'queue' | 'custody' | 'studio' =
+    rawTab === 'custody' ? 'custody' : rawTab === 'studio' ? 'studio' : 'queue';
   const [workbench, setWorkbench] = useState(false);
 
-  const setTab = (next: 'queue' | 'custody') => {
+  const setTab = (next: 'queue' | 'custody' | 'studio') => {
     const search = new URLSearchParams(params);
-    if (next === 'custody') search.set('tab', 'custody');
+    if (next === 'custody' || next === 'studio') search.set('tab', next);
     else search.delete('tab');
     setParams(search, { replace: true });
   };
@@ -57,6 +59,7 @@ export function DigitizationPage() {
             [
               ['queue', 'Scan review queue'],
               ['custody', 'Custody register'],
+              ...(allowed('studio.use') ? ([['studio', 'Edit in studio']] as const) : []),
             ] as const
           ).map(([key, label]) => (
             <button
@@ -64,7 +67,13 @@ export function DigitizationPage() {
               type="button"
               role="tab"
               aria-selected={tab === key}
-              onClick={() => setTab(key)}
+              onClick={() => {
+                setTab(key);
+                // The studio tab is the operator entry to the workbench: it
+                // opens the "new digitization" picker, whose "Open studio"
+                // leads into the scan studio (scan pages, reorder, build PDF).
+                if (key === 'studio') setWorkbench(true);
+              }}
               className={`focus-ring min-h-10 flex-1 rounded-lg px-4 text-sm font-semibold transition sm:flex-none ${
                 tab === key
                   ? 'bg-[var(--rr-accent-fill)] text-white'
@@ -87,7 +96,7 @@ export function DigitizationPage() {
         )}
       </div>
 
-      {tab === 'queue' ? <ScanReviewQueue /> : <CustodyRegister />}
+      {tab === 'queue' ? <ScanReviewQueue /> : tab === 'custody' ? <CustodyRegister /> : null}
 
       <Modal
         open={workbench}
@@ -171,7 +180,7 @@ function WorkbenchPicker({ onOpenFile }: { onOpenFile: (fileId: string) => void 
                 icon={<Scan size={15} />}
                 onClick={() => onOpenFile(file.id)}
               >
-                Open studio
+                Edit in studio
               </Button>
             </li>
           ))}

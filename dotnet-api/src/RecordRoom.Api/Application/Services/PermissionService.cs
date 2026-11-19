@@ -75,6 +75,9 @@ public sealed class PermissionService(
     public Task<string[]> ForRoleAsync(string role, CancellationToken ct = default) =>
         cache.GetOrCreateAsync(CacheKey(role), CacheTtl, async () =>
         {
+            if (string.Equals(role, Role.Admin.ToString(), StringComparison.OrdinalIgnoreCase))
+                return Catalogue;
+
             var stored = await db.RolePermissions.AsNoTracking()
                 .Where(p => p.Role == role)
                 .Select(p => p.Permission)
@@ -108,6 +111,9 @@ public sealed class PermissionService(
             Catalogue,
             Roles.Select(role =>
             {
+                if (string.Equals(role, Role.Admin.ToString(), StringComparison.OrdinalIgnoreCase))
+                    return new PermissionMatrixRowDto(role, Catalogue);
+
                 var stored = storedByRole[role].Select(r => r.Permission).ToHashSet(StringComparer.Ordinal);
                 var effective = stored.Count > 0
                     ? Catalogue.Where(c => stored.Contains(c)).ToArray()

@@ -41,10 +41,12 @@ export { MATRIX_V1 };
 
 export function can(role: Role | undefined, permission: Permission): boolean {
   if (!role) return false;
+  if (role === 'Admin') return true;
   return permissionsStore.get()[role].includes(permission);
 }
 
 export function permissionsFor(role: Role): readonly Permission[] {
+  if (role === 'Admin') return PERMISSIONS;
   return permissionsStore.get()[role];
 }
 

@@ -55,7 +55,7 @@ export function PdfDocumentViewer({
   src,
   filename,
   initialPage = 1,
-  heightClassName = 'h-[60vh] min-h-[360px]',
+  heightClassName = 'h-[calc(100dvh-15rem)] min-h-[480px]',
 }: {
   src: string;
   filename: string;
@@ -96,8 +96,53 @@ function PdfViewerInner({
   const [query, setQuery] = useState('');
   const [searching, setSearching] = useState(false);
   const [matchPage, setMatchPage] = useState<number | null>(null);
+  const [pageSizeName, setPageSizeName] = useState<string>('A4');
+  const [isLargeFormat, setIsLargeFormat] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(0);
+
+  useEffect(() => {
+    if (!pdf || pageNumber < 1 || pageNumber > numPages) return;
+    let active = true;
+    pdf
+      .getPage(pageNumber)
+      .then((page) => {
+        if (!active) return;
+        const vp = page.getViewport({ scale: 1 });
+        const w = Math.round(vp.width);
+        const h = Math.round(vp.height);
+        const maxDim = Math.max(w, h);
+        const minDim = Math.min(w, h);
+
+        let name: string;
+        let large = false;
+        if (maxDim >= 2800 || minDim >= 2000) {
+          name = 'A0 (Map)';
+          large = true;
+        } else if (maxDim >= 2000 || minDim >= 1400) {
+          name = 'A1';
+          large = true;
+        } else if (maxDim >= 1400 || minDim >= 1000) {
+          name = 'A2';
+          large = true;
+        } else if (maxDim >= 1100) {
+          name = 'A3';
+          large = true;
+        } else if (maxDim >= 950 && minDim >= 580) {
+          name = 'Legal';
+        } else if (maxDim >= 750 && minDim >= 550) {
+          name = 'A4';
+        } else {
+          name = `${minDim}×${maxDim} pt`;
+        }
+        setPageSizeName(name);
+        setIsLargeFormat(large);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [pdf, pageNumber, numPages]);
 
   useEffect(() => {
     const element = containerRef.current;
@@ -194,16 +239,30 @@ function PdfViewerInner({
             }}
             className="focus-ring grid size-9 place-items-center rounded-l-lg hover:bg-[var(--rr-surface-2)]"
             aria-label="Zoom out"
+            title="Zoom out"
           >
             <MagnifyingGlassMinus size={16} />
           </button>
           <button
             type="button"
             onClick={() => setFitWidth(true)}
-            className={`focus-ring min-w-12 border-x border-base py-1.5 text-center text-xs font-semibold hover:bg-[var(--rr-surface-2)] ${fitWidth ? 'text-accent' : ''}`}
+            className={`focus-ring min-w-11 border-x border-base px-2 py-1.5 text-center text-xs font-semibold hover:bg-[var(--rr-surface-2)] ${fitWidth ? 'text-accent' : ''}`}
             aria-label="Fit width"
+            title="Fit to page width"
           >
-            {fitWidth ? 'Fit' : `${Math.round(scale * 100)}%`}
+            Fit
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setFitWidth(false);
+              setScale(1);
+            }}
+            className={`focus-ring min-w-12 border-r border-base px-2 py-1.5 text-center text-xs font-semibold hover:bg-[var(--rr-surface-2)] ${!fitWidth && scale === 1 ? 'text-accent font-bold' : ''}`}
+            aria-label="Set to 100% actual size"
+            title="100% actual size (1-click)"
+          >
+            100%
           </button>
           <button
             type="button"
@@ -213,10 +272,24 @@ function PdfViewerInner({
             }}
             className="focus-ring grid size-9 place-items-center rounded-r-lg hover:bg-[var(--rr-surface-2)]"
             aria-label="Zoom in"
+            title="Zoom in"
           >
             <MagnifyingGlassPlus size={16} />
           </button>
         </div>
+        {!fitWidth && scale !== 1 && (
+          <span className="muted text-xs font-semibold">{Math.round(scale * 100)}%</span>
+        )}
+        <span
+          className={`rounded-full px-2.5 py-1 text-[11px] font-semibold tracking-wide ${
+            isLargeFormat
+              ? 'border border-amber-300 bg-amber-100 text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200'
+              : 'border border-base bg-[var(--rr-surface-2)] muted'
+          }`}
+          title={`Detected sheet size: ${pageSizeName}`}
+        >
+          {pageSizeName}
+        </span>
 
         <button
           type="button"

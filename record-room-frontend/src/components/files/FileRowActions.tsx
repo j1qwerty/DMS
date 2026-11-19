@@ -9,7 +9,7 @@ import {
   Eye,
   MapPinPlus,
   MapTrifold,
-  Sparkle,
+  PencilSimple,
   Stack,
   UploadSimple,
 } from '@phosphor-icons/react';
@@ -188,7 +188,7 @@ export function FileRowActions({ file, onAction, variant }: Props) {
     return (
       <div className="grid grid-cols-2 gap-2">
         <LabeledAction icon={Eye} label="View file" to={scanPath} />
-        {canStudio && <LabeledAction icon={Sparkle} label="Edit in studio" to={studioPath} />}
+        {canStudio && <LabeledAction icon={PencilSimple} label="Edit in studio" to={studioPath} />}
         {canEdit && (
           <LabeledAction
             icon={UploadSimple}
@@ -217,38 +217,43 @@ export function FileRowActions({ file, onAction, variant }: Props) {
   }
 
   return (
-    <div className="flex items-center gap-1.5">
-      <Segment label="File">
-        <IconAction icon={Eye} label="View file scan" to={scanPath} />
-        {canStudio && <IconAction icon={Sparkle} label="Edit in scan studio" to={studioPath} />}
+    <div className="flex flex-col gap-1.5 py-0.5">
+      <div className="flex items-center gap-1.5">
+        <Segment label="File">
+          <IconAction icon={Eye} label="View file" to={scanPath} />
+          {canStudio && <IconAction icon={PencilSimple} label="Edit in studio" to={studioPath} />}
+          {canEdit && (
+            <IconAction
+              icon={UploadSimple}
+              label="Upload file scan"
+              onClick={() => onAction('upload', file)}
+            />
+          )}
+        </Segment>
         {canEdit && (
-          <IconAction
-            icon={UploadSimple}
-            label="Upload file scan"
-            onClick={() => onAction('upload', file)}
-          />
+          <button
+            type="button"
+            onClick={() => onAction('move', file)}
+            className="focus-ring inline-flex h-9 items-center gap-1 rounded-lg border border-base bg-[var(--rr-surface)] px-2 text-xs font-semibold hover:bg-[var(--rr-surface-2)]"
+            title="Move / relocate file"
+          >
+            <ArrowsLeftRight size={15} className="text-accent" /> Move
+          </button>
         )}
-      </Segment>
-      <Segment label="Map">
-        <IconAction icon={MapTrifold} label="View map" to={mapPath} />
-        {canUploadMap && (
-          <IconAction
-            icon={MapPinPlus}
-            label="Upload map"
-            onClick={() => onAction('mapUpload', file)}
-          />
-        )}
-      </Segment>
-      {canEdit && (
-        <button
-          type="button"
-          onClick={() => onAction('move', file)}
-          className="focus-ring inline-flex h-9 items-center gap-1.5 rounded-lg border border-base bg-[var(--rr-surface)] px-2.5 text-[13px] font-semibold hover:bg-[var(--rr-surface-2)]"
-        >
-          <ArrowsLeftRight size={16} className="text-accent" /> Move
-        </button>
-      )}
-      <MoreMenu file={file} />
+        <MoreMenu file={file} />
+      </div>
+      <div className="flex items-center gap-1.5">
+        <Segment label="Map">
+          <IconAction icon={MapTrifold} label="View map" to={mapPath} />
+          {canUploadMap && (
+            <IconAction
+              icon={MapPinPlus}
+              label="Upload map"
+              onClick={() => onAction('mapUpload', file)}
+            />
+          )}
+        </Segment>
+      </div>
     </div>
   );
 }

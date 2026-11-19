@@ -4,6 +4,7 @@ import {
   DownloadSimple,
   Funnel,
   MagnifyingGlass,
+  PencilSimple,
   Plus,
   SortAscending,
   SortDescending,
@@ -14,7 +15,8 @@ import { Badge } from '../components/ui/Badge';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Button, LinkButton } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
-import { Field, SelectInput } from '../components/ui/Field';
+import { Modal } from '../components/ui/Modal';
+import { Field, SelectInput, TextInput } from '../components/ui/Field';
 import { Pagination } from '../components/ui/Pagination';
 import { StatusBadge } from '../components/ui/Flash';
 import { EmptyState } from '../components/ui/EmptyState';
@@ -99,7 +101,7 @@ const DEFAULT_QUERY: FileQuery = {
 export function FilesPage() {
   const service = useService();
   const { allowed } = useSession();
-  const { success } = useFlash();
+  const { success, danger } = useFlash();
   const { barcode } = useFeatures();
 
   // Dashboard shortcuts link here with ?status=Missing or ?q=...
@@ -124,6 +126,9 @@ export function FilesPage() {
   // current result actually shows, so paging or filtering implicitly prunes it.
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkMoving, setBulkMoving] = useState(false);
+  const [editingEOfficeFile, setEditingEOfficeFile] = useState<RecordFile | null>(null);
+  const [eOfficeDraft, setEOfficeDraft] = useState('');
+  const [savingEOffice, setSavingEOffice] = useState(false);
 
   const toggleOne = (id: string, checked: boolean) =>
     setSelected((current) => {
@@ -674,11 +679,42 @@ export function FilesPage() {
                             {barcode && (
                               <p className="mono muted mt-1 text-xs">{file.fileBarcode}</p>
                             )}
-                            {file.eOfficeReference?.trim() && (
-                              <p className="muted mt-0.5 break-all text-xs">
-                                e-office: {file.eOfficeReference}
-                              </p>
-                            )}
+                            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                              {file.eOfficeReference?.trim() ? (
+                                <span className="inline-flex items-center gap-1 rounded bg-[var(--rr-surface-2)] px-1.5 py-0.5 font-mono text-[11px] text-[var(--rr-text)]">
+                                  <span className="muted font-sans text-[10px]">e-office:</span>{' '}
+                                  {file.eOfficeReference}
+                                  {allowed('files.edit') && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setEditingEOfficeFile(file);
+                                        setEOfficeDraft(file.eOfficeReference ?? '');
+                                      }}
+                                      className="focus-ring ml-0.5 text-accent hover:underline"
+                                      title="Edit e-office reference"
+                                      aria-label="Edit e-office reference"
+                                    >
+                                      <PencilSimple size={12} />
+                                    </button>
+                                  )}
+                                </span>
+                              ) : (
+                                allowed('files.edit') && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setEditingEOfficeFile(file);
+                                      setEOfficeDraft('');
+                                    }}
+                                    className="focus-ring inline-flex items-center gap-1 rounded border border-dashed border-base px-1.5 py-0.5 text-[11px] font-medium text-accent hover:bg-accent-soft"
+                                    title="Link e-office reference"
+                                  >
+                                    <Plus size={11} /> e-Office ref
+                                  </button>
+                                )
+                              )}
+                            </div>
                           </td>
                           {!hiddenColumns.has('type') && (
                             <td className="px-4 py-3.5">
@@ -797,6 +833,62 @@ export function FilesPage() {
       </Card>
 
       {dialogs}
+      <Modal
+        open={editingEOfficeFile !== null}
+        onClose={() => setEditingEOfficeFile(null)}
+        title={`E-office Reference — ${editingEOfficeFile?.fileNumber ?? ''}`}
+        description="Enter or update the e-office file name or identifier to link this record."
+      >
+        <form
+          className="space-y-4"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            if (!editingEOfficeFile) return;
+            setSavingEOffice(true);
+            try {
+              const res = await service.files.updateEOfficeReference(
+                editingEOfficeFile.id,
+                eOfficeDraft.trim(),
+              );
+              if (res.ok) {
+                success(
+                  res.value.eOfficeReference
+                    ? 'E-office reference saved.'
+                    : 'E-office reference cleared.',
+                );
+                setEditingEOfficeFile(null);
+                reload();
+              } else {
+                danger(res.error);
+              }
+            } finally {
+              setSavingEOffice(false);
+            }
+          }}
+        >
+          <Field
+            label="E-office file name / ID"
+            htmlFor="eoffice-modal-ref"
+            hint="Clear the field to remove the link."
+          >
+            <TextInput
+              id="eoffice-modal-ref"
+              value={eOfficeDraft}
+              onChange={(e) => setEOfficeDraft(e.target.value)}
+              placeholder="e.g. EOFFICE/REV/2026/00123"
+              autoFocus
+            />
+          </Field>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="ghost" type="button" onClick={() => setEditingEOfficeFile(null)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={savingEOffice}>
+              {savingEOffice ? 'Saving…' : 'Save reference'}
+            </Button>
+          </div>
+        </form>
+      </Modal>
       {bulkMoving && selectedRows.length > 0 && (
         <BulkMoveModal
           files={selectedRows}

@@ -6,26 +6,56 @@ import { BrandMark } from './Sidebar';
 import { CommandPalette } from '../components/CommandPalette';
 import { useFeatures } from '../lib/features';
 import { APP_SHORT } from '../lib/brand';
-import { dataSource } from '../services';
+import { apiBase, dataSource } from '../services';
 
 /**
- * Which data layer is live, always visible (round 4): a red dot while the app
- * runs on the in-browser demo dataset — nothing you create reaches a server —
- * and a green dot once VITE_API_MODE=http points at the .NET API.
+ * Which data layer is live, always visible: a red dot and "Demo data" while
+ * the app runs on the in-browser demo dataset, a green dot and "Live API"
+ * while the .NET API answers, and a red dot and "API down" when the API mode
+ * is on but the server does not answer. The text is shown at every viewport,
+ * not just on wide screens, so the state is readable at any width.
  */
 function DataSourceBadge() {
+  // Poll the health endpoint in http mode so the badge tells the truth when
+  // the API is down; in local mode there is nothing to probe.
+  const [apiUp, setApiUp] = useState(dataSource === 'api');
+
+  useEffect(() => {
+    if (dataSource !== 'api') return;
+    let live = true;
+    const probe = async () => {
+      try {
+        const res = await fetch(`${apiBase()}/api/health`);
+        if (live) setApiUp(res.ok);
+      } catch {
+        if (live) setApiUp(false);
+      }
+    };
+    void probe();
+    const timer = window.setInterval(() => void probe(), 15000);
+    return () => {
+      live = false;
+      window.clearInterval(timer);
+    };
+  }, []);
+
   const demo = dataSource === 'local';
+  const down = !demo && !apiUp;
+  const red = demo || down;
+
+  const title = demo
+    ? 'Demo mode: data lives only in this browser. Start the API (dotnet run, port 5199) and set VITE_API_MODE=http in record-room-frontend/.env.local to work against the real database.'
+    : down
+      ? 'The .NET API is not reachable. Start it with dotnet run from dotnet-api/src/RecordRoom.Api and refresh this page.'
+      : 'Live API: every change is written to the .NET API and its database.';
+
   return (
     <span
-      title={
-        demo
-          ? 'Demo mode: data lives only in this browser. Start the API (dotnet run, port 5199) and set VITE_API_MODE=http in record-room-frontend/.env.local to work against the real database.'
-          : 'Live API: every change is written to the .NET API and its database.'
-      }
+      title={title}
       className={`focus-ring inline-flex min-h-9 items-center gap-2 rounded-full border px-3 text-xs font-semibold ${
-        demo
+        red
           ? 'border-[color-mix(in_srgb,var(--rr-danger)_40%,transparent)] bg-[color-mix(in_srgb,var(--rr-danger)_10%,transparent)] text-[var(--rr-danger)]'
-          : 'border-[color-mix(in_srgb,var(--rr-success)_40%,transparent)] bg-[color-mix(in_srgb,var(--rr-success)_10%,transparent)] text-[var(--rr-success)]'
+          : 'border-none'
       }`}
     >
       <span className="relative flex size-2">
@@ -34,11 +64,11 @@ function DataSourceBadge() {
         )}
         <span
           className={`relative inline-flex size-2 rounded-full ${
-            demo ? 'bg-[var(--rr-danger)]' : 'bg-[var(--rr-success)]'
+            red ? 'bg-[var(--rr-danger)]' : 'bg-[var(--rr-success)]'
           }`}
         />
       </span>
-      <span className="hidden sm:inline">{demo ? 'Demo data' : 'Live API'}</span>
+      <span>{demo ? 'Demo data' : down ? 'API down' : ''}</span>
     </span>
   );
 }

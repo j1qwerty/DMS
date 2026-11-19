@@ -3,22 +3,12 @@ import { service, dataSource } from '../services';
 import { CheckCircle, Circle, Sliders } from '@phosphor-icons/react';
 import { useEffect, useState, type ReactNode } from 'react';
 
-import {
-  ArrowCounterClockwise,
-  Bell,
-  Database,
-  Globe,
-  HardDrives,
-  Moon,
-  ShieldCheck,
-  Trash,
-} from '@phosphor-icons/react';
+import { Bell, Globe, Moon, ShieldCheck } from '@phosphor-icons/react';
 import { PageHeader } from '../components/ui/PageHeader';
 import { SectionHeader } from '../components/ui/SectionHeader';
 import { Card } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
-import { Button } from '../components/ui/Button';
-import { useDb, useSession } from '../hooks/useService';
+import { useSession } from '../hooks/useService';
 import { ROLE_DESCRIPTIONS, permissionsFor } from '../services/permissions';
 import { ROLES } from '../types';
 
@@ -35,35 +25,20 @@ import { ROLES } from '../types';
  */
 export function SettingsPage() {
   const features = useFeatures();
-  const db = useDb();
   const { user } = useSession();
   const [notifications, setNotifications] = useState(true);
   const [dark, setDark] = useState(localStorage.getItem('rr-dark') === '1');
 
-  const demo = dataSource === 'local';
-
-  // The reset used to clear a key that no longer exists (rr-db-v1; the store
-  // moved to rr-db-v2) and left demo documents in place. The service reset
-  // clears the store and the IndexedDB document store together.
-  const resetDataset = async () => {
-    if (!window.confirm('Reset every local change and reload the seed dataset?')) return;
-    try {
-      await service.reset();
-    } finally {
-      window.location.reload();
-    }
-  };
-
   return (
     <div className="space-y-10">
       <PageHeader
-        kicker="System settings"
+        // kicker="System settings"
         title="Settings"
-        description="Grouped by what they affect: the connection and its data, how the app looks, which feature areas are visible, your session, and the deployment facts."
+        // description="Grouped by what they affect: the connection and its data, how the app looks, which feature areas are visible, your session, and the deployment facts."
       />
 
       {/* ------------------------------------------------- connection + data */}
-      <section aria-label="Connection and data">
+      {/* <section aria-label="Connection and data">
         <SectionHeader
           eyebrow="Where your data lives"
           title="Connection & data"
@@ -191,15 +166,15 @@ export function SettingsPage() {
             </Card>
           )}
         </div>
-      </section>
+      </section> */}
 
       {/* ------------------------------------------------------ the interface */}
       <section aria-label="Interface">
-        <SectionHeader
+        {/* <SectionHeader
           eyebrow="How the app looks and pings you"
           title="Interface"
           description="Personal, browser-local preferences. Nothing here changes what anyone else sees."
-        />
+        /> */}
         <Card>
           <div className="grid gap-3 md:grid-cols-2">
             <Toggle
@@ -219,22 +194,22 @@ export function SettingsPage() {
               setValue={setNotifications}
             />
           </div>
-          <div className="mt-5 rounded-xl bg-accent-soft p-4">
+          {/* <div className="mt-5 rounded-xl bg-accent-soft p-4">
             <Badge tone="info">Frontend only</Badge>
             <p className="muted mt-2 text-xs leading-6">
               Role, audit, retention, storage and search policies are backend-enforced. Hiding a
               control in this UI is not authorization.
             </p>
-          </div>
+          </div> */}
         </Card>
       </section>
 
       {/* --------------------------------------------------- feature visibility */}
       <section aria-label="Feature visibility">
         <SectionHeader
-          eyebrow="What is visible to users"
+          // eyebrow="What is visible to users"
           title="Feature visibility"
-          description="Grouped switches that hide whole capability areas without removing them. Admin-only writes; everyone sees the current state."
+          // description="Grouped switches that hide whole capability areas without removing them. Admin-only writes; everyone sees the current state."
         />
         <FeatureVisibilityCard />
       </section>
@@ -304,15 +279,6 @@ export function SettingsPage() {
           />
         </Card>
       </section>
-    </div>
-  );
-}
-
-function Count({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-xl bg-[var(--rr-bg)] p-3">
-      <dt className="muted text-[10px] uppercase tracking-wider">{label}</dt>
-      <dd className="mt-1 text-lg font-semibold">{value}</dd>
     </div>
   );
 }

@@ -54,6 +54,47 @@ public static class DatabaseSeeder
             await db.SaveChangesAsync(ct);
             logger.LogInformation("Seeded the role permission matrix from the v1 lists.");
         }
+        else
+        {
+            // Admin is fixed and holds the full catalogue; ensure all catalogue permissions exist for Admin.
+            var existingAdminPerms = await db.RolePermissions
+                .Where(p => p.Role == Role.Admin.ToString())
+                .Select(p => p.Permission)
+                .ToListAsync(ct);
+            var missingAdminPerms = PermissionService.Catalogue
+                .Where(c => !existingAdminPerms.Contains(c, StringComparer.Ordinal))
+                .ToList();
+            if (missingAdminPerms.Count > 0)
+            {
+                foreach (var permission in missingAdminPerms)
+                {
+                    db.RolePermissions.Add(new RolePermission
+                    {
+                        Role = Role.Admin.ToString(),
+                        Permission = permission,
+                        GrantedBy = "seed",
+                        GrantedAt = DateTime.UtcNow,
+                    });
+                }
+                await db.SaveChangesAsync(ct);
+            }
+
+            // If studio.use is missing completely from the database (seeded before round 3/4), grant it by default to all four roles.
+            if (!await db.RolePermissions.AnyAsync(p => p.Permission == "studio.use", ct))
+            {
+                foreach (var role in (Role[])Enum.GetValues(typeof(Role)))
+                {
+                    db.RolePermissions.Add(new RolePermission
+                    {
+                        Role = role.ToString(),
+                        Permission = "studio.use",
+                        GrantedBy = "seed",
+                        GrantedAt = DateTime.UtcNow,
+                    });
+                }
+                await db.SaveChangesAsync(ct);
+            }
+        }
 
         // The managed department list (round 3) starts as the vocabulary the
         // registry seed itself uses; admins add, rename and remove from the

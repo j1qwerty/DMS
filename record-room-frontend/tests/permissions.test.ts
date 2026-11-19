@@ -51,4 +51,16 @@ describe('permission store', () => {
       }
     }
   });
+
+  it('guarantees Admin always has studio.use and cannot lose capabilities', () => {
+    expect(can('Admin', 'studio.use')).toBe(true);
+    // Even if an external store update attempts to omit studio.use from Admin:
+    const stripped = {
+      ...MATRIX_V1,
+      Admin: MATRIX_V1.Admin.filter((p) => p !== 'studio.use'),
+    };
+    permissionsStore.replace(stripped);
+    expect(can('Admin', 'studio.use')).toBe(true);
+    expect(permissionsFor('Admin')).toContain('studio.use');
+  });
 });

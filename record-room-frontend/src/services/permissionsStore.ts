@@ -8,7 +8,12 @@
  */
 
 import type { Role } from '../types';
-import { MATRIX_V1, type Permission, type RolePermissionMatrix } from './permissions-matrix';
+import {
+  MATRIX_V1,
+  type Permission,
+  type RolePermissionMatrix,
+  PERMISSIONS,
+} from './permissions-matrix';
 
 export type { RolePermissionMatrix };
 export { MATRIX_V1 };
@@ -23,6 +28,30 @@ function readStored(): RolePermissionMatrix | null {
     const parsed = JSON.parse(raw) as RolePermissionMatrix;
     const roles: Role[] = ['Admin', 'Supervisor', 'Operator', 'Employee'];
     if (!roles.every((role) => Array.isArray(parsed[role]))) return null;
+
+    // Admin is fixed and permanently holds the full compile-time catalogue.
+    parsed.Admin = PERMISSIONS;
+
+    // If an older cache predates studio.use (no role has it), backfill default grants.
+    const anyRoleHasStudio = roles.some((r) => parsed[r]?.includes('studio.use'));
+    if (!anyRoleHasStudio) {
+      for (const r of roles) {
+        if (MATRIX_V1[r].includes('studio.use') && !parsed[r].includes('studio.use')) {
+          parsed[r] = [...parsed[r], 'studio.use'];
+        }
+      }
+    }
+
+    // Same safeguard for audit.fileViews.
+    const anyRoleHasFileViews = roles.some((r) => parsed[r]?.includes('audit.fileViews'));
+    if (!anyRoleHasFileViews) {
+      for (const r of roles) {
+        if (MATRIX_V1[r].includes('audit.fileViews') && !parsed[r].includes('audit.fileViews')) {
+          parsed[r] = [...parsed[r], 'audit.fileViews'];
+        }
+      }
+    }
+
     return parsed;
   } catch {
     return null;
@@ -41,10 +70,14 @@ export const permissionsStore = {
     return snapshot;
   },
   replace(next: RolePermissionMatrix, persist = false) {
-    snapshot = next;
+    const sanitized: RolePermissionMatrix = {
+      ...next,
+      Admin: PERMISSIONS,
+    };
+    snapshot = sanitized;
     if (persist) {
       try {
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(sanitized));
       } catch {
         /* losing the cache is not losing the grants: the API still holds them */
       }

@@ -1,36 +1,51 @@
-import { useFeatures } from '../lib/features';
-import { useEffect, useState } from 'react';
+import { useState, useEffect } from 'react';
+import {
+  Link,
+  NavLink,
+  useLocation,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from 'react-router-dom';
 import {
   ArrowLeft,
-  Barcode,
-  ClipboardText,
-  Sparkle,
+  ArrowsLeftRight,
   CheckCircle,
   ClockCounterClockwise,
   FileText,
+  Info as InfoIcon,
   MapPin,
+  MapPinPlus,
+  MapTrifold,
+  PencilSimple,
   Printer,
+  Trash,
+  UploadSimple,
   UserCircle,
 } from '@phosphor-icons/react';
-import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Badge } from '../components/ui/Badge';
+import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
-import { Button, LinkButton } from '../components/ui/Button';
-import { PageHeader } from '../components/ui/PageHeader';
 import { EmptyState } from '../components/ui/EmptyState';
 import { Field, SelectInput, TextInput } from '../components/ui/Field';
 import { StatusBadge } from '../components/ui/Flash';
 import { BarcodeSymbol } from '../components/BarcodeSymbol';
 import { ShelfView } from '../components/ShelfView';
-import { DocumentUploadActions } from '../components/DocumentUploadActions';
+import { DocumentViewer } from '../components/files/DocumentViewer';
+import {
+  MoveFileModal,
+  UploadFileModal,
+  UploadMapModal,
+} from '../components/files/FileActionModals';
+import { ScanStudioPage, type UnifiedDocumentVersion } from './ScanStudioPage';
 import { useFlash, useQuery, useService, useSession } from '../hooks/useService';
+import { useFeatures } from '../lib/features';
 import { buildPayload } from '../lib/barcode';
 import { pushRecentFile } from '../lib/recent';
-import type { Page, Result } from '../services/contracts';
-import { err } from '../services/contracts';
+import { describePageCount, formatDocumentSize } from '../lib/document';
+import { cn } from '../lib/utils';
 import type {
   DocumentDerivative,
-  FileScan,
   IssueRecord,
   MapUpload,
   MovementEvent,
@@ -38,58 +53,91 @@ import type {
   RecordFileDocument,
   Room,
 } from '../types';
+import type { Page } from '../services/contracts';
 
 const EMPTY_ROOMS: Room[] = [];
 const EMPTY_MOVEMENTS: MovementEvent[] = [];
-const EMPTY_SCANS: FileScan[] = [];
+const EMPTY_DOCS: RecordFileDocument[] = [];
 const EMPTY_MAPS: MapUpload[] = [];
-const EMPTY_DOCUMENTS: RecordFileDocument[] = [];
 const EMPTY_ISSUE_PAGE: Page<IssueRecord> = { items: [], total: 0, page: 1, pageSize: 500 };
 
+type Dialog = 'upload' | 'mapUpload' | 'move' | null;
+type TabKey = 'scan' | 'details' | 'studio' | 'map';
+
 export function FileDetailPage() {
-  const { barcode } = useFeatures();
-  const { fileId } = useParams();
+  const { fileId = '' } = useParams();
   const navigate = useNavigate();
-  const location = useLocation();
+  const { pathname } = useLocation();
+  const [params, setParams] = useSearchParams();
   const service = useService();
-  const { allowed } = useSession();
+  const { allowed, user } = useSession();
+  const { barcode } = useFeatures();
+  const { success, danger } = useFlash();
 
-  /**
-   * Round 4: in-app Back. A direct link (fresh tab) has no in-app history, and
-   * the create-success flow must not send the operator back to the empty form —
-   * both cases go to /files. Anything else pops the real history entry, so
-   * dashboard → file → Back still returns to the dashboard. Pages that want a
-   * specific destination pass `{ from: '/path' }` in navigation state.
-   */
-  const backTarget = (location.state as { from?: string } | null)?.from;
-  const goBack = () => {
-    if (backTarget) navigate(backTarget);
-    else if (location.key === 'default') navigate('/files');
-    else navigate(-1);
-  };
+  const tab: TabKey = pathname.endsWith('/studio')
+    ? 'studio'
+    : pathname.endsWith('/map')
+      ? 'map'
+      : pathname.endsWith('/details')
+        ? 'details'
+        : 'scan';
 
+  const canEdit = allowed('files.edit');
+  const canStudio = allowed('studio.use');
+  const canUploadMap = canEdit || allowed('digitization.upload');
+  const canDeleteScan = user?.role === 'Admin';
+
+  const [dialog, setDialog] = useState<Dialog>(null);
   const [shelfId, setShelfId] = useState('');
   const [position, setPosition] = useState(1);
   const [reason, setReason] = useState('');
   const [eOfficeDraft, setEOfficeDraft] = useState<string | null>(null);
   const [savingEOffice, setSavingEOffice] = useState(false);
-  const { success, danger } = useFlash();
-  const [scanMode, setScanMode] = useState<'pdf' | 'page'>('pdf');
-  const [pageNoDraft, setPageNoDraft] = useState('1');
-  const [sizeDraft, setSizeDraft] = useState('');
 
-  // One file id drives every read on this page. `rooms` comes back whole because
-  // the location breadcrumb, the shelf picker and the shelf diagram all derive
-  // from it, and the API has no cheaper single-room-plus-relations endpoint.
   const {
     data: file,
-    loading,
+    loading: loadingFile,
     reload: reloadFile,
-  } = useQuery(() => service.files.get(fileId ?? ''), [fileId], null as RecordFile | null);
+  } = useQuery(() => service.files.get(fileId), [fileId], null as RecordFile | null, ['files']);
+
   const { data: rooms } = useQuery(() => service.locations.listRooms(), [], EMPTY_ROOMS);
 
-  // E8: a visit feeds the command palette's recent-files list. Pure localStorage
-  // write — no component state, so the effect stays side-effect-only.
+  const { data: docs, reload: reloadDocs } = useQuery(
+    () => service.files.listDocuments(fileId),
+    [fileId],
+    EMPTY_DOCS,
+  );
+
+  const { data: deliverables, reload: reloadDeliverables } = useQuery(
+    () => (fileId ? service.digitization.listPdfs(fileId) : Promise.resolve([])),
+    [fileId],
+    [] as DocumentDerivative[],
+  );
+
+  const fileBarcode = file?.fileBarcode ?? '';
+  const { data: maps, reload: reloadMaps } = useQuery(
+    async () =>
+      fileBarcode
+        ? [...(await service.uploads.maps({ fileBarcode }))].sort(
+            (a, b) => a.pageNo - b.pageNo || b.version - a.version,
+          )
+        : EMPTY_MAPS,
+    [fileBarcode],
+    EMPTY_MAPS,
+  );
+
+  const { data: movements, reload: reloadMovements } = useQuery(
+    () => service.movements.list({ fileId, limit: 50 }),
+    [fileId],
+    EMPTY_MOVEMENTS,
+  );
+
+  const { data: openIssues } = useQuery(
+    () => service.issues.list({ open: true, pageSize: 500 }),
+    [],
+    EMPTY_ISSUE_PAGE,
+  );
+
   useEffect(() => {
     if (!file) return;
     pushRecentFile({
@@ -99,65 +147,84 @@ export function FileDetailPage() {
       status: file.status,
     });
   }, [file, barcode]);
-  const { data: movements, reload: reloadMovements } = useQuery(
-    () => service.movements.list({ fileId: fileId ?? '', limit: 50 }),
-    [fileId],
-    EMPTY_MOVEMENTS,
-  );
-  const { data: scans, reload: reloadScans } = useQuery(
-    () => (fileId ? service.digitization.list(fileId) : Promise.resolve([])),
-    [fileId],
-    EMPTY_SCANS,
-  );
-  // Deliverable PDFs built in the studio; the newest build and its review
-  // state are part of this section's story now.
-  const { data: deliverables } = useQuery(
-    () => (fileId ? service.digitization.listPdfs(fileId) : Promise.resolve([])),
-    [fileId],
-    [] as DocumentDerivative[],
-  );
-  const { data: maps, reload: reloadMaps } = useQuery(
-    () => service.uploads.maps({ fileBarcode: file?.fileBarcode ?? '' }),
-    [file?.fileBarcode],
-    EMPTY_MAPS,
-  );
-  const { data: documents, reload: reloadDocuments } = useQuery(
-    () => (fileId ? service.files.listDocuments(fileId) : Promise.resolve([])),
-    [fileId],
-    EMPTY_DOCUMENTS,
-  );
-  const { data: openIssues } = useQuery(
-    () => service.issues.list({ open: true, pageSize: 500 }),
-    [],
-    EMPTY_ISSUE_PAGE,
-  );
 
-  // The record arrives from the API, so a missing row and an unanswered read
-  // are different states: only the latter is still loading.
   if (!file) {
     return (
-      <div className="space-y-6">
-        <Link to="/files" className="inline-flex items-center gap-2 text-xs font-semibold muted">
-          <ArrowLeft size={15} /> All files
-        </Link>
-        <EmptyState
-          title={loading ? 'Loading file' : 'File not found'}
-          description={
-            loading
-              ? 'Asking the registry for this file.'
-              : 'That id is not in the local registry dataset.'
-          }
-          action={
-            loading ? undefined : (
-              <Link to="/files" className="focus-ring text-xs font-semibold text-accent">
-                Back to the registry
-              </Link>
-            )
-          }
-        />
-      </div>
+      <EmptyState
+        title={loadingFile ? 'Opening document…' : 'File not found'}
+        description={
+          loadingFile ? 'Loading registry record.' : 'That file is not in the registry any more.'
+        }
+        action={
+          loadingFile ? undefined : (
+            <Link to="/files" className="focus-ring text-sm font-semibold text-accent">
+              Back to documents
+            </Link>
+          )
+        }
+      />
     );
   }
+
+  const allVersions: UnifiedDocumentVersion[] = [
+    ...docs.map((doc) => ({
+      id: doc.id,
+      source: 'document' as const,
+      filename: doc.filename,
+      versionLabel: `v${doc.version}`,
+      updatedAt: doc.uploadedAt,
+      pageCount: doc.pageCount,
+      sizeBytes: doc.sizeBytes,
+      status: 'Approved' as const,
+      rawDoc: doc,
+    })),
+    ...deliverables.map((deriv) => ({
+      id: deriv.id,
+      source: 'derivative' as const,
+      filename: deriv.filename,
+      versionLabel: `Build ${deriv.id}`,
+      updatedAt: deriv.createdAt,
+      pageCount: deriv.pageCount,
+      sizeBytes: deriv.sizeBytes,
+      status: (deriv.status === 'Approved'
+        ? 'Approved'
+        : deriv.status === 'Rejected'
+          ? 'Rejected'
+          : 'Pending approval') as UnifiedDocumentVersion['status'],
+      reviewNote: deriv.reviewNote,
+      reviewedBy: deriv.reviewedBy,
+      rawDeriv: deriv,
+    })),
+  ].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+
+  const picked = params.get('v');
+  const selectedVersion = allVersions.find((v) => v.id === picked) ?? allVersions[0];
+  const selectedMap =
+    maps.find((row) => row.id === picked) ?? maps.find((row) => row.hasDocument) ?? maps[0];
+
+  const pick = (id: string) => setParams({ v: id }, { replace: true });
+
+  const doneAction = (msg: string) => {
+    setDialog(null);
+    success(msg);
+    reloadFile();
+    reloadDocs();
+    reloadMaps();
+    reloadDeliverables();
+  };
+
+  const removeDoc = async (doc: RecordFileDocument) => {
+    if (!window.confirm(`Delete ${doc.filename} (version ${doc.version}) permanently?`)) return;
+    const result = await service.files.deleteDocument(fileId, doc.id);
+    if (result.ok) {
+      success(`Deleted ${doc.filename} v${doc.version}.`);
+      if (params.get('v') === doc.id) setParams({}, { replace: true });
+      reloadFile();
+      reloadDocs();
+    } else {
+      danger(result.error);
+    }
+  };
 
   const room = rooms.find((item) => item.id === file.roomId);
   const unit =
@@ -166,22 +233,6 @@ export function FileDetailPage() {
   const openIssue = openIssues.items.find((issue) =>
     issue.lines.some((line) => line.fileId === file.id),
   );
-
-  // Page-by-page scan: register the page row, then attach the scanned image to
-  // it in one flow, so the user never sees an empty metadata row.
-  const addPageScan = async (upload: File): Promise<Result<FileScan>> => {
-    const pageNo = Number(pageNoDraft);
-    if (!Number.isInteger(pageNo) || pageNo < 1) {
-      return err('Page number starts at 1.', 'pageNo');
-    }
-    const added = await service.digitization.add(file.id, {
-      pageNo,
-      filename: upload.name,
-      documentSize: sizeDraft,
-    });
-    if (!added.ok) return added;
-    return service.digitization.addDocument(added.value.id, upload);
-  };
 
   const shelfOptions = rooms.flatMap((item) =>
     item.sections.flatMap((sec) =>
@@ -233,589 +284,686 @@ export function FileDetailPage() {
     );
     setShelfId('');
     setReason('');
-    // Relocation changes the file row and appends a movement event, so both
-    // reads have to be refetched or the page keeps showing the old shelf.
     reloadFile();
     reloadMovements();
   };
 
+  const tabLink = (
+    to: string,
+    label: string,
+    count: number | undefined,
+    IconCmp: typeof FileText,
+    isActive: boolean,
+  ) => (
+    <NavLink
+      to={to}
+      end
+      className={cn(
+        'focus-ring -mb-px inline-flex min-h-11 items-center gap-2 rounded-t-lg border-b-2 px-4 text-sm font-semibold transition',
+        isActive
+          ? 'border-[var(--rr-accent)] text-accent'
+          : 'muted border-transparent hover:text-[var(--rr-text)]',
+      )}
+    >
+      <IconCmp size={17} /> {label}
+      {count !== undefined && (
+        <span className="rounded-full bg-[var(--rr-surface-2)] px-1.5 text-xs">{count}</span>
+      )}
+    </NavLink>
+  );
+
   return (
-    <div className="space-y-7">
-      <button
-        onClick={goBack}
-        className="focus-ring inline-flex items-center gap-2 text-xs font-semibold muted hover:text-[var(--rr-text)]"
-      >
-        <ArrowLeft size={15} /> Back
-      </button>
+    <div className="space-y-5">
+      {/* Identity Bar */}
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div className="min-w-0">
+          <Link
+            to="/files"
+            className="focus-ring muted inline-flex min-h-9 items-center gap-1.5 rounded-lg text-[13px] font-semibold hover:text-[var(--rr-text)]"
+          >
+            <ArrowLeft size={15} /> Documents
+          </Link>
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+            <h1 className="mono text-xl font-bold tracking-tight md:text-2xl">{file.fileNumber}</h1>
+            <StatusBadge status={file.status} />
+          </div>
+          <p className="muted mt-1 max-w-3xl text-sm leading-5">{file.subject}</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {barcode && (
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<Printer size={16} />}
+              onClick={() => window.print()}
+            >
+              Print label
+            </Button>
+          )}
+          {canEdit && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setDialog('move')}
+              icon={<ArrowsLeftRight size={16} />}
+            >
+              Move
+            </Button>
+          )}
+          <Link
+            to="/issue"
+            className="focus-ring inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-base bg-[var(--rr-surface)] px-3 text-[13px] font-semibold hover:bg-[var(--rr-surface-2)]"
+          >
+            Issue / return
+          </Link>
+        </div>
+      </div>
 
-      <PageHeader
-        kicker="Document"
-        title={file.subject}
-        description={`${file.fileNumber} · ${file.department} · ${file.year}`}
-        actions={
-          <>
-            {barcode && (
-              <Button variant="ghost" icon={<Printer size={17} />} onClick={() => window.print()}>
-                Print label
-              </Button>
-            )}
-            <LinkButton to="/issue" icon={<ClipboardText size={17} />}>
-              Issue / move
-            </LinkButton>
-            {allowed('studio.use') && (
-              <LinkButton to={`/files/${file.id}/studio`} icon={<Sparkle size={17} />}>
-                Scan studio
-              </LinkButton>
-            )}
-          </>
-        }
-      />
+      {/* Unified Tab Row */}
+      <div className="flex gap-1 overflow-x-auto border-b border-base">
+        {tabLink(
+          `/files/${file.id}/scan`,
+          'Document Preview',
+          docs.length + deliverables.length,
+          FileText,
+          tab === 'scan',
+        )}
+        {tabLink(`/files/${file.id}/details`, 'Details', undefined, InfoIcon, tab === 'details')}
+        {canStudio &&
+          tabLink(
+            `/files/${file.id}/studio`,
+            'Edit in studio',
+            undefined,
+            PencilSimple,
+            tab === 'studio',
+          )}
+        {tabLink(`/files/${file.id}/map`, 'Map', maps.length, MapTrifold, tab === 'map')}
+      </div>
 
-      <div className="grid gap-5 xl:grid-cols-[1.1fr_.9fr]">
-        <div className="space-y-5">
-          <Card>
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div>
-                <p className="font-mono text-sm font-semibold text-accent">
-                  {barcode ? file.fileBarcode : file.fileNumber}
-                </p>
-                <p className="muted mt-2 text-xs">
-                  {barcode
-                    ? 'Permanent identity · immutable for the file lifecycle'
-                    : 'File number'}
-                </p>
-              </div>
-              <StatusBadge status={file.status} />
-            </div>
-            <div className="mt-6 grid gap-5 sm:grid-cols-2">
-              <Info label="File number" value={file.fileNumber} />
-              <Info label="Department" value={file.department} />
-              <Info label="Type" value={file.fileType} />
-              <Info label="Year" value={String(file.year)} />
-              <Info label="Codal life" value={file.codalLife} />
-              <Info label="Created" value={`${file.createdAt} by ${file.createdBy}`} />
-              <Info label="Area / pincode" value={`${file.area || '—'} / ${file.pincode || '—'}`} />
-              <Info
-                label="Property"
-                value={`${file.propertyNo || '—'} · ${file.propertyArea || '—'}`}
-              />
-              <Info label="Dealer" value={file.dealer || '—'} />
-              <Info label="Last movement" value={file.lastMovement} />
-            </div>
-            {barcode && (
-              <div className="mt-6 rounded-xl bg-[var(--rr-bg)] p-4 text-[var(--rr-text)]">
-                <BarcodeSymbol value={buildPayload('File', file.fileBarcode).value} height={56} />
-              </div>
-            )}
-          </Card>
-
-          <Card>
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <p className="text-sm font-semibold">E-office reference</p>
-                <p className="muted mt-1 text-xs">
-                  {file.eOfficeReference?.trim()
-                    ? 'This registry record is linked to an e-office file.'
-                    : 'No e-office file name or ID has been recorded.'}
-                </p>
-              </div>
-              <Badge tone={file.eOfficeReference?.trim() ? 'success' : 'neutral'}>
-                {file.eOfficeReference?.trim() ? 'Linked' : 'Not linked'}
-              </Badge>
-            </div>
-            {file.eOfficeReference?.trim() && (
-              <p className="mt-3 break-all rounded-lg bg-[var(--rr-bg)] p-3 font-mono text-xs">
-                {file.eOfficeReference}
-              </p>
-            )}
-            {allowed('files.edit') && (
-              <div className="mt-4 space-y-3 border-t border-base pt-4">
-                <Field
-                  label="E-office file name / ID"
-                  htmlFor="eoffice-reference"
-                  hint="Optional. Clear the field to remove the link."
-                >
-                  <TextInput
-                    id="eoffice-reference"
-                    value={eOfficeDraft ?? file.eOfficeReference ?? ''}
-                    onChange={(event) => setEOfficeDraft(event.target.value)}
-                    placeholder="e.g. EOFFICE/REV/2026/00123"
-                  />
-                </Field>
-                <div className="flex justify-end">
-                  <Button onClick={() => void saveEOfficeReference()} disabled={savingEOffice}>
-                    {savingEOffice ? 'Saving…' : 'Save e-office reference'}
-                  </Button>
-                </div>
-              </div>
-            )}
-          </Card>
-
-          <Card>
-            <div className="flex items-center gap-2">
-              <FileText className="text-accent" size={19} />
-              <p className="text-sm font-semibold">Description</p>
-            </div>
-            <p className="muted mt-4 text-sm leading-7">{file.description}</p>
-          </Card>
-
-          <Card>
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <FileText className="text-accent" size={19} />
-                <p className="text-sm font-semibold">Scans</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <Badge tone={documents.length + scans.length ? 'success' : 'neutral'}>
-                  {documents.length + scans.length} item(s)
-                </Badge>
-                {allowed('studio.use') && (
-                  <LinkButton
-                    to={`/files/${file.id}/studio`}
-                    icon={<Sparkle size={15} />}
-                    className="!min-h-9 !px-3 text-xs"
-                  >
-                    Open studio
-                  </LinkButton>
-                )}
-              </div>
-            </div>
-            <p className="muted mt-2 text-xs leading-5">
-              Add a full-PDF scan for the record, or page-by-page scans with a page number and sheet
-              size. Rescans become new versions; page scans await review in the Digitization queue.
-              Composing — reorder, replace, add pages, build the deliverable PDF — happens in the
-              studio, and every built PDF waits for reviewer approval before it counts as the
-              deliverable.
-            </p>
-
-            {deliverables.length > 0 && (
-              <div className="mt-4 rounded-xl border border-base bg-accent-soft/40 p-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
+      {/* TAB 1: Document Preview */}
+      {tab === 'scan' && (
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+          {/* Main Viewer Area (Full Height & Page-size Responsive) */}
+          <div className="min-w-0">
+            {selectedVersion ? (
+              <DocumentViewer
+                fill
+                docKey={selectedVersion.id}
+                load={() =>
+                  selectedVersion.source === 'document'
+                    ? service.files.documentBlob(file.id, selectedVersion.id)
+                    : service.digitization.pdfBlob(selectedVersion.id)
+                }
+                filename={selectedVersion.filename}
+                contentType={
+                  selectedVersion.source === 'document'
+                    ? selectedVersion.rawDoc?.contentType
+                    : 'application/pdf'
+                }
+                toolbar={
                   <div className="min-w-0">
-                    <p className="text-xs font-semibold uppercase tracking-wide muted">
-                      Deliverable PDF (latest of {deliverables.length})
-                    </p>
-                    <p className="mt-1 break-all text-xs font-semibold">
-                      {deliverables[0].filename}
-                    </p>
-                    <p className="muted mt-1 text-[11px]">
-                      {deliverables[0].pageCount} page(s) · built {deliverables[0].createdAt} by{' '}
-                      {deliverables[0].createdBy}
-                      {deliverables[0].reviewedBy
-                        ? ` · reviewed by ${deliverables[0].reviewedBy}`
+                    <div className="flex items-center gap-2">
+                      <p className="truncate text-sm font-semibold">{selectedVersion.filename}</p>
+                      {selectedVersion.source === 'derivative' &&
+                        selectedVersion.status !== 'Approved' && (
+                          <Badge
+                            tone={selectedVersion.status === 'Rejected' ? 'danger' : 'warning'}
+                          >
+                            {selectedVersion.status}
+                          </Badge>
+                        )}
+                    </div>
+                    <p className="muted text-xs">
+                      {selectedVersion.versionLabel} ·{' '}
+                      {selectedVersion.sizeBytes
+                        ? formatDocumentSize(selectedVersion.sizeBytes)
+                        : ''}
+                      {selectedVersion.pageCount
+                        ? ` · ${describePageCount(selectedVersion.pageCount)}`
                         : ''}
                     </p>
-                    {deliverables[0].reviewNote && (
-                      <p className="muted mt-1 text-[11px]">Note: {deliverables[0].reviewNote}</p>
-                    )}
                   </div>
-                  <Badge
-                    tone={
-                      deliverables[0].status === 'Approved'
-                        ? 'success'
-                        : deliverables[0].status === 'Rejected'
-                          ? 'danger'
-                          : 'warning'
-                    }
-                  >
-                    {deliverables[0].status}
-                  </Badge>
-                </div>
-              </div>
-            )}
-            {allowed('digitization.upload') && (
-              <div className="mt-4 rounded-xl border border-base p-4">
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setScanMode('pdf')}
-                    className={
-                      'focus-ring rounded-lg px-3 py-1.5 text-xs font-semibold ' +
-                      (scanMode === 'pdf'
-                        ? 'bg-accent text-white'
-                        : 'border border-base hover:bg-surface-muted')
-                    }
-                  >
-                    Full PDF
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setScanMode('page')}
-                    className={
-                      'focus-ring rounded-lg px-3 py-1.5 text-xs font-semibold ' +
-                      (scanMode === 'page'
-                        ? 'bg-accent text-white'
-                        : 'border border-base hover:bg-surface-muted')
-                    }
-                  >
-                    Page scan
-                  </button>
-                </div>
-                {scanMode === 'pdf' ? (
-                  <div className="mt-4">
-                    <DocumentUploadActions
-                      filename={
-                        (barcode ? file.fileBarcode : file.fileNumber.replace(/[\\/]+/g, '-')) +
-                        '.pdf'
-                      }
-                      hasDocument={false}
-                      canUpload={allowed('files.edit')}
-                      onUpload={(upload) => service.files.uploadDocument(file.id, upload)}
-                      getBlob={() =>
-                        Promise.reject(new Error('No document has been uploaded yet.'))
-                      }
-                      onUploaded={() => reloadDocuments()}
-                    />
-                  </div>
-                ) : (
-                  <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                    <Field label="Page number" htmlFor="scan-page-no">
-                      <TextInput
-                        id="scan-page-no"
-                        type="number"
-                        min={1}
-                        value={pageNoDraft}
-                        onChange={(event) => setPageNoDraft(event.target.value)}
-                      />
-                    </Field>
-                    <Field
-                      label="Sheet size"
-                      htmlFor="scan-size"
-                      hint={file.documentSize ? `File default: ${file.documentSize}` : undefined}
-                    >
-                      <SelectInput
-                        id="scan-size"
-                        value={sizeDraft}
-                        onChange={(event) => setSizeDraft(event.target.value)}
-                      >
-                        <option value="">Inherit file size</option>
-                        {['A0', 'A1', 'A2', 'A3', 'A4', 'Other'].map((size) => (
-                          <option key={size} value={size}>
-                            {size}
-                          </option>
-                        ))}
-                      </SelectInput>
-                    </Field>
-                    <div className="sm:col-span-3">
-                      <DocumentUploadActions
-                        filename={`Page ${pageNoDraft || '?'} scan`}
-                        hasDocument={false}
-                        canUpload
-                        onUpload={(upload) => addPageScan(upload)}
-                        getBlob={() => Promise.reject(new Error('No scan uploaded yet.'))}
-                        onUploaded={() => {
-                          reloadScans();
-                          reloadFile();
-                        }}
-                      />
+                }
+              />
+            ) : (
+              <Card>
+                <EmptyState
+                  title="No scan uploaded yet"
+                  description="Upload a full-PDF scan for this document, or open Edit in studio to scan pages and build a deliverable PDF."
+                  action={
+                    <div className="flex flex-wrap gap-2">
+                      {canEdit && (
+                        <Button
+                          size="sm"
+                          onClick={() => setDialog('upload')}
+                          icon={<UploadSimple size={16} />}
+                        >
+                          Upload scan
+                        </Button>
+                      )}
+                      {canStudio && (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          icon={<PencilSimple size={16} />}
+                          onClick={() => navigate(`/files/${file.id}/studio`)}
+                        >
+                          Edit in studio
+                        </Button>
+                      )}
                     </div>
-                  </div>
+                  }
+                />
+              </Card>
+            )}
+          </div>
+
+          {/* Right Sidebar: Selectable Version History */}
+          <div className="space-y-4">
+            <Card>
+              <div className="mb-3 flex items-center justify-between border-b border-base pb-3">
+                <div>
+                  <p className="text-sm font-semibold">Document versions</p>
+                  <p className="muted text-xs">{allVersions.length} stored version(s)</p>
+                </div>
+                {canEdit && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => setDialog('upload')}
+                    icon={<UploadSimple size={15} />}
+                  >
+                    Upload scan
+                  </Button>
                 )}
               </div>
-            )}
 
-            {documents.length > 0 && (
-              <div className="mt-5">
-                <p className="text-xs font-semibold uppercase tracking-wide muted">
-                  Full-PDF versions
-                </p>
-                <div className="mt-3 space-y-3">
-                  {documents.map((document, index) => (
-                    <div key={document.id} className="rounded-xl border border-base p-3">
-                      <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <p className="break-all text-xs font-semibold">{document.filename}</p>
-                          <p className="muted mt-1 text-[11px]">
-                            Version {document.version} ·{' '}
-                            {new Date(document.uploadedAt).toLocaleString()} · {document.uploadedBy}
-                          </p>
+              {allVersions.length === 0 ? (
+                <p className="muted py-4 text-center text-xs">No scan versions recorded yet.</p>
+              ) : (
+                <ul className="divide-y divide-[var(--rr-border)]">
+                  {allVersions.map((version, index) => {
+                    const isSelected = selectedVersion?.id === version.id;
+                    const isCurrent = index === 0;
+
+                    return (
+                      <li
+                        key={version.id}
+                        className={cn(
+                          'rounded-xl p-3 transition',
+                          isSelected
+                            ? 'border border-[var(--rr-accent)] bg-accent-soft/40'
+                            : 'hover:bg-[var(--rr-surface-2)]',
+                        )}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <button
+                            type="button"
+                            onClick={() => pick(version.id)}
+                            className="min-w-0 flex-1 text-left focus:outline-none"
+                          >
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="truncate text-xs font-semibold">
+                                {version.filename}
+                              </span>
+                              {isCurrent && <Badge tone="success">Current version</Badge>}
+                              {version.source === 'derivative' && version.status !== 'Approved' && (
+                                <Badge tone={version.status === 'Rejected' ? 'danger' : 'warning'}>
+                                  {version.status}
+                                </Badge>
+                              )}
+                            </div>
+                            <p className="muted mt-1 text-[11px]">
+                              {version.versionLabel} ·{' '}
+                              {new Date(version.updatedAt).toLocaleString()}
+                            </p>
+                            <p className="muted text-[11px]">
+                              {version.sizeBytes ? formatDocumentSize(version.sizeBytes) : ''}
+                              {version.pageCount
+                                ? ` · ${describePageCount(version.pageCount)}`
+                                : ''}
+                            </p>
+                            {version.reviewNote && (
+                              <p className="mt-1 text-[11px] text-[var(--rr-warning)]">
+                                Note: {version.reviewNote}
+                              </p>
+                            )}
+                          </button>
+                          <div className="flex items-center gap-1">
+                            {canStudio && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="!h-7 !px-2 text-[11px]"
+                                onClick={() => navigate(`/files/${file.id}/studio`)}
+                                title="Open this file in studio"
+                              >
+                                Edit in studio
+                              </Button>
+                            )}
+                            {version.source === 'document' && version.rawDoc && canDeleteScan && (
+                              <button
+                                type="button"
+                                onClick={() => void removeDoc(version.rawDoc!)}
+                                className="focus-ring rounded p-1 text-[var(--rr-muted)] hover:text-[var(--rr-danger)]"
+                                title="Delete this scan version"
+                                aria-label="Delete this scan version"
+                              >
+                                <Trash size={14} />
+                              </button>
+                            )}
+                          </div>
                         </div>
-                        {index === 0 && <Badge tone="success">Latest</Badge>}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </Card>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 2: Details (Clean metadata & physical placement — NO redundant preview) */}
+      {tab === 'details' && (
+        <div className="grid gap-5 xl:grid-cols-[1.1fr_.9fr]">
+          <div className="space-y-5">
+            <Card>
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <p className="font-mono text-sm font-semibold text-accent">
+                    {barcode ? file.fileBarcode : file.fileNumber}
+                  </p>
+                  <p className="muted mt-2 text-xs">
+                    {barcode
+                      ? 'Permanent identity · immutable for the file lifecycle'
+                      : 'File number'}
+                  </p>
+                </div>
+                <StatusBadge status={file.status} />
+              </div>
+              <div className="mt-6 grid gap-5 sm:grid-cols-2">
+                <Info label="File number" value={file.fileNumber} />
+                <Info label="Department" value={file.department} />
+                <Info label="Type" value={file.fileType} />
+                <Info label="Year" value={String(file.year)} />
+                <Info label="Codal life" value={file.codalLife} />
+                <Info label="Created" value={`${file.createdAt} by ${file.createdBy}`} />
+                <Info
+                  label="Area / pincode"
+                  value={`${file.area || '—'} / ${file.pincode || '—'}`}
+                />
+                <Info
+                  label="Property"
+                  value={`${file.propertyNo || '—'} · ${file.propertyArea || '—'}`}
+                />
+                <Info label="Dealer" value={file.dealer || '—'} />
+                <Info label="Last movement" value={file.lastMovement} />
+              </div>
+              {barcode && (
+                <div className="mt-6 rounded-xl bg-[var(--rr-bg)] p-4 text-[var(--rr-text)]">
+                  <BarcodeSymbol value={buildPayload('File', file.fileBarcode).value} height={56} />
+                </div>
+              )}
+            </Card>
+
+            <Card>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold">E-office reference</p>
+                  <p className="muted mt-1 text-xs">
+                    {file.eOfficeReference?.trim()
+                      ? 'This registry record is linked to an e-office file.'
+                      : 'No e-office file name or ID has been recorded.'}
+                  </p>
+                </div>
+                <Badge tone={file.eOfficeReference?.trim() ? 'success' : 'neutral'}>
+                  {file.eOfficeReference?.trim() ? 'Linked' : 'Not linked'}
+                </Badge>
+              </div>
+              {file.eOfficeReference?.trim() && (
+                <p className="mt-3 break-all rounded-lg bg-[var(--rr-bg)] p-3 font-mono text-xs">
+                  {file.eOfficeReference}
+                </p>
+              )}
+              {allowed('files.edit') && (
+                <div className="mt-4 space-y-3 border-t border-base pt-4">
+                  <Field
+                    label="E-office file name / ID"
+                    htmlFor="eoffice-reference"
+                    hint="Optional. Clear the field to remove the link."
+                  >
+                    <TextInput
+                      id="eoffice-reference"
+                      value={eOfficeDraft ?? file.eOfficeReference ?? ''}
+                      onChange={(event) => setEOfficeDraft(event.target.value)}
+                      placeholder="e.g. EOFFICE/REV/2026/00123"
+                    />
+                  </Field>
+                  <div className="flex justify-end">
+                    <Button onClick={() => void saveEOfficeReference()} disabled={savingEOffice}>
+                      {savingEOffice ? 'Saving…' : 'Save e-office reference'}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </Card>
+
+            <Card>
+              <div className="flex items-center gap-2">
+                <FileText className="text-accent" size={19} />
+                <p className="text-sm font-semibold">Description</p>
+              </div>
+              <p className="muted mt-4 text-sm leading-7">
+                {file.description || 'No description provided.'}
+              </p>
+            </Card>
+
+            <Card padding={false} className="overflow-hidden">
+              <div className="flex items-center gap-2 border-b border-base p-5">
+                <ClockCounterClockwise className="text-accent" size={19} />
+                <p className="text-sm font-semibold">Location and movement history</p>
+              </div>
+              {movements.length === 0 ? (
+                <p className="muted p-5 text-xs">No recorded movement for this file yet.</p>
+              ) : (
+                <ol className="divide-y divide-[var(--rr-border)]">
+                  {movements.map((event) => (
+                    <li key={event.id} className="p-5">
+                      <div className="flex items-center justify-between gap-3">
+                        <Badge tone="info">{event.kind}</Badge>
+                        <span className="muted text-[11px]">
+                          {event.at} · {event.actor}
+                        </span>
                       </div>
-                      <DocumentUploadActions
-                        filename={document.filename}
-                        version={document.version}
-                        hasDocument
-                        contentType={document.contentType}
-                        sizeBytes={document.sizeBytes}
-                        pageCount={document.pageCount}
-                        canUpload={index === 0 && allowed('files.edit')}
-                        onUpload={(upload) => service.files.uploadDocument(file.id, upload)}
-                        getBlob={() => service.files.documentBlob(file.id, document.id)}
-                        onUploaded={() => reloadDocuments()}
+                      <div className="mt-3 grid gap-3 text-xs sm:grid-cols-2">
+                        <div>
+                          <p className="muted text-[10px] uppercase tracking-wider">From</p>
+                          <p className="mt-0.5 font-semibold">{event.from}</p>
+                        </div>
+                        <div>
+                          <p className="muted text-[10px] uppercase tracking-wider">To</p>
+                          <p className="mt-0.5 font-semibold">{event.to}</p>
+                        </div>
+                      </div>
+                      <p className="muted mt-2 text-[11px]">{event.detail}</p>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </Card>
+          </div>
+
+          <div className="space-y-5">
+            <Card>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold">Exact physical location</p>
+                  <p className="muted mt-1 text-xs">Room → section → almirah → shelf</p>
+                </div>
+                <MapPin className="text-accent" size={19} />
+              </div>
+              <div className="mt-4 rounded-xl bg-accent-soft p-4">
+                <p className="text-sm font-semibold">{file.location || 'Not placed'}</p>
+                {file.shelfId ? (
+                  <>
+                    <p className="muted mt-2 text-xs">
+                      Approximate shelf position · {file.position}% along shelf
+                    </p>
+                    <div className="mt-3 h-3 overflow-hidden rounded-full bg-[var(--rr-surface)]">
+                      <div
+                        className="h-full rounded-full bg-[var(--rr-accent)]"
+                        style={{ width: `${file.position}%` }}
                       />
                     </div>
-                  ))}
-                  {documents.some((item) => item.sha256) && (
-                    <p className="muted break-all text-[10px]">
-                      SHA-256 checksums are retained in upload metadata for integrity verification.
+                  </>
+                ) : (
+                  <p className="muted mt-2 text-xs">
+                    Not on a shelf yet — pick a shelf below to place it.
+                  </p>
+                )}
+                {barcode && (
+                  <p className="muted mt-3 font-mono text-[11px]">
+                    shelf barcode {file.shelfBarcode || '—'}
+                  </p>
+                )}
+              </div>
+              <div className="mt-4 flex gap-2">
+                {file.roomId ? (
+                  <Link
+                    to={`/rooms/${file.roomId}`}
+                    className="focus-ring inline-flex flex-1 items-center justify-center gap-2 rounded-lg border border-base bg-[var(--rr-surface)] py-2 text-xs font-semibold hover:bg-[var(--rr-surface-2)]"
+                  >
+                    <MapPin size={16} /> Open room
+                  </Link>
+                ) : (
+                  <p className="muted flex-1 text-xs">No room assigned yet.</p>
+                )}
+              </div>
+              {section && (
+                <p className="muted mt-4 border-t border-base pt-4 text-xs leading-6">
+                  Section <span className="font-mono font-semibold">{section.name}</span> of room{' '}
+                  {room?.code}.
+                </p>
+              )}
+            </Card>
+
+            {unit && (
+              <Card>
+                <ShelfView unit={unit} activeShelf={file.shelf} />
+              </Card>
+            )}
+
+            <Card>
+              <div className="flex items-center gap-2">
+                <UserCircle className="text-accent" size={19} />
+                <p className="text-sm font-semibold">Current custodian state</p>
+              </div>
+              <div className="mt-4 flex items-start gap-3 rounded-xl bg-[var(--rr-bg)] p-4">
+                <CheckCircle
+                  size={20}
+                  className={file.holder ? 'text-[var(--rr-warning)]' : 'text-[var(--rr-success)]'}
+                />
+                <div>
+                  <p className="text-sm font-semibold">{file.holder ?? 'In record room'}</p>
+                  {openIssue ? (
+                    <p className="muted mt-1 text-xs">
+                      Receipt {openIssue.receiptNumber} · due {openIssue.dueAt} ·{' '}
+                      {openIssue.purpose}
+                    </p>
+                  ) : (
+                    <p className="muted mt-1 text-xs">
+                      Custody changes only through the issue and return desks.
                     </p>
                   )}
                 </div>
               </div>
-            )}
+            </Card>
 
-            {scans.length > 0 && (
-              <div className="mt-5">
-                <p className="text-xs font-semibold uppercase tracking-wide muted">Page scans</p>
-                <div className="mt-3 space-y-3">
-                  {scans.map((scan) => (
-                    <div key={scan.id} className="rounded-xl border border-base p-3">
-                      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="break-all text-xs font-semibold">{scan.filename}</p>
-                          <p className="muted mt-1 text-[11px]">
-                            Page {scan.pageNo} · v{scan.version} · {scan.documentSize}
-                          </p>
-                        </div>
-                        <StatusBadge status={scan.status} />
-                      </div>
-                      {scan.note && <p className="muted mb-2 text-[11px]">{scan.note}</p>}
-                      <DocumentUploadActions
-                        filename={scan.filename}
-                        version={scan.version}
-                        hasDocument={scan.hasDocument === true}
-                        contentType={scan.contentType}
-                        sizeBytes={scan.sizeBytes}
-                        pageCount={scan.pageCount}
-                        canUpload={allowed('digitization.upload')}
-                        onUpload={(upload) => service.digitization.addDocument(scan.id, upload)}
-                        getBlob={() => service.digitization.scanBlob(scan.id)}
-                        onUploaded={() => reloadScans()}
-                      />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </Card>
-
-          <Card>
-            <div className="flex items-center gap-2">
-              <MapPin className="text-accent" size={19} />
-              <p className="text-sm font-semibold">Maps and copies</p>
-            </div>
-            <p className="muted mt-1 text-xs leading-5">
-              Actual map scans are stored as versioned files. Existing metadata-only map rows can be
-              uploaded here as well.
-            </p>
-            {maps.length === 0 ? (
-              <p className="muted mt-4 text-xs">No map/copy rows are registered for this file.</p>
-            ) : (
-              <div className="mt-4 space-y-3">
-                {maps.map((map) => (
-                  <div key={map.id} className="rounded-xl border border-base p-3">
-                    <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="break-all text-xs font-semibold">{map.filename}</p>
-                        <p className="muted mt-1 text-[11px]">
-                          Page {map.pageNo} · v{map.version} · {map.sizeKb} KiB
-                        </p>
-                      </div>
-                      <StatusBadge status={map.status} />
-                    </div>
-                    <DocumentUploadActions
-                      filename={map.filename}
-                      version={map.version}
-                      hasDocument={map.hasDocument === true}
-                      contentType={map.contentType}
-                      sizeBytes={map.sizeBytes}
-                      canUpload={allowed('files.edit') || allowed('digitization.upload')}
-                      onUpload={(upload) => service.uploads.uploadMapDocument(map.id, upload)}
-                      getBlob={() => service.uploads.mapBlob(map.id)}
-                      onUploaded={() => reloadMaps()}
+            {allowed('files.edit') && (
+              <Card>
+                <p className="text-sm font-semibold">
+                  {file.shelfId ? 'Relocate this file' : 'Place this file on a shelf'}
+                </p>
+                <div className="mt-4 space-y-4">
+                  <Field label="New shelf" htmlFor="relocate-shelf" required>
+                    <SelectInput
+                      id="relocate-shelf"
+                      value={shelfId}
+                      onChange={(event) => setShelfId(event.target.value)}
+                    >
+                      <option value="">Select a shelf</option>
+                      {shelfOptions.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </SelectInput>
+                  </Field>
+                  <Field label="Position on shelf (1–100)" htmlFor="relocate-position">
+                    <TextInput
+                      id="relocate-position"
+                      type="number"
+                      min={1}
+                      max={100}
+                      value={position}
+                      onChange={(event) => setPosition(Number(event.target.value))}
                     />
-                  </div>
-                ))}
-              </div>
+                  </Field>
+                  <Field label="Reason" htmlFor="relocate-reason">
+                    <TextInput
+                      id="relocate-reason"
+                      value={reason}
+                      onChange={(event) => setReason(event.target.value)}
+                      placeholder="Shelf mapping reconciled during physical audit"
+                    />
+                  </Field>
+                  <Button className="w-full" onClick={relocate} disabled={!shelfId}>
+                    {file.shelfId ? 'Relocate file' : 'Place file'}
+                  </Button>
+                </div>
+              </Card>
             )}
-          </Card>
+          </div>
+        </div>
+      )}
 
-          <Card padding={false} className="overflow-hidden">
-            <div className="flex items-center gap-2 border-b border-base p-5">
-              <ClockCounterClockwise className="text-accent" size={19} />
-              <p className="text-sm font-semibold">Location and movement history</p>
-            </div>
-            {movements.length === 0 ? (
-              <p className="muted p-5 text-xs">No recorded movement for this file yet.</p>
-            ) : (
-              <ol className="divide-y divide-[var(--rr-border)]">
-                {movements.map((event) => (
-                  <li key={event.id} className="p-5">
-                    <div className="flex items-center justify-between gap-3">
-                      <Badge tone="info">{event.kind}</Badge>
-                      <span className="muted text-[11px]">
-                        {event.at} · {event.actor}
+      {/* TAB 3: Edit in studio */}
+      {tab === 'studio' && (
+        <div>
+          <ScanStudioPage embedded />
+        </div>
+      )}
+
+      {/* TAB 4: Map (Large format / A0 optimized) */}
+      {tab === 'map' && (
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+          {/* Main Map Viewer */}
+          <div className="min-w-0">
+            {selectedMap?.hasDocument ? (
+              <DocumentViewer
+                fill
+                docKey={selectedMap.id}
+                load={() => service.uploads.mapBlob(selectedMap.id)}
+                filename={selectedMap.filename}
+                contentType={selectedMap.contentType}
+                toolbar={
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="truncate text-sm font-semibold">{selectedMap.filename}</p>
+                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+                        A0 Map
                       </span>
                     </div>
-                    <div className="mt-3 grid gap-3 text-xs sm:grid-cols-2">
-                      <div>
-                        <p className="muted text-[10px] uppercase tracking-wider">From</p>
-                        <p className="mt-0.5 font-semibold">{event.from}</p>
-                      </div>
-                      <div>
-                        <p className="muted text-[10px] uppercase tracking-wider">To</p>
-                        <p className="mt-0.5 font-semibold">{event.to}</p>
-                      </div>
-                    </div>
-                    <p className="muted mt-2 text-[11px]">{event.detail}</p>
-                  </li>
-                ))}
-              </ol>
-            )}
-          </Card>
-        </div>
-
-        <div className="space-y-5">
-          <Card>
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-semibold">Exact physical location</p>
-                <p className="muted mt-1 text-xs">Room → section → almirah → shelf</p>
-              </div>
-              <MapPin className="text-accent" size={19} />
-            </div>
-            <div className="mt-4 rounded-xl bg-accent-soft p-4">
-              <p className="text-sm font-semibold">{file.location || 'Not placed'}</p>
-              {file.shelfId ? (
-                <>
-                  <p className="muted mt-2 text-xs">
-                    Approximate shelf position · {file.position}% along shelf
-                  </p>
-                  <div className="mt-3 h-3 overflow-hidden rounded-full bg-[var(--rr-surface)]">
-                    <div
-                      className="h-full rounded-full bg-[var(--rr-accent)]"
-                      style={{ width: `${file.position}%` }}
-                    />
+                    <p className="muted text-xs">
+                      Page {selectedMap.pageNo} · Version {selectedMap.version} ·{' '}
+                      {selectedMap.sizeKb} KB
+                    </p>
                   </div>
-                </>
-              ) : (
-                <p className="muted mt-2 text-xs">
-                  Not on a shelf yet — pick a shelf below to place it. The file can still be issued
-                  by scanning its barcode.
-                </p>
-              )}
-              {barcode && (
-                <p className="muted mt-3 font-mono text-[11px]">
-                  shelf barcode {file.shelfBarcode || '—'}
-                </p>
-              )}
-            </div>
-            <div className="mt-4 flex gap-2">
-              {file.roomId ? (
-                <LinkButton
-                  to={`/rooms/${file.roomId}`}
-                  variant="ghost"
-                  className="flex-1"
-                  icon={<MapPin size={16} />}
-                >
-                  Open room
-                </LinkButton>
-              ) : (
-                <p className="muted flex-1 text-xs">No room assigned yet.</p>
-              )}
-              {barcode && (
-                <LinkButton
-                  to="/scan"
-                  variant="ghost"
-                  className="flex-1"
-                  icon={<Barcode size={16} />}
-                >
-                  Validate scan
-                </LinkButton>
-              )}
-            </div>
-            {section && (
-              <p className="muted mt-4 border-t border-base pt-4 text-xs leading-6">
-                Section <span className="font-mono font-semibold">{section.name}</span> of room{' '}
-                {room?.code}. A section may only be deactivated once its almirahs are, which is what
-                keeps every file resolvable to a shelf.
-              </p>
-            )}
-          </Card>
-
-          {unit && (
-            <Card>
-              <ShelfView unit={unit} activeShelf={file.shelf} />
-            </Card>
-          )}
-
-          <Card>
-            <div className="flex items-center gap-2">
-              <UserCircle className="text-accent" size={19} />
-              <p className="text-sm font-semibold">Current custodian state</p>
-            </div>
-            <div className="mt-4 flex items-start gap-3 rounded-xl bg-[var(--rr-bg)] p-4">
-              <CheckCircle
-                size={20}
-                className={file.holder ? 'text-[var(--rr-warning)]' : 'text-[var(--rr-success)]'}
+                }
               />
-              <div>
-                <p className="text-sm font-semibold">{file.holder ?? 'In record room'}</p>
-                {openIssue ? (
-                  <p className="muted mt-1 text-xs">
-                    Receipt {openIssue.receiptNumber} · due {openIssue.dueAt} · {openIssue.purpose}
-                  </p>
-                ) : (
-                  <p className="muted mt-1 text-xs">
-                    Custody changes only through the issue and return desks.
-                  </p>
+            ) : (
+              <Card>
+                <EmptyState
+                  title="No map document attached"
+                  description="Register or upload an A0 map drawing or copy for this file."
+                  action={
+                    canUploadMap && (
+                      <Button
+                        size="sm"
+                        onClick={() => setDialog('mapUpload')}
+                        icon={<MapPinPlus size={16} />}
+                      >
+                        Upload map
+                      </Button>
+                    )
+                  }
+                />
+              </Card>
+            )}
+          </div>
+
+          {/* Right Sidebar: Map Versions */}
+          <div className="space-y-4">
+            <Card>
+              <div className="mb-3 flex items-center justify-between border-b border-base pb-3">
+                <div>
+                  <p className="text-sm font-semibold">Map versions</p>
+                  <p className="muted text-xs">{maps.length} map row(s)</p>
+                </div>
+                {canUploadMap && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => setDialog('mapUpload')}
+                    icon={<MapPinPlus size={15} />}
+                  >
+                    Upload map
+                  </Button>
                 )}
               </div>
-            </div>
-          </Card>
 
-          {allowed('files.edit') && (
-            <Card>
-              <p className="text-sm font-semibold">
-                {file.shelfId ? 'Relocate this file' : 'Place this file on a shelf'}
-              </p>
-              <p className="muted mt-1 text-xs leading-6">
-                {file.shelfId
-                  ? 'Identity never changes. Only the shelf and position move, and the change is written to the movement log and the audit trail together.'
-                  : 'This file is not on a shelf yet. Pick a shelf below to place it — identity never changes, and the placement is written to the movement log and the audit trail.'}
-              </p>
-              <div className="mt-4 space-y-4">
-                <Field label="New shelf" htmlFor="relocate-shelf" required>
-                  <SelectInput
-                    id="relocate-shelf"
-                    value={shelfId}
-                    onChange={(event) => setShelfId(event.target.value)}
-                  >
-                    <option value="">Select a shelf</option>
-                    {shelfOptions.map((option) => (
-                      <option key={option.id} value={option.id}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </SelectInput>
-                </Field>
-                <Field label="Position on shelf (1–100)" htmlFor="relocate-position">
-                  <TextInput
-                    id="relocate-position"
-                    type="number"
-                    min={1}
-                    max={100}
-                    value={position}
-                    onChange={(event) => setPosition(Number(event.target.value))}
-                  />
-                </Field>
-                <Field label="Reason" htmlFor="relocate-reason">
-                  <TextInput
-                    id="relocate-reason"
-                    value={reason}
-                    onChange={(event) => setReason(event.target.value)}
-                    placeholder="Shelf mapping reconciled during physical audit"
-                  />
-                </Field>
-                <Button className="w-full" onClick={relocate} disabled={!shelfId}>
-                  {file.shelfId ? 'Relocate file' : 'Place file'}
-                </Button>
-              </div>
+              {maps.length === 0 ? (
+                <p className="muted py-4 text-center text-xs">No maps registered for this file.</p>
+              ) : (
+                <ul className="divide-y divide-[var(--rr-border)]">
+                  {maps.map((m) => {
+                    const isSelected = selectedMap?.id === m.id;
+                    return (
+                      <li
+                        key={m.id}
+                        className={cn(
+                          'rounded-xl p-3 transition',
+                          isSelected
+                            ? 'bg-accent-soft/40 border border-[var(--rr-accent)]'
+                            : 'hover:bg-[var(--rr-surface-2)]',
+                        )}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => pick(m.id)}
+                          className="w-full text-left focus:outline-none"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="truncate text-xs font-semibold">{m.filename}</span>
+                            <StatusBadge status={m.status} />
+                          </div>
+                          <p className="muted mt-1 text-[11px]">
+                            Page {m.pageNo} · v{m.version} · {m.sizeKb} KB
+                          </p>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
             </Card>
-          )}
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* Dialog Modals */}
+      {dialog === 'move' && (
+        <MoveFileModal
+          file={file}
+          onClose={() => setDialog(null)}
+          onDone={(msg) => doneAction(msg)}
+        />
+      )}
+      {dialog === 'upload' && (
+        <UploadFileModal
+          file={file}
+          onClose={() => setDialog(null)}
+          onDone={(msg) => doneAction(msg)}
+        />
+      )}
+      {dialog === 'mapUpload' && (
+        <UploadMapModal
+          file={file}
+          onClose={() => setDialog(null)}
+          onDone={(msg) => doneAction(msg)}
+        />
+      )}
     </div>
   );
 }
