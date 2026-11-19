@@ -42,7 +42,11 @@ public sealed class RecordFileDocumentsController(IRecordFileDocumentsService do
         return File(item.Stream, item.ContentType, enableRangeProcessing: true);
     }
 
-    /// <summary>Removing a stored scan version is a destructive admin action.</summary>
+    /// <summary>
+    /// Removing a stored scan version is destructive and gated by files.edit:
+    /// Admin and Supervisor (who hold that cell) can delete, Operator and
+    /// Employee cannot.
+    /// </summary>
     [Authorize(Policy = "perm:files.edit")]
     [HttpDelete("{documentId:long}")]
     public async Task<IResult> Delete(int fileId, long documentId, CancellationToken ct) =>

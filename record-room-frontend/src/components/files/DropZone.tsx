@@ -3,17 +3,31 @@ import { FileArrowUp, FilePdf, X } from '@phosphor-icons/react';
 import { documentAcceptAttribute, formatDocumentSize } from '../../lib/document';
 import { cn } from '../../lib/utils';
 
-/** Tap-or-drop file picker for scans. Validation is the caller's job. */
+/**
+ * Tap-or-drop file picker for scans. Validation is the caller's job. `accept`
+ * narrows the picker (PDF-only on the file detail page); with `multiple`, a
+ * drop or pick of several files goes to `onFiles` as a queue, single picks
+ * still go to `onFile`.
+ */
 export function DropZone({
   file,
   onFile,
+  onFiles,
   disabled,
   hint = 'PDF, JPG, PNG or GIF · up to 48 MiB',
+  accept = documentAcceptAttribute(),
+  multiple = false,
+  label = 'Choose a scan or drop it here',
 }: {
   file: File | null;
   onFile: (file: File | null) => void;
+  /** Receives every picked/dropped file when `multiple` is on. */
+  onFiles?: (files: File[]) => void;
   disabled?: boolean;
   hint?: string;
+  accept?: string;
+  multiple?: boolean;
+  label?: string;
 }) {
   const id = useId();
   const [over, setOver] = useState(false);
@@ -22,7 +36,10 @@ export function DropZone({
     event.preventDefault();
     setOver(false);
     if (disabled) return;
-    onFile(event.dataTransfer.files?.[0] ?? null);
+    const dropped = Array.from(event.dataTransfer.files ?? []);
+    if (dropped.length === 0) return;
+    if (multiple && onFiles) onFiles(dropped);
+    else onFile(dropped[0]);
   };
 
   if (file) {
@@ -66,15 +83,23 @@ export function DropZone({
       )}
     >
       <FileArrowUp size={30} className="text-accent" />
-      <span className="text-sm font-semibold">Choose a scan or drop it here</span>
+      <span className="text-sm font-semibold">{multiple ? `${label} — one or more` : label}</span>
       <span className="muted text-xs">{hint}</span>
       <input
         id={id}
         type="file"
-        accept={documentAcceptAttribute()}
+        accept={accept}
+        multiple={multiple}
         className="sr-only"
         disabled={disabled}
-        onChange={(event) => onFile(event.target.files?.[0] ?? null)}
+        onChange={(event) => {
+          const picked = Array.from(event.target.files ?? []);
+          if (picked.length === 0) return;
+          if (multiple && onFiles) onFiles(picked);
+          else onFile(picked[0]);
+          // Reset so picking the same file again after removing it re-fires change.
+          event.target.value = '';
+        }}
       />
     </label>
   );

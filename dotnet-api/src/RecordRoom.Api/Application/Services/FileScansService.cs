@@ -32,6 +32,13 @@ public interface IFileScansService
     /// <summary>Reviews every pending page of one file at once; returns how many moved.</summary>
     Task<Result<int>> ReviewAllAsync(int fileId, PageReviewInput input, CancellationToken ct = default);
 
+    /// <summary>
+    /// Reviews a chosen set of one file's pages in one request — the review
+    /// screen decides on a selection, and one call per page turns a 30-page
+    /// decision into 30 round trips.
+    /// </summary>
+    Task<Result<int>> ReviewSetAsync(int fileId, long[] scanIds, PageReviewInput input, CancellationToken ct = default);
+
     /// <summary>The pending-review queue across all files.</summary>
     Task<FileScanPageDto[]> PendingAsync(string? search, CancellationToken ct = default);
 
@@ -333,6 +340,43 @@ public sealed class FileScansService(
             $"{file.Barcode}: {pending.Count} page(s) {(approve ? "approved" : "rejected")}");
 
         return Result<int>.Ok(pending.Count);
+    }
+
+    public async Task<Result<int>> ReviewSetAsync(int fileId, long[] scanIds, PageReviewInput input, CancellationToken ct)
+    {
+        var file = await db.Files.FirstOrDefaultAsync(f => f.Id == fileId, ct);
+        if (file is null) return Result<int>.Fail("File not found.", "fileId");
+        if (scanIds.Length == 0) return Result<int>.Fail("Select at least one page.", "scanIds");
+
+        var approve = string.Equals(input.Decision, "Approved", StringComparison.OrdinalIgnoreCase);
+        if (!approve && string.IsNullOrWhiteSpace(input.Note))
+            return Result<int>.Fail("A rejection reason is required.", "note");
+
+        // The ids must belong to this file's pages; anything else is ignored so
+        // a stale review screen cannot decide on rows that moved elsewhere.
+        var pages = await db.ScanPages
+            .Where(p => p.Barcode == file.Barcode && scanIds.Contains(p.Id))
+            .ToListAsync(ct);
+        if (pages.Count == 0)
+            return Result<int>.Fail("None of the selected pages belong to this file.", "scanIds");
+
+        foreach (var page in pages)
+        {
+            page.Status = approve ? PageStatus.Approved : PageStatus.Rejected;
+            if (!string.IsNullOrWhiteSpace(input.Note)) page.Note = input.Note.Trim();
+        }
+
+        await audit.LogAsync(db, approve ? AuditAction.Approve : AuditAction.Reject,
+            "FileScanPage", file.Id.ToString(),
+            $"selected={pages.Count}",
+            $"{(approve ? "approved" : "rejected")}={pages.Count}",
+            $"{file.Barcode}: {pages.Count} selected page(s) {(approve ? "approved" : "rejected")}");
+        await db.SaveChangesAsync(ct);
+        await audit.AnnounceAsync(RealtimeChannels.Digitization,
+            approve ? "page.approved" : "page.rejected", file.Id.ToString(),
+            $"{file.Barcode}: {pages.Count} selected page(s) {(approve ? "approved" : "rejected")}");
+
+        return Result<int>.Ok(pages.Count);
     }
 
     public async Task<FileScanPageDto[]> PendingAsync(string? search, CancellationToken ct = default)

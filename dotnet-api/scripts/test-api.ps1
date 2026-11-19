@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     End-to-end API smoke test. Exercises the real HTTP surface against a real
     SQL Server: auth, the legacy guards, multi-file issue with a partial
@@ -130,6 +130,8 @@ $config = Invoke-Api -Path '/api/config'
 Assert-Equal 200 $config.Status 'GET /api/config is public'
 Assert-Equal 'Document Management System' $config.Data.appName 'the product is named Document Management System'
 Assert-True ($config.Data.features.barcode -is [bool]) 'config reports the barcode feature as true/false'
+Assert-True ($null -ne $config.Data.ocr) 'config reports the OCR engine status'
+Assert-True ($config.Data.ocr.enabled -is [bool]) 'config reports OCR enabled as a boolean'
 $barcodeOn = [bool]$config.Data.features.barcode
 Write-Host "  (barcode features are $(if ($barcodeOn) { 'ON' } else { 'OFF' }); set Features__BarcodeEnabled to test the other state)"
 
@@ -235,7 +237,7 @@ $unknownRole = Invoke-Api -Method PUT -Path '/api/permissions/Wizard/files.view'
 Assert-Equal 400 $unknownRole.Status 'an unknown role is refused'
 
 # ============================================================ locations
-Write-Step 'Location hierarchy and guards
+Write-Step 'Location hierarchy and guards'
 $rooms = Invoke-Api -Path '/api/locations/rooms' -Token $admin
 Assert-Equal 200 $rooms.Status 'GET /api/locations/rooms responds'
 $roomCount = @($rooms.Data.data).Count
@@ -323,14 +325,24 @@ Assert-True ($first.fileBarcode) 'each file carries a barcode'
 Assert-True ($null -ne $first.lastMovement) 'each file carries a last-movement stamp'
 
 $byBarcode = Invoke-Api -Path "/api/files/by-barcode/$($first.fileBarcode)" -Token $admin
-if ($barcodeOn) {
-    Assert-Equal 200 $byBarcode.Status 'a file resolves by barcode'
-    Assert-Equal $first.id $byBarcode.Data.data.id 'barcode lookup returns the same row'
-} else {
-    Assert-Equal 404 $byBarcode.Status 'barcode lookup is blocked while barcode features are off'
-    $barcodeApi = Invoke-Api -Path '/api/barcodes/jobs' -Token $admin
-    Assert-Equal 404 $barcodeApi.Status 'the barcode endpoints are blocked while barcode features are off'
+Assert-Equal 200 $byBarcode.Status 'a file resolves by barcode'
+Assert-Equal $first.id $byBarcode.Data.data.id 'barcode lookup returns the same row'
+
+# The gate itself. The feature-switch step above turns every group on so the
+# rest of the run can exercise the hidden surfaces, so it is checked by
+# flipping barcode off here instead of trusting the seeded state.
+$barcodeOff = Invoke-Api -Method PUT -Path '/api/config/features' -Token $admin -Body @{
+    features = @{ barcode = $false }
 }
+Assert-Equal 200 $barcodeOff.Status 'barcode can be switched off at runtime'
+$blockedLookup = Invoke-Api -Path "/api/files/by-barcode/$($first.fileBarcode)" -Token $admin
+Assert-Equal 404 $blockedLookup.Status 'barcode lookup is blocked while barcode features are off'
+$blockedApi = Invoke-Api -Path '/api/barcodes/jobs' -Token $admin
+Assert-Equal 404 $blockedApi.Status 'the barcode endpoints are blocked while barcode features are off'
+$barcodeBack = Invoke-Api -Method PUT -Path '/api/config/features' -Token $admin -Body @{
+    features = @{ barcode = $true }
+}
+Assert-Equal 200 $barcodeBack.Status 'barcode is switched back on for the rest of the run'
 
 $departments = Invoke-Api -Path '/api/files/departments' -Token $admin
 Assert-True (@($departments.Data.data).Count -gt 0) 'departments are listed for filtering'
@@ -635,10 +647,16 @@ if (-not $SkipDestructive) {
     Assert-Equal 1 $page3.version 'the attached scan keeps version 1'
     Assert-True ($page3.pageCount -eq 1) 'the pdf page count is stored on the scan'
 
+    # studio.use is granted to every role by default and an admin can revoke it
+    # per role, so the gate is the matrix cell, not a hard-coded role.
+    $revokeStudioAdd = Invoke-Api -Method PUT -Path '/api/permissions/Employee/studio.use' -Token $admin -Body @{ granted = $false }
+    Assert-Equal 200 $revokeStudioAdd.Status 'studio.use is revoked from Employee for the gate check'
     $empAdd = Invoke-Api -Method POST -Path "/api/files/$newFileId/scans" -Token $employeeToken -Body @{
         fileName = ''; pageNo = 2; documentSize = 'A4'
     }
-    Assert-Equal 403 $empAdd.Status 'an employee cannot register scan pages'
+    Assert-Equal 403 $empAdd.Status 'an employee without studio.use cannot register scan pages'
+    $restoreStudioAdd = Invoke-Api -Method PUT -Path '/api/permissions/Employee/studio.use' -Token $admin -Body @{ granted = $true }
+    Assert-Equal 200 $restoreStudioAdd.Status 'studio.use is restored to Employee'
     $opReview = Invoke-Api -Method POST -Path "/api/scans/$($page2.Data.data.id)/review" -Token $operatorToken -Body @{
         decision = 'Approved'; note = ''
     }
@@ -842,11 +860,11 @@ if (-not $SkipDestructive) {
     Assert-Equal 403 $empDelete.Status 'an employee cannot delete a scan version'
     $opDelete = Invoke-Api -Method DELETE -Path "/api/files/$newFileId/documents/$scanId" -Token $operatorToken
     Assert-Equal 403 $opDelete.Status 'an operator cannot delete a scan version'
-    $supDelete = Invoke-Api -Method DELETE -Path "/api/files/$newFileId/documents/$scanId" -Token $supervisorToken
-    Assert-Equal 403 $supDelete.Status 'a supervisor cannot delete a scan version'
 
-    $adminDelete = Invoke-Api -Method DELETE -Path "/api/files/$newFileId/documents/$scanId" -Token $admin
-    Assert-Equal 200 $adminDelete.Status 'an admin can delete a scan version'
+    # files.edit is the gate, and Supervisor holds it, so a supervisor can remove
+    # a stored version. The second delete is the guard that keeps it honest.
+    $supDelete = Invoke-Api -Method DELETE -Path "/api/files/$newFileId/documents/$scanId" -Token $supervisorToken
+    Assert-Equal 200 $supDelete.Status 'a supervisor can delete a scan version (files.edit)'
     $gone = Invoke-Api -Method DELETE -Path "/api/files/$newFileId/documents/$scanId" -Token $admin
     Assert-Equal 400 $gone.Status 'deleting an already removed scan version is refused'
 }
@@ -1032,7 +1050,7 @@ $empViews = Invoke-Api -Path '/api/audit/file-views' -Token $employeeToken
 Assert-Equal 403 $empViews.Status 'an employee cannot read the file-view trail'
 $views = Invoke-Api -Path '/api/audit/file-views' -Token $admin
 Assert-Equal 200 $views.Status 'the admin reads the file-view trail'
-$viewRows = @($views.Data.data | Where-Object { $_.entityId -eq "$newFileId" })
+$viewRows = @($views.Data.data.entries | Where-Object { $_.entityId -eq "$newFileId" })
 Assert-True ($viewRows.Count -ge 2) 'both opens of the file are on the trail'
 
 # The permission is a matrix cell: grant it to Supervisor and it works at once.
@@ -1137,6 +1155,9 @@ Assert-True ($processed -match '^200$' -or $processed -match "`n200$") 'the proc
 $revert = Invoke-Api -Method DELETE -Path "/api/scans/$studioScanId/enhancement" -Token $admin
 Assert-Equal 200 $revert.Status 'the page reverts to its original scan'
 
+$ocrRun = Invoke-Api -Method POST -Path "/api/scans/$studioScanId/ocr" -Token $admin
+Assert-Equal 200 $ocrRun.Status 're-running OCR on a scan page responds'
+
 $approvePage = Invoke-Api -Method POST -Path "/api/scans/$studioScanId/review" -Token $admin -Body @{
     decision = 'Approved'; note = 'Studio smoke test page'
 }
@@ -1207,7 +1228,7 @@ Write-Step 'Split audit groups (round 4)'
 $logins = Invoke-Api -Path '/api/audit?group=logins&limit=50' -Token $admin
 Assert-Equal 200 $logins.Status 'the logins group is readable'
 Assert-True (@($logins.Data.data).Count -ge 1) 'the logins group has entries'
-$loginsEntities = @($logins.Data.data | ForEach-Object { $_.entity } | Sort-Object -Unique)
+$loginsEntities = @($logins.Data.data.entries | ForEach-Object { $_.entity } | Sort-Object -Unique)
 Assert-True ($loginsEntities.Count -eq 1 -and $loginsEntities[0] -eq 'Session') 'the logins group carries session entities only'
 
 $issues = Invoke-Api -Path '/api/audit?group=issues&limit=200' -Token $admin

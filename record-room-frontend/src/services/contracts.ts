@@ -355,6 +355,8 @@ export interface ScanApi {
     scanIds: string[],
     decision: 'Approved' | 'Rejected',
     note?: string,
+    /** Known by the review page; lets the HTTP adapter use the batch endpoint. */
+    fileId?: string,
   ): Promise<Result<number>>;
   /** Stores a manual correction of one page's OCR text. */
   saveOcrText(scanId: string, text: string): Promise<Result<FileScan>>;
@@ -404,6 +406,8 @@ export interface ScanApi {
     note?: string,
     fileId?: string,
   ): Promise<Result<DocumentDerivative>>;
+  /** Removes one deliverable build and its bytes — destructive, confirm first. */
+  removePdf(derivativeId: string, fileId?: string): Promise<Result<true>>;
   pdfBlob(derivativeId: string, fileId?: string): Promise<Blob>;
 }
 
@@ -683,10 +687,35 @@ export interface MediaApi {
 
 // ------------------------------------------------------------ feature config
 
+/** OCR engine status as `GET /api/config` reports it — one honest line for the OCR screen. */
+export interface OcrStatusInfo {
+  enabled: boolean;
+  available: boolean;
+  engine: string;
+  languages: string;
+  note: string;
+}
+
+/**
+ * Deployment facts from `GET /api/config`: what the environment decided, not
+ * what the database stores. `settingsEditable: false` means the feature
+ * switchboard is locked (Settings shows read-only and the API refuses writes);
+ * `demoMode: true` means the registry runs on the seeded demo dataset.
+ */
+export interface AppConfigInfo {
+  appName: string;
+  features: Features;
+  settingsEditable: boolean;
+  demoMode: boolean;
+  ocr: OcrStatusInfo;
+}
+
 /** The grouped feature switchboard (ZILA_PANCHAYAT_CC §F). */
 export interface ConfigApi {
   features(): Promise<Features>;
   updateFeatures(patch: Partial<Record<FeatureKey, boolean>>): Promise<Result<Features>>;
+  /** Deployment facts: demo mode, the feature-edit lock and the OCR engine status. */
+  info(): Promise<AppConfigInfo>;
 }
 
 // --------------------------------------------------------------- root facade

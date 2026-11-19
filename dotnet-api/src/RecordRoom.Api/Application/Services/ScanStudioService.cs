@@ -53,6 +53,13 @@ public interface IScanStudioService
 
     Task<PrivateDocumentContent?> OpenPdfAsync(long derivativeId, CancellationToken ct = default);
 
+    /// <summary>
+    /// Removes one deliverable build — the row and its stored bytes. Rejected
+    /// builds and superseded compressed copies are the usual targets; deleting
+    /// is destructive and the controller gates it on the studio permission.
+    /// </summary>
+    Task<Result<bool>> DeletePdfAsync(long derivativeId, CancellationToken ct = default);
+
     /// <summary>Generated PDF deliverables across all files awaiting review ("Pending approval").</summary>
     Task<DocumentDerivativeDto[]> PendingPdfsAsync(string? search = null, CancellationToken ct = default);
 }
@@ -521,6 +528,33 @@ public sealed class ScanStudioService(
         var stream = await documentStore.OpenReadAsync(row.StorageKey, ct);
         return stream is null ? null
             : new PrivateDocumentContent(row.FileName, row.ContentType ?? "application/pdf", row.SizeBytes ?? 0, row.Sha256, stream);
+    }
+
+    public async Task<Result<bool>> DeletePdfAsync(long derivativeId, CancellationToken ct)
+    {
+        var row = await db.Derivatives.FirstOrDefaultAsync(d => d.Id == derivativeId, ct);
+        if (row is null) return Result<bool>.Fail("Deliverable PDF not found.", "derivativeId");
+
+        var storageKey = row.StorageKey;
+        var label = $"{row.FileName} ({row.Status}) for {row.Barcode}";
+
+        db.Derivatives.Remove(row);
+        await audit.LogAsync(db, AuditAction.Delete, "DocumentDerivative", row.Id.ToString(),
+            row.Status.ToLowerInvariant(), "deleted", $"Removed deliverable build {label}", ct);
+        await db.SaveChangesAsync(ct);
+
+        if (storageKey is not null)
+        {
+            try { await documentStore.DeleteAsync(storageKey, CancellationToken.None); }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Could not remove deliverable content {StorageKey}; the row is gone.", storageKey);
+            }
+        }
+
+        await audit.AnnounceAsync(RealtimeChannels.Digitization, "deliverable.deleted", row.Id.ToString(),
+            $"Deliverable build {row.FileName} removed for {row.Barcode}");
+        return Result<bool>.Ok(true);
     }
 
     /// <summary>

@@ -50,10 +50,17 @@ async function pageThumbOf(scan: FileScan, load: () => Promise<Blob>): Promise<s
 }
 
 /**
- * Full-file review preview (round 5): every page of the file in composition
- * order, the changed ones highlighted and selectable, so the reviewer sees the
- * whole document and exactly what is new — then approves or rejects the
- * selection with one remark. Pending deliverable builds sit above the grid.
+ * The full-file review surface (round 5, reworked): every page of the file in
+ * composition order, the changed ones highlighted and selectable, so the
+ * reviewer sees the whole document and exactly what is new — then approves or
+ * rejects the selection with one remark. Pending deliverable builds sit above
+ * the grid.
+ *
+ * Rendered as its own page (route /review/:fileId), no longer inside a modal:
+ * a 40-page grid deserves the whole viewport, a stable URL and the browser's
+ * own back button. The one-page zoom stays an overlay — it is a viewer, not a
+ * decision surface — and swallows Escape itself so closing it never loses the
+ * selection or the remark.
  */
 export function FilePagesPreview({
   fileId,
@@ -107,13 +114,16 @@ export function FilePagesPreview({
   const selected =
     selection.key === pendingKey ? selection.ids : new Set(pendingPages.map((page) => page.id));
 
-  // Thumbnails load lazily per page; URLs are revoked when the preview closes.
+  // Thumbnails load a few at a time (a burst of 80 parallel rasterizations
+  // froze the tab on large files); URLs are revoked when the preview unmounts.
   useEffect(() => {
     const created: string[] = [];
     let live = true;
-    const queue = pages.filter((page) => page.hasDocument).slice(0, 80);
-    void Promise.all(
-      queue.map(async (page) => {
+    const queue = pages.filter((page) => page.hasDocument).slice(0, 240);
+    let cursor = 0;
+    const worker = async () => {
+      while (live && cursor < queue.length) {
+        const page = queue[cursor++];
         try {
           const url = await pageThumbOf(page, () =>
             service.digitization.scanBlob(page.id, page.hasProcessed ? 'processed' : 'original'),
@@ -127,13 +137,26 @@ export function FilePagesPreview({
         } catch {
           /* the card keeps its placeholder */
         }
-      }),
-    );
+      }
+    };
+    void Promise.all([worker(), worker(), worker()]);
     return () => {
       live = false;
       created.forEach((url) => URL.revokeObjectURL(url));
     };
   }, [pages, service]);
+
+  // The zoom overlay is the only thing Escape should close here.
+  useEffect(() => {
+    if (!zoomed) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.stopPropagation();
+      setZoomed(null);
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [zoomed]);
 
   const visible = mode === 'changed' ? pendingPages : pages;
 
@@ -149,7 +172,13 @@ export function FilePagesPreview({
     if (decision === 'Rejected' && !remark.trim()) return;
     setBusy(true);
     try {
-      const result = await service.digitization.reviewScans([...selected], decision, remark);
+      // One batch call — the fileId lets the adapter hit the review-set endpoint.
+      const result = await service.digitization.reviewScans(
+        [...selected],
+        decision,
+        remark,
+        fileId,
+      );
       if (!result.ok) {
         danger(result.error);
         return;
@@ -388,9 +417,10 @@ export function FilePagesPreview({
         )}
       </section>
 
-      {/* Decision bar with the shared remark. */}
+      {/* Decision bar with the shared remark — sticky at the viewport bottom
+          now that the review surface owns a whole page. */}
       {canReview && pendingPages.length > 0 && (
-        <div className="sticky bottom-0 space-y-3 rounded-xl border border-base bg-[var(--rr-surface)] p-4">
+        <div className="sticky bottom-4 z-30 space-y-3 rounded-xl border border-base bg-[var(--rr-surface)] p-4 shadow-lg shadow-black/5">
           <textarea
             value={remark}
             onChange={(event) => setRemark(event.target.value)}

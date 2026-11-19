@@ -262,6 +262,12 @@ if [ "$PROVISION" = "1" ]; then
   apt-get update -qq
   command -v nginx >/dev/null || apt-get install -y -qq nginx curl
   command -v openssl >/dev/null || apt-get install -y -qq openssl curl
+  # OCR engine: the API shells out to the tesseract CLI with the hin+eng models
+  # shipped in dotnet-api/tessdata (copied into the publish output). Without the
+  # binary, uploads succeed but pages carry no OCR text.
+  command -v tesseract >/dev/null || apt-get install -y -qq tesseract-ocr tesseract-ocr-hin tesseract-ocr-eng || echo "tesseract install failed; OCR will be unavailable (see .env.example)"
+  # deliverable PDF builder (QuestPDF/Skia): font config + fonts (including Devanagari for Hindi text)
+  dpkg -s libfontconfig1 >/dev/null 2>&1 || apt-get install -y -qq libfontconfig1 fonts-dejavu-core fonts-noto-devanagari || echo "font install failed"
   command -v dotnet >/dev/null || { echo "dotnet still missing after provisioning"; exit 1; }
 fi
 command -v nginx >/dev/null || { echo "nginx missing"; exit 1; }
@@ -292,6 +298,16 @@ if [ ! -f "$envfile" ]; then
     echo "Jwt__ExpiryMinutes=120"
     echo "Database__MigrateOnStartup=true"
     echo "Database__SeedOnStartup=true"
+    # Production defaults: no demo registry on a fresh install, and the feature
+    # switchboard locked to this env file (see .env.example; flip to re-enable).
+    echo "App__DemoMode=false"
+    echo "Settings__AllowFeatureEditing=false"
+    # OCR: binary on PATH, models from the publish output's tessdata folder.
+    echo "Ocr__Enabled=true"
+    echo "Ocr__TesseractPath=tesseract"
+    echo "Ocr__TessDataPath=tessdata"
+    echo "Ocr__Languages=hin+eng"
+    echo "Ocr__MaxPdfPages=10"
     echo "Redis__ConnectionString="
     # Barcode features of the record-room section. true (default) or false; edit the
     # env file later to change it, the deploy never overwrites an existing value.

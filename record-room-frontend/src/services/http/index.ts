@@ -747,10 +747,24 @@ export const httpDigitizationService: ScanApi = {
     return groupPendingByFile(pages, pdfs, files);
   },
 
-  async reviewScans(scanIds, decision, note) {
+  async reviewScans(scanIds, decision, note, fileId) {
     if (scanIds.length === 0) return err('Select at least one page.', 'scanIds');
     if (decision === 'Rejected' && !note?.trim()) {
       return err('A rejection reason is required.', 'note');
+    }
+    // One batch call for the whole selection when the caller knows the file
+    // (the review page does); the per-page endpoint covers callers that do not.
+    if (fileId) {
+      const result = await attempt<number>(
+        'POST',
+        `/api/files/${toApiId(fileId, 'file')}/scans/review-set`,
+        {
+          scanIds: scanIds.map((id) => toApiId(id, 'scan')),
+          decision,
+          note: note ?? '',
+        },
+      );
+      return result.ok ? ok(result.value) : result;
     }
     let done = 0;
     for (const scanId of scanIds) {
@@ -910,6 +924,13 @@ export const httpDigitizationService: ScanApi = {
     const path = fId > 0 ? `/api/files/${fId}/pdf/${dId}/review` : `/api/derivatives/${dId}/review`;
     const result = await attempt<Dto>('POST', path, { decision, note: note ?? '' });
     return result.ok ? ok(toDerivative(result.value)) : result;
+  },
+
+  async removePdf(derivativeId, fileId) {
+    const fId = fileId ? toApiId(fileId, 'file') : 0;
+    const dId = toApiId(derivativeId, 'derivative');
+    const path = fId > 0 ? `/api/files/${fId}/pdf/${dId}` : `/api/derivatives/${dId}`;
+    return wrapTrue(await attempt<Dto>('DELETE', path));
   },
 
   async pdfBlob(derivativeId, fileId) {
@@ -1381,6 +1402,40 @@ export const httpConfigService: ConfigApi = {
       recordRoom: body.features?.recordRoom === true,
       maps: body.features?.maps === true,
       support: body.features?.support === true,
+    };
+  },
+
+  async info() {
+    const body = await getPlain<{
+      appName?: string;
+      features?: Record<string, unknown>;
+      settingsEditable?: boolean;
+      demoMode?: boolean;
+      ocr?: {
+        enabled?: boolean;
+        available?: boolean;
+        engine?: string;
+        languages?: string;
+        note?: string;
+      };
+    }>('/api/config');
+    return {
+      appName: body.appName ?? 'Document Management System',
+      features: {
+        barcode: body.features?.barcode === true,
+        recordRoom: body.features?.recordRoom === true,
+        maps: body.features?.maps === true,
+        support: body.features?.support === true,
+      },
+      settingsEditable: body.settingsEditable !== false,
+      demoMode: body.demoMode === true,
+      ocr: {
+        enabled: body.ocr?.enabled !== false,
+        available: body.ocr?.available === true,
+        engine: body.ocr?.engine ?? 'tesseract',
+        languages: body.ocr?.languages ?? 'hin+eng',
+        note: body.ocr?.note ?? '',
+      },
     };
   },
 

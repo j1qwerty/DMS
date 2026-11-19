@@ -50,6 +50,9 @@ const DigitizationPage = lazy(() =>
 const ReviewPage = lazy(() =>
   import('./pages/ReviewPage').then((m) => ({ default: m.ReviewPage })),
 );
+const ReviewFilePage = lazy(() =>
+  import('./pages/ReviewFilePage').then((m) => ({ default: m.ReviewFilePage })),
+);
 const ReportsPage = lazy(() =>
   import('./pages/ReportsPage').then((m) => ({ default: m.ReportsPage })),
 );
@@ -187,8 +190,10 @@ export function App() {
             <Route path="/digitization" element={<DigitizationPage />} />
             {/* The register moved under Digitization as a tab; old links follow. */}
             <Route path="/custody" element={<Navigate to="/digitization?tab=custody" replace />} />
-            {/* Round 5: the scan review queue is its own Review section. */}
+            {/* Round 5: the scan review queue is its own Review section; one
+                file's decisions get their own page (not a modal). */}
             <Route path="/review" element={<ReviewPage />} />
+            <Route path="/review/:fileId" element={<ReviewFilePage />} />
             <Route path="/reports" element={<ReportsPage />} />
             <Route
               path="/support"

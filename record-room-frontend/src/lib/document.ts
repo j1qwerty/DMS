@@ -64,3 +64,29 @@ export function pdfPageFragment(pageIndex?: number | null): string {
 export function documentAcceptAttribute(): string {
   return '.pdf,.jpg,.jpeg,.png,.gif,application/pdf,image/jpeg,image/png,image/gif';
 }
+
+/** The file-detail scan upload takes whole-PDF scans; images belong to the studio. */
+export function pdfAcceptAttribute(): string {
+  return '.pdf,application/pdf';
+}
+
+/**
+ * PDF-only validation for the file-detail scan upload. A full scan is a
+ * multi-page PDF; loose images are studio material (the studio accepts them
+ * per page), so this picker refuses them with a pointed message instead of
+ * letting an image land as the file's only "version".
+ */
+export function validatePdfFile(file: DocumentFileLike | null): string | null {
+  if (!file) return 'Choose a PDF file.';
+  const extension = file.name.split('.').pop()?.toLowerCase() ?? '';
+  if (extension !== 'pdf') {
+    return 'Only PDF files can be attached here. Use “Edit in studio” to scan or add single images.';
+  }
+  if (!Number.isFinite(file.size) || file.size <= 0) return 'The selected file is empty.';
+  if (file.size > MAX_DOCUMENT_BYTES) return 'Files must be 48 MiB or smaller.';
+  const mime = file.type.toLowerCase();
+  if (mime && mime !== 'application/octet-stream' && mime !== 'application/pdf') {
+    return 'The selected file type does not match its extension.';
+  }
+  return null;
+}

@@ -19,6 +19,7 @@ import { session } from './session';
 import {
   localDocumentBlob,
   localDerivativeBlob,
+  deleteLocalDerivativeBytes,
   saveLocalRowDocument,
   saveLocalDerivativeBytes,
 } from './document-storage';
@@ -845,6 +846,24 @@ export const scansService: ScanApi = {
       });
     });
     return ok(updated);
+  },
+
+  async removePdf(derivativeId) {
+    const row = store.getState().derivatives.find((item) => item.id === derivativeId);
+    if (!row) return err('Deliverable PDF not found.', 'derivativeId');
+    store.update((draft) => {
+      draft.derivatives = draft.derivatives.filter((item) => item.id !== derivativeId);
+      log(draft, {
+        action: 'Delete',
+        entity: 'DocumentDerivative',
+        entityId: derivativeId,
+        before: row.status.toLowerCase(),
+        after: 'deleted',
+        summary: `Removed deliverable build ${row.filename} (${row.status})`,
+      });
+    });
+    await deleteLocalDerivativeBytes(derivativeId);
+    return ok(true);
   },
 
   async pdfBlob(derivativeId) {

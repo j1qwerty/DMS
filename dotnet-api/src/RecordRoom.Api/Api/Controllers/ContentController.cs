@@ -52,6 +52,21 @@ public class FileScansController(IFileScansService scans, IScanStudioService stu
     public async Task<IResult> ReviewAll(int fileId, PageReviewInput input, CancellationToken ct) =>
         ApiResults.FromResult(await scans.ReviewAllAsync(fileId, input, ct));
 
+    /// <summary>
+    /// Decides a chosen selection of this file's pages in one call — the review
+    /// screen works on a selection, and one request per page would turn a
+    /// 30-page decision into 30 round trips.
+    /// </summary>
+    [Authorize(Policy = "perm:digitization.review")]
+    [HttpPost("review-set")]
+    public async Task<IResult> ReviewSet(int fileId, PageSetReviewInput input, CancellationToken ct) =>
+        ApiResults.FromResult(
+            await scans.ReviewSetAsync(
+                fileId,
+                input.ScanIds ?? [],
+                new PageReviewInput(input.Decision, input.Note),
+                ct));
+
     /// <summary>Scan studio (§3.4): persists the composition order of the file's pages.</summary>
     [Authorize(Policy = "perm:studio.use")]
     [HttpPut("order")]

@@ -26,9 +26,22 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.12" />
     <PackageReference Include="OpenCvSharp5" Version="5.0.0.20261012" />
     <PackageReference Include="OpenCvSharp5.official.runtime.linux-x64" Version="5.0.0.20261012" />
+    <!-- The natives are runtime-specific: only linux-x64 shipped, so on a Windows
+         dev box PDFium rasterization threw DllNotFoundException (OpenCvSharpExtern)
+         and every PDF silently OCR'd to nothing. Matching version on purpose —
+         the managed binding and the native binary are built together. -->
+    <PackageReference Include="OpenCvSharp5.runtime.win" Version="5.0.0.20261012"
+                      Condition="$([MSBuild]::IsOSPlatform('Windows'))" />
     <PackageReference Include="QuestPDF" Version="2026.9.1" />
     <PackageReference Include="StackExchange.Redis" Version="3.3.1" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="10.2.3" />
+  </ItemGroup>
+
+  <!-- The tesseract language models ship with the repository and must follow
+       the app into every publish output, or OCR quietly finds no hin+eng data
+       (TesseractOcrEngine looks them up next to the DLL first). -->
+  <ItemGroup>
+    <Content Include="..\..\tessdata\**\*.traineddata" CopyToOutputDirectory="PreserveNewest" LinkBase="tessdata" />
   </ItemGroup>
 
 </Project>

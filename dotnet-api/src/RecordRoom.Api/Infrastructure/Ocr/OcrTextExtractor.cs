@@ -29,14 +29,18 @@ public sealed class OcrTextExtractor(
     private const int RenderWidth = 1654;
     private const int RenderHeight = 2339;
 
-    /// <summary>Bound on how many PDF pages one pass will rasterize; a scan row is normally one page.</summary>
-    private const int MaxPdfPages = 10;
+    /// <summary>
+    /// Bound on how many PDF pages one pass will rasterize; a scan row is
+    /// normally one page. Configurable via <c>Ocr:MaxPdfPages</c> because the
+    /// right ceiling depends on the hardware — each page is a tesseract run.
+    /// </summary>
+    private int MaxPdfPages => Math.Max(1, configuration.GetValue("Ocr:MaxPdfPages", 10));
 
     private bool Enabled => configuration.GetValue("Ocr:Enabled", true);
 
     public async Task<OcrExtraction> ExtractAsync(byte[] blob, string contentType, CancellationToken ct = default)
     {
-        if (blob.Length == 0) return new OcrExtraction("", "none");
+        if (!Enabled || blob.Length == 0) return new OcrExtraction("", "none");
 
         if (contentType == "application/pdf")
         {
@@ -74,15 +78,19 @@ public sealed class OcrTextExtractor(
             for (var i = 0; i < Math.Min(doc.GetPageCount(), MaxPdfPages); i++)
             {
                 using var reader = doc.GetPageReader(i);
-                var raw = reader.GetImage(); // BGR, 3 bytes per pixel
+                // Docnet hands back B-G-R-A, four bytes per pixel; reading it as
+                // three-channel data sheared every row and gave tesseract garbage.
+                var raw = reader.GetImage();
                 var handle = System.Runtime.InteropServices.GCHandle.Alloc(
                     raw, System.Runtime.InteropServices.GCHandleType.Pinned);
                 try
                 {
                     using var wrapped = Mat.FromPixelData(
-                        reader.GetPageHeight(), reader.GetPageWidth(), MatType.CV_8UC3, handle.AddrOfPinnedObject());
-                    using var owned = wrapped.Clone();
-                    Cv2.ImEncode(".png", owned, out var bytes);
+                        reader.GetPageHeight(), reader.GetPageWidth(), MatType.CV_8UC4,
+                        handle.AddrOfPinnedObject());
+                    using var bgr = new Mat();
+                    Cv2.CvtColor(wrapped, bgr, ColorConversionCodes.BGRA2BGR);
+                    Cv2.ImEncode(".png", bgr, out var bytes);
                     pages.Add(bytes);
                 }
                 finally

@@ -12,6 +12,7 @@ import { BarcodeSymbol } from '../components/BarcodeSymbol';
 import { useQuery, useService, useSession } from '../hooks/useService';
 import { buildPayload } from '../lib/barcode';
 import { documentAcceptAttribute, formatDocumentSize, validateDocumentFile } from '../lib/document';
+import { extractPdfPagesToImages } from '../lib/pdf-unpack';
 import { nextFileBarcode } from '../services/impl/files';
 import type {
   Area,
@@ -314,7 +315,29 @@ export function NewFilePage() {
         try {
           if (isPdf) {
             const upload = await service.files.uploadDocument(result.value.id, document);
-            if (!upload.ok) failures.push(`${document.name}: ${upload.error}`);
+            if (!upload.ok) {
+              failures.push(`${document.name}: ${upload.error}`);
+            } else {
+              try {
+                const existing = await service.digitization.list(result.value.id);
+                let nextPageNo = existing.reduce((max, row) => Math.max(max, row.pageNo), 0);
+                const extracted = await extractPdfPagesToImages(document, document.name);
+                for (const pageFile of extracted) {
+                  nextPageNo += 1;
+                  const added = await service.digitization.add(result.value.id, {
+                    pageNo: nextPageNo,
+                    filename: pageFile.name,
+                    documentSize: form.documentSize || 'A4',
+                    note: `Imported from ${document.name}`,
+                  });
+                  if (added.ok) {
+                    await service.digitization.addDocument(added.value.id, pageFile);
+                  }
+                }
+              } catch (e) {
+                console.warn('Could not unpack PDF pages during file creation:', e);
+              }
+            }
           } else {
             const pages = await service.digitization.list(result.value.id);
             pageNo = pages.reduce((max, row) => Math.max(max, row.pageNo), 0) + 1;

@@ -11,6 +11,7 @@ using RecordRoom.Api.Application.Contracts;
 using RecordRoom.Api.Application.Services;
 using RecordRoom.Api.Infrastructure.Auth;
 using RecordRoom.Api.Infrastructure.Cache;
+using RecordRoom.Api.Infrastructure.Configuration;
 using RecordRoom.Api.Infrastructure.Data;
 using RecordRoom.Api.Infrastructure.Features;
 using RecordRoom.Api.Infrastructure.Jobs;
@@ -22,6 +23,19 @@ using Microsoft.AspNetCore.Authorization;
 var builder = WebApplication.CreateBuilder(args);
 
 // ---------------------------------------------------------------- configuration
+// A .env file next to the app is the one-file deployment story: storage root,
+// demo mode, OCR settings, the feature-edit lock — everything an operator
+// should not need a redeploy for. Inserted ahead of the environment-variables
+// source so a real env var (or the command line) still overrides the file.
+var envFilePath = Environment.GetEnvironmentVariable("DOTNET_ENV_FILE")
+                  ?? Path.Combine(builder.Environment.ContentRootPath, ".env");
+var envSourceIndex = builder.Configuration.Sources.ToList().FindIndex(
+    s => s is Microsoft.Extensions.Configuration.EnvironmentVariables.EnvironmentVariablesConfigurationSource);
+if (envSourceIndex >= 0)
+    builder.Configuration.Sources.Insert(envSourceIndex, new EnvFileConfigurationSource(envFilePath));
+else
+    builder.Configuration.AddEnvFile(envFilePath);
+
 var connectionString = builder.Configuration.GetConnectionString("Default")
     ?? throw new InvalidOperationException("ConnectionStrings:Default is required.");
 
@@ -281,7 +295,12 @@ using (var scope = app.Services.CreateScope())
     {
         try
         {
-            await DatabaseSeeder.SeedAsync(db, logger);
+            // Demo mode (App:DemoMode, .env key App__DemoMode) decides whether a
+            // fresh database gets the demo registry. With it off, a production
+            // install still gets its bootstrap rows — permission matrix, feature
+            // switch defaults and the standard users — but no demo files.
+            var demoMode = app.Configuration.GetValue("App:DemoMode", true);
+            await DatabaseSeeder.SeedAsync(db, logger, demoMode, default);
         }
         catch (Exception ex)
         {

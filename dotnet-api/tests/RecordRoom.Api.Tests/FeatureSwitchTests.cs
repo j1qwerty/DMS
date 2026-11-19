@@ -230,7 +230,11 @@ public class FeatureSwitchTests
         var dto = new RecordRoom.Api.Application.Contracts.AppConfigDto(
             AppInfo.Name,
             new RecordRoom.Api.Application.Contracts.FeaturesDto(
-                Barcode: false, RecordRoom: true, Maps: false, Support: false));
+                Barcode: false, RecordRoom: true, Maps: false, Support: false),
+            SettingsEditable: true,
+            DemoMode: false,
+            Ocr: new RecordRoom.Api.Application.Contracts.OcrStatusDto(
+                Enabled: true, Available: true, Engine: "tesseract", Languages: "hin+eng", Note: "ready"));
         Assert.Equal("Document Management System", dto.AppName);
         Assert.False(dto.Features.Barcode);
         Assert.True(dto.Features.RecordRoom);

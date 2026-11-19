@@ -1,5 +1,13 @@
 import { useState } from 'react';
-import { ArrowRight, Info, MapPinPlus, UploadSimple, WarningCircle } from '@phosphor-icons/react';
+import {
+  ArrowRight,
+  CheckCircle,
+  Info,
+  MapPinPlus,
+  Trash,
+  UploadSimple,
+  WarningCircle,
+} from '@phosphor-icons/react';
 import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
 import { Field, SelectInput, TextInput } from '../ui/Field';
@@ -7,7 +15,8 @@ import { StatusBadge } from '../ui/Flash';
 import { DropZone } from './DropZone';
 import { useQuery, useService } from '../../hooks/useService';
 import { useFeatures } from '../../lib/features';
-import { validateDocumentFile } from '../../lib/document';
+import { pdfAcceptAttribute, validateDocumentFile, validatePdfFile } from '../../lib/document';
+import { extractPdfPagesToImages } from '../../lib/pdf-unpack';
 import type { MapUpload, RecordFile, Room } from '../../types';
 
 export type FileActionKind = 'upload' | 'move' | 'mapUpload';
@@ -62,31 +71,97 @@ function Notice({ tone, children }: { tone: 'danger' | 'info'; children: React.R
 
 // ---------------------------------------------------------------- upload file
 
+/**
+ * The file-detail scan upload. Whole-PDF scans only — loose images are studio
+ * material (the studio accepts them page by page and enhances them there), so
+ * this picker refuses them with a pointed message instead of letting one
+ * image land as the file's only "version". Several PDFs can be attached in
+ * one go; each becomes its own version, reported line by line.
+ */
 export function UploadFileModal({ file, onClose, onDone }: ActionContext) {
   const service = useService();
-  const [scan, setScan] = useState<File | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [queue, setQueue] = useState<File[]>([]);
+  const [results, setResults] = useState<{ name: string; ok: boolean; message: string }[]>([]);
   const [busy, setBusy] = useState(false);
+  const [statusMsg, setStatusMsg] = useState('');
+
+  const issue = queue.length === 0 ? null : queue.map(validatePdfFile).find((error) => error);
 
   const submit = async () => {
-    const issue = validateDocumentFile(scan);
-    if (issue || !scan) {
-      setError(issue ?? 'Choose a PDF or image first.');
+    const rejected = queue.map((item) => ({ item, error: validatePdfFile(item) }));
+    if (rejected.some((row) => row.error)) {
+      setResults(
+        rejected
+          .filter((row) => row.error)
+          .map((row) => ({ name: row.item.name, ok: false, message: row.error! })),
+      );
+      setQueue(rejected.filter((row) => !row.error).map((row) => row.item));
       return;
     }
     setBusy(true);
-    setError(null);
+    setResults([]);
+    const done: { name: string; ok: boolean; message: string }[] = [];
     try {
-      const result = await service.files.uploadDocument(file.id, scan);
-      if (!result.ok) {
-        setError(result.error);
-        return;
+      for (const scan of queue) {
+        try {
+          setStatusMsg(`Uploading ${scan.name}…`);
+          const result = await service.files.uploadDocument(file.id, scan);
+          if (result.ok) {
+            // Also unpack pages so they are immediately available for OCR and Studio
+            try {
+              setStatusMsg(`Unpacking ${scan.name} into pages for OCR…`);
+              const existing = await service.digitization.list(file.id);
+              let nextPageNo = existing.reduce((max, row) => Math.max(max, row.pageNo), 0);
+              const extracted = await extractPdfPagesToImages(scan, scan.name);
+              for (const pageFile of extracted) {
+                nextPageNo += 1;
+                const added = await service.digitization.add(file.id, {
+                  pageNo: nextPageNo,
+                  filename: pageFile.name,
+                  documentSize: 'A4',
+                  note: `Imported from ${scan.name}`,
+                });
+                if (added.ok) {
+                  await service.digitization.addDocument(added.value.id, pageFile);
+                }
+              }
+              done.push({
+                name: scan.name,
+                ok: true,
+                message: `stored as version ${result.value.version} (${extracted.length} page(s) ready for OCR)`,
+              });
+            } catch (unpackErr) {
+              console.warn('Could not extract PDF pages for OCR:', unpackErr);
+              done.push({
+                name: scan.name,
+                ok: true,
+                message: `stored as version ${result.value.version}`,
+              });
+            }
+          } else {
+            done.push({ name: scan.name, ok: false, message: result.error });
+          }
+        } catch (cause) {
+          done.push({
+            name: scan.name,
+            ok: false,
+            message: cause instanceof Error ? cause.message : 'Upload failed.',
+          });
+        }
+        setResults([...done]);
       }
-      onDone(`Scan uploaded to ${file.fileNumber} as version ${result.value.version}.`);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Upload failed. Try again.');
+      const uploaded = done.filter((row) => row.ok).length;
+      if (uploaded > 0) {
+        onDone(
+          uploaded === 1
+            ? `Scan uploaded to ${file.fileNumber}.`
+            : `${uploaded} scans uploaded to ${file.fileNumber}.`,
+        );
+        setQueue([]);
+      }
     } finally {
       setBusy(false);
+      setStatusMsg('');
     }
   };
 
@@ -95,32 +170,76 @@ export function UploadFileModal({ file, onClose, onDone }: ActionContext) {
       open
       onClose={onClose}
       title="Upload file scan"
-      description="Attach the scanned copy of this file. An existing scan is kept as an earlier version."
+      description="Attach the scanned copy of this file as PDF. An existing scan is kept as an earlier version."
       footer={
         <>
           <Button variant="ghost" onClick={onClose} disabled={busy}>
-            Cancel
+            Close
           </Button>
-          <Button onClick={submit} disabled={!scan || busy} icon={<UploadSimple size={17} />}>
-            {busy ? 'Uploading…' : 'Upload scan'}
+          <Button
+            onClick={submit}
+            disabled={queue.length === 0 || busy}
+            icon={<UploadSimple size={17} />}
+          >
+            {busy
+              ? statusMsg || `Uploading ${results.length + 1} of ${queue.length}…`
+              : queue.length > 1
+                ? `Upload ${queue.length} PDFs`
+                : 'Upload scan'}
           </Button>
         </>
       }
     >
       <FileSummary file={file} />
       <DropZone
-        file={scan}
-        onFile={(next) => {
-          setScan(next);
-          setError(null);
-        }}
+        file={queue.length === 1 ? queue[0] : null}
+        onFile={(next) => setQueue(next ? [next] : [])}
+        onFiles={(files) => setQueue(files)}
+        multiple
+        accept={pdfAcceptAttribute()}
+        label="Choose PDF scan(s) or drop them here"
+        hint="PDF only · several files allowed · up to 48 MiB each · images go to the studio"
         disabled={busy}
       />
-      {error && (
+      {queue.length > 1 && (
+        <p className="muted mt-3 text-xs">
+          {queue.length} PDFs queued — each is uploaded as its own version.
+        </p>
+      )}
+      {issue && (
         <div className="mt-4">
-          <Notice tone="danger">{error}</Notice>
+          <Notice tone="danger">{issue}</Notice>
         </div>
       )}
+      {results.length > 0 && (
+        <ul className="mt-4 space-y-2">
+          {results.map((row) => (
+            <li
+              key={row.name}
+              className={`flex items-start gap-2 rounded-lg border p-2.5 text-xs leading-5 ${
+                row.ok
+                  ? 'border-[color-mix(in_srgb,var(--rr-success)_40%,transparent)] bg-[color-mix(in_srgb,var(--rr-success)_8%,transparent)]'
+                  : 'border-[color-mix(in_srgb,var(--rr-danger)_45%,transparent)] bg-[color-mix(in_srgb,var(--rr-danger)_8%,transparent)]'
+              }`}
+            >
+              {row.ok ? (
+                <CheckCircle size={15} weight="fill" className="mt-0.5 text-[var(--rr-success)]" />
+              ) : (
+                <WarningCircle size={15} weight="fill" className="mt-0.5 text-[var(--rr-danger)]" />
+              )}
+              <span className="min-w-0 break-all">
+                <strong>{row.name}</strong> — {row.message}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="mt-4">
+        <Notice tone="info">
+          Only PDFs can be attached here. To scan or add single images page by page, use{' '}
+          <strong>Edit in studio</strong> on the file page.
+        </Notice>
+      </div>
     </Modal>
   );
 }
@@ -420,6 +539,67 @@ export function UploadMapModal({ file, onClose, onDone }: ActionContext) {
         </Field>
         {error && <Notice tone="danger">{error}</Notice>}
       </div>
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------- delete file
+
+/**
+ * Removing a registry row entirely. The API blocks the delete with readable
+ * reasons when the file is issued, has scan pages, maps or issue history —
+ * those messages surface here so the operator knows exactly what to clear.
+ */
+export function DeleteFileModal({ file, onClose, onDone }: ActionContext) {
+  const service = useService();
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await service.files.remove(file.id);
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      onDone(`${file.fileNumber} was deleted from the registry.`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Delete failed. Try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal
+      open
+      onClose={busy ? () => undefined : onClose}
+      title="Delete this file?"
+      description="The registry row and any stored attachments are removed. This cannot be undone."
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
+            Keep the file
+          </Button>
+          <Button variant="danger" onClick={submit} disabled={busy} icon={<Trash size={16} />}>
+            {busy ? 'Deleting…' : 'Delete file'}
+          </Button>
+        </>
+      }
+    >
+      <FileSummary file={file} />
+      <Notice tone="danger">
+        {file.fileNumber} will be deleted together with its stored scan versions. Files that are
+        issued, or still have scan pages, maps or issue receipts attached, are refused with the
+        reason — nothing is deleted behind your back.
+      </Notice>
+      {error && (
+        <div className="mt-4">
+          <Notice tone="danger">{error}</Notice>
+        </div>
+      )}
     </Modal>
   );
 }

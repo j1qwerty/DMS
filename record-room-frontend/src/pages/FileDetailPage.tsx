@@ -13,6 +13,7 @@ import {
   CheckCircle,
   ClockCounterClockwise,
   FileText,
+  FilePdf,
   Info as InfoIcon,
   MapPin,
   MapPinPlus,
@@ -27,6 +28,7 @@ import {
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
+import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { EmptyState } from '../components/ui/EmptyState';
 import { Field, SelectInput, TextInput } from '../components/ui/Field';
 import { StatusBadge } from '../components/ui/Flash';
@@ -36,6 +38,7 @@ import { DocumentViewer } from '../components/files/DocumentViewer';
 import { OcrPanel } from '../components/files/OcrPanel';
 import { CompressModal } from '../components/files/CompressModal';
 import {
+  DeleteFileModal,
   MoveFileModal,
   UploadFileModal,
   UploadMapModal,
@@ -65,8 +68,14 @@ const EMPTY_DOCS: RecordFileDocument[] = [];
 const EMPTY_MAPS: MapUpload[] = [];
 const EMPTY_ISSUE_PAGE: Page<IssueRecord> = { items: [], total: 0, page: 1, pageSize: 500 };
 
-type Dialog = 'upload' | 'mapUpload' | 'move' | null;
+type Dialog = 'upload' | 'mapUpload' | 'move' | 'deleteFile' | null;
 type TabKey = 'scan' | 'details' | 'ocr' | 'studio' | 'map';
+
+/** One pending destructive action, confirmed through the shared dialog. */
+type PendingRemoval =
+  | { kind: 'document'; doc: RecordFileDocument }
+  | { kind: 'derivative'; derivative: DocumentDerivative }
+  | { kind: 'map'; map: MapUpload };
 
 export function FileDetailPage() {
   const { fileId = '' } = useParams();
@@ -74,7 +83,7 @@ export function FileDetailPage() {
   const { pathname } = useLocation();
   const [params, setParams] = useSearchParams();
   const service = useService();
-  const { allowed, user } = useSession();
+  const { allowed } = useSession();
   const { barcode } = useFeatures();
   const { success, danger } = useFlash();
 
@@ -92,9 +101,14 @@ export function FileDetailPage() {
   const canStudio = allowed('studio.use');
   const canUploadMap = canEdit || allowed('digitization.upload');
   const canCompress = allowed('digitization.upload');
-  const canDeleteScan = user?.role === 'Admin';
+  // The API gates every document-version delete on files.edit (destructive
+  // admin action); the UI follows the same rule instead of its own role check.
+  const canDeleteScan = canEdit;
+  const canDeleteDeliverable = canStudio;
 
   const [dialog, setDialog] = useState<Dialog>(null);
+  const [removal, setRemoval] = useState<PendingRemoval | null>(null);
+  const [removalBusy, setRemovalBusy] = useState(false);
   const [shelfId, setShelfId] = useState('');
   const [position, setPosition] = useState(1);
   const [reason, setReason] = useState('');
@@ -228,18 +242,69 @@ export function FileDetailPage() {
     reloadDeliverables();
   };
 
-  const removeDoc = async (doc: RecordFileDocument) => {
-    if (!window.confirm(`Delete ${doc.filename} (version ${doc.version}) permanently?`)) return;
-    const result = await service.files.deleteDocument(fileId, doc.id);
-    if (result.ok) {
-      success(`Deleted ${doc.filename} v${doc.version}.`);
-      if (params.get('v') === doc.id) setParams({}, { replace: true });
-      reloadFile();
-      reloadDocs();
-    } else {
-      danger(result.error);
+  // One shared confirmation dialog for every destructive action on this page:
+  // stored scan version, built deliverable, map version. The API blocks
+  // deletes it must refuse and its reasons surface as a toast.
+  const confirmRemoval = async () => {
+    if (!removal) return;
+    setRemovalBusy(true);
+    try {
+      if (removal.kind === 'document') {
+        const result = await service.files.deleteDocument(fileId, removal.doc.id);
+        if (result.ok) {
+          success(`Deleted ${removal.doc.filename} v${removal.doc.version}.`);
+          if (params.get('v') === removal.doc.id) setParams({}, { replace: true });
+          setRemoval(null);
+          reloadFile();
+          reloadDocs();
+        } else {
+          danger(result.error);
+        }
+      } else if (removal.kind === 'derivative') {
+        const result = await service.digitization.removePdf(removal.derivative.id, fileId);
+        if (result.ok) {
+          success(`Deleted build ${removal.derivative.filename}.`);
+          if (params.get('v') === removal.derivative.id) setParams({}, { replace: true });
+          setRemoval(null);
+          reloadDeliverables();
+        } else {
+          danger(result.error);
+        }
+      } else {
+        const result = await service.uploads.removeMap(removal.map.id);
+        if (result.ok) {
+          success(`Deleted map ${removal.map.filename} (page ${removal.map.pageNo}).`);
+          if (params.get('v') === removal.map.id) setParams({}, { replace: true });
+          setRemoval(null);
+          reloadMaps();
+        } else {
+          danger(result.error);
+        }
+      }
+    } finally {
+      setRemovalBusy(false);
     }
   };
+
+  const removalCopy = (() => {
+    if (!removal) return { title: '', description: '' };
+    if (removal.kind === 'document') {
+      return {
+        title: 'Delete this scan version?',
+        description: `${removal.doc.filename} (version ${removal.doc.version}) will be removed permanently. Earlier versions stay; this cannot be undone.`,
+      };
+    }
+    if (removal.kind === 'derivative') {
+      return {
+        title: 'Delete this deliverable build?',
+        description: `${removal.derivative.filename} (${removal.derivative.status.toLowerCase()}, ${removal.derivative.pageCount} page(s)) will be removed permanently. The scan pages it was built from stay untouched.`,
+      };
+    }
+    return {
+      title: 'Delete this map version?',
+      description: `${removal.map.filename} (page ${removal.map.pageNo}, version ${removal.map.version}) will be removed permanently. This cannot be undone.`,
+    };
+  })();
 
   const room = rooms.find((item) => item.id === file.roomId);
   const unit =
@@ -365,6 +430,17 @@ export function FileDetailPage() {
           >
             Issue / return
           </Link>
+          {canEdit && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-[var(--rr-danger)] hover:text-[var(--rr-danger)]"
+              onClick={() => setDialog('deleteFile')}
+              icon={<Trash size={16} />}
+            >
+              Delete
+            </Button>
+          )}
         </div>
       </div>
 
@@ -548,9 +624,15 @@ export function FileDetailPage() {
                             className="min-w-0 flex-1 text-left focus:outline-none"
                           >
                             <div className="flex flex-wrap items-center gap-1.5">
-                              <span className="truncate text-xs font-semibold">
-                                {version.filename}
-                              </span>
+                              <Badge tone={version.source === 'document' ? 'info' : 'neutral'}>
+                                {version.source === 'document' ? (
+                                  'Scan PDF'
+                                ) : (
+                                  <span className="inline-flex items-center gap-1">
+                                    <FilePdf size={11} /> Built PDF
+                                  </span>
+                                )}
+                              </Badge>
                               {isCurrent && <Badge tone="success">Current version</Badge>}
                               {version.source === 'derivative' && version.status !== 'Approved' && (
                                 <Badge tone={version.status === 'Rejected' ? 'danger' : 'warning'}>
@@ -558,6 +640,9 @@ export function FileDetailPage() {
                                 </Badge>
                               )}
                             </div>
+                            <p className="mt-1.5 truncate text-xs font-semibold">
+                              {version.filename}
+                            </p>
                             <p className="muted mt-1 text-[11px]">
                               {version.versionLabel} ·{' '}
                               {new Date(version.updatedAt).toLocaleString()}
@@ -574,6 +659,11 @@ export function FileDetailPage() {
                                 {version.rawDeriv.savedPercent !== undefined
                                   ? ` · −${version.rawDeriv.savedPercent}%`
                                   : ''}
+                              </p>
+                            )}
+                            {version.rawDeriv?.includesOcrText && (
+                              <p className="mt-0.5 text-[11px] text-accent">
+                                Includes searchable OCR text
                               </p>
                             )}
                             {version.reviewNote && (
@@ -614,7 +704,9 @@ export function FileDetailPage() {
                             {version.source === 'document' && version.rawDoc && canDeleteScan && (
                               <button
                                 type="button"
-                                onClick={() => void removeDoc(version.rawDoc!)}
+                                onClick={() =>
+                                  setRemoval({ kind: 'document', doc: version.rawDoc! })
+                                }
                                 className="focus-ring rounded p-1 text-[var(--rr-muted)] hover:text-[var(--rr-danger)]"
                                 title="Delete this scan version"
                                 aria-label="Delete this scan version"
@@ -622,6 +714,24 @@ export function FileDetailPage() {
                                 <Trash size={14} />
                               </button>
                             )}
+                            {version.source === 'derivative' &&
+                              version.rawDeriv &&
+                              canDeleteDeliverable && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setRemoval({
+                                      kind: 'derivative',
+                                      derivative: version.rawDeriv!,
+                                    })
+                                  }
+                                  className="focus-ring rounded p-1 text-[var(--rr-muted)] hover:text-[var(--rr-danger)]"
+                                  title="Delete this deliverable build"
+                                  aria-label="Delete this deliverable build"
+                                >
+                                  <Trash size={14} />
+                                </button>
+                              )}
                           </div>
                         </div>
                       </li>
@@ -992,19 +1102,32 @@ export function FileDetailPage() {
                             : 'hover:bg-[var(--rr-surface-2)]',
                         )}
                       >
-                        <button
-                          type="button"
-                          onClick={() => pick(m.id)}
-                          className="w-full text-left focus:outline-none"
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="truncate text-xs font-semibold">{m.filename}</span>
-                            <StatusBadge status={m.status} />
-                          </div>
-                          <p className="muted mt-1 text-[11px]">
-                            Page {m.pageNo} · v{m.version} · {m.sizeKb} KB
-                          </p>
-                        </button>
+                        <div className="flex items-start justify-between gap-2">
+                          <button
+                            type="button"
+                            onClick={() => pick(m.id)}
+                            className="min-w-0 flex-1 text-left focus:outline-none"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="truncate text-xs font-semibold">{m.filename}</span>
+                              <StatusBadge status={m.status} />
+                            </div>
+                            <p className="muted mt-1 text-[11px]">
+                              Page {m.pageNo} · v{m.version} · {m.sizeKb} KB
+                            </p>
+                          </button>
+                          {canEdit && (
+                            <button
+                              type="button"
+                              onClick={() => setRemoval({ kind: 'map', map: m })}
+                              className="focus-ring rounded p-1 text-[var(--rr-muted)] hover:text-[var(--rr-danger)]"
+                              title="Delete this map version"
+                              aria-label="Delete this map version"
+                            >
+                              <Trash size={14} />
+                            </button>
+                          )}
+                        </div>
                       </li>
                     );
                   })}
@@ -1030,6 +1153,25 @@ export function FileDetailPage() {
           onDone={(msg) => doneAction(msg)}
         />
       )}
+      {dialog === 'deleteFile' && (
+        <DeleteFileModal
+          file={file}
+          onClose={() => setDialog(null)}
+          onDone={(msg) => {
+            setDialog(null);
+            success(msg);
+            navigate('/files');
+          }}
+        />
+      )}
+      <ConfirmDialog
+        open={removal !== null}
+        title={removalCopy.title}
+        description={removalCopy.description}
+        busy={removalBusy}
+        onCancel={() => setRemoval(null)}
+        onConfirm={() => void confirmRemoval()}
+      />
       {dialog === 'mapUpload' && (
         <UploadMapModal
           file={file}

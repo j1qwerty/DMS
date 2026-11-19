@@ -28,6 +28,9 @@ public sealed class OcrTextExtractorTests
             Calls++;
             return Task.FromResult(string.IsNullOrWhiteSpace(result) || result.Length < 4 ? null : result);
         }
+
+        public OcrEngineStatus Describe() =>
+            new(available, available, null, [], available ? "Fake engine ready (hin+eng)." : "Fake engine is not available.");
     }
 
     private static OcrTextExtractor Extractor(IOcrEngine engine) =>
@@ -127,5 +130,29 @@ public sealed class OcrTextExtractorTests
         var extraction = await Extractor(engine).ExtractAsync(pdf, "application/pdf");
         Assert.Equal("first page\n\nsecond page", extraction.Text);
         Assert.Equal(2, engine.Calls);
+    }
+
+    [Fact]
+    public void TesseractOcrEngine_resolves_standard_installation_path()
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Ocr:TesseractPath"] = "tesseract",
+                ["Ocr:TessDataPath"] = "tessdata",
+                ["Ocr:Languages"] = "hin+eng"
+            })
+            .Build();
+
+        var engine = new TesseractOcrEngine(config, NullLogger<TesseractOcrEngine>.Instance);
+        if (File.Exists(@"C:\Program Files\Tesseract-OCR\tesseract.exe"))
+        {
+            Assert.Equal(@"C:\Program Files\Tesseract-OCR\tesseract.exe", engine.ResolvedBinaryPath);
+            Assert.True(engine.IsAvailable);
+            var status = engine.Describe();
+            Assert.True(status.BinaryFound);
+            Assert.True(status.TessDataFound);
+            Assert.Contains("Tesseract ready", status.Note);
+        }
     }
 }

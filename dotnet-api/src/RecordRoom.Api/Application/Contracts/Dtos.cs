@@ -312,6 +312,9 @@ public sealed record FileScanPageDto(
 public sealed record ScanAddInput(string FileName, int PageNo, string? DocumentSize = null, string? Note = null);
 public sealed record PageReviewInput(string Decision, string Note = "");
 
+/// <summary>Body of POST /api/files/{fileId}/scans/review-set: the reviewer's page selection decided in one call.</summary>
+public sealed record PageSetReviewInput(long[] ScanIds, string Decision, string Note = "");
+
 /// <summary>Body of PUT /api/files/{fileId}/scans/order: the studio's persisted page order.</summary>
 public sealed record ScanOrderInput(long[] ScanIds);
 
@@ -528,7 +531,28 @@ public sealed record MediaLinkDto(long Id, string Title, string Url, string Alt,
 
 /// <summary>Served at GET /api/config so the frontend knows which optional features are on.</summary>
 public sealed record FeaturesDto(bool Barcode, bool RecordRoom, bool Maps, bool Support);
-public sealed record AppConfigDto(string AppName, FeaturesDto Features);
+
+/// <summary>
+/// Served at GET /api/config so the frontend knows which optional features are on.
+/// <c>SettingsEditable</c> is false when the deployment locked the feature
+/// switchboard through its environment (<c>Settings:AllowFeatureEditing=false</c>) —
+/// the Settings page then shows the switches read-only instead of failing on save.
+/// <c>DemoMode</c> tells the UI the registry is running on the demo dataset.
+/// </summary>
+public sealed record AppConfigDto(
+    string AppName,
+    FeaturesDto Features,
+    bool SettingsEditable,
+    bool DemoMode,
+    OcrStatusDto Ocr);
+
+/// <summary>One line of truth about the OCR engine, shown on the OCR screen.</summary>
+public sealed record OcrStatusDto(
+    bool Enabled,
+    bool Available,
+    string Engine,
+    string Languages,
+    string Note);
 
 public sealed record HealthDto(string Status, string Database, bool Redis, string Hangfire, DateTime At);
 public sealed record JobAcceptedDto(string JobId, string Queue);

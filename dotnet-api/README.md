@@ -58,6 +58,69 @@ validation, multi-file issue with a partial return, audit and movement trails,
 digitization versioning, bulk classification, barcodes, reports, dashboard
 aggregates and role-based access control.
 
+### Linux / Ubuntu VPS Deployment & OCR Dependencies
+
+The OCR path is platform-neutral: it shells out to the `tesseract` CLI with the same arguments on Windows and Linux (`tesseract <page.png> stdout -l hin+eng --psm 3`, with `--tessdata-dir` added when resolved). On Windows, it auto-detects `C:\Program Files\Tesseract-OCR\tesseract.exe` if not on PATH. On Ubuntu/Debian, `apt` packages provide the CLI and optional system models.
+
+#### 1. System packages (Ubuntu / Debian VPS)
+
+```bash
+sudo apt-get update
+# Tesseract CLI + Hindi and English language models
+sudo apt-get install -y tesseract-ocr tesseract-ocr-eng tesseract-ocr-hin
+
+# Deliverable PDF builder (QuestPDF/Skia): font config + fonts (including Devanagari for Hindi text)
+sudo apt-get install -y libfontconfig1 fonts-dejavu-core fonts-noto-devanagari
+
+# Verify installation
+tesseract --version && tesseract --list-langs
+```
+
+> **Note on fonts**: QuestPDF uses system fonts (`UseSystemFonts = true`). On minimal Linux images without `libfontconfig1`, PDF composition degrades. For Hindi text in deliverable PDFs, `fonts-noto-devanagari` (or `fonts-lohit-deva`) ensures clean Devanagari rendering.
+
+#### 2. Models & tessdata lookup order
+
+The repository ships `dotnet-api/tessdata/` (`eng.traineddata` + `hin.traineddata`), which `RecordRoom.Api.csproj` copies directly into the publish output directory. The lookup order is:
+1. Configured path (`Ocr:TessDataPath`)
+2. App folder (`AppContext.BaseDirectory/tessdata`)
+3. Working directory (`./tessdata`, `./dotnet-api/tessdata`, `../../tessdata`)
+4. Binary directory (`<tesseract-bin-dir>/tessdata`)
+5. System locations (`/usr/share/tesseract-ocr/5/tessdata`, `/usr/share/tesseract-ocr/4.00/tessdata`, `/usr/share/tessdata`)
+
+If you want to use the system models instead of the bundled files:
+```bash
+# Check location:
+dpkg -L tesseract-ocr-hin | grep traineddata
+# Set in /etc/recordroom/recordroom.env or .env:
+Ocr__TessDataPath=/usr/share/tesseract-ocr/5/tessdata
+```
+
+#### 3. Native bits & container images
+
+- **OpenCV**: The csproj references `OpenCvSharp5.official.runtime.linux-x64` unconditionally; `OpenCvSharp5.runtime.win` is wrapped in `Condition="$([MSBuild]::IsOSPlatform('Windows'))"`. Linux publishes get their native binaries automatically.
+- **PDF rasterization**: `Docnet.Core` (PDFium) ships `linux-x64` native binaries.
+- **Docker**: If containerizing `dotnet-api/`, include `tesseract-ocr`, `tesseract-ocr-eng`, `tesseract-ocr-hin`, `libfontconfig1`, `fonts-dejavu-core`, and `fonts-noto-devanagari` in the Dockerfile.
+
+#### 4. Post-deploy verification
+
+Check the health and engine status:
+```bash
+curl http://localhost:5006/api/config
+```
+The returned JSON includes an `ocr` block:
+```json
+{
+  "ocr": {
+    "enabled": true,
+    "available": true,
+    "engine": "tesseract",
+    "languages": "hin+eng",
+    "note": "Tesseract ready (hin+eng)."
+  }
+}
+```
+Setting `Ocr__Enabled=false` disables the entire OCR path if ever needed.
+
 ## Layout
 
 ```

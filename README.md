@@ -97,6 +97,7 @@ only — a bare IP cannot get a normal TLS certificate):
   (systemd `recordroom-api`), env `/etc/recordroom/recordroom.env`,
   nginx site `recordroom`, SQL Server database `RecordRoom` + login `recordroom_app`
 - The API applies EF migrations and seeds the demo dataset on first boot.
+- **OCR & Fonts**: The OCR engine shells out to `tesseract` (`hin+eng`). The deployment script installs `tesseract-ocr`, `tesseract-ocr-eng`, `tesseract-ocr-hin`, plus `libfontconfig1`, `fonts-dejavu-core`, and `fonts-noto-devanagari` for QuestPDF Hindi deliverable PDF generation. The repo's `dotnet-api/tessdata/` models travel with the publish output. Full deployment guide in `dotnet-api/README.md`.
 
 ## Roadmap
 

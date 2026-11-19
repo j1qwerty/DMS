@@ -14,7 +14,8 @@ public static class DatabaseSeeder
 {
     public const string DemoPassword = "Demo@12345";
 
-    public static async Task SeedAsync(AppDbContext db, ILogger logger, CancellationToken ct = default)
+    public static async Task SeedAsync(
+        AppDbContext db, ILogger logger, bool demoMode = true, CancellationToken ct = default)
     {
         // ---------------------------------------------------------------- switches
         // The feature groups seed independently of the demo dataset: a
@@ -117,6 +118,43 @@ public static class DatabaseSeeder
         if (await db.Files.AnyAsync(ct))
         {
             logger.LogInformation("Seed skipped: the registry already has rows.");
+            return;
+        }
+
+        // ---------------------------------------------------------- bootstrap only
+        // With demo mode off (App__DemoMode=false in the deployment's .env), a
+        // fresh install still needs the standard accounts so an administrator
+        // can sign in — but no demo employees, rooms, files or receipts. The
+        // accounts carry no employee link because the employee master is demo
+        // data; admins attach real ones after first login.
+        if (!demoMode)
+        {
+            if (!await db.Users.AnyAsync(ct))
+            {
+                foreach (var (userName, display, role, active) in new[]
+                {
+                    ("admin", "Administrator", Role.Admin, true),
+                    ("supervisor", "Supervisor", Role.Supervisor, true),
+                    ("operator", "Operator", Role.Operator, true),
+                    ("employee", "Employee", Role.Employee, true),
+                })
+                {
+                    var (hash, salt) = PasswordHasher.Create(DemoPassword);
+                    db.Users.Add(new AppUser
+                    {
+                        UserName = userName,
+                        DisplayName = display,
+                        Role = role,
+                        Active = active,
+                        PasswordHash = hash,
+                        PasswordSalt = salt,
+                    });
+                }
+                await db.SaveChangesAsync(ct);
+                logger.LogInformation(
+                    "Demo mode is off: seeded bootstrap accounts only (password {Password}; change it after first login).",
+                    DemoPassword);
+            }
             return;
         }
 

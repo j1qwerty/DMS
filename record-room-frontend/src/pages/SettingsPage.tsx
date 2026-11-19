@@ -1,30 +1,36 @@
-import { useFeatures, applyFeatures, FEATURE_GROUPS, type FeatureKey } from '../lib/features';
-import { service, dataSource } from '../services';
-import { CheckCircle, Circle, Sliders } from '@phosphor-icons/react';
 import { useEffect, useState, type ReactNode } from 'react';
-import { Bell, Moon } from '@phosphor-icons/react';
+import {
+  CheckCircle,
+  Circle,
+  Lock,
+  Moon,
+  Sliders,
+  Database,
+  TextAa,
+  WarningCircle,
+} from '@phosphor-icons/react';
 import { PageHeader } from '../components/ui/PageHeader';
 import { SectionHeader } from '../components/ui/SectionHeader';
 import { Card } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
 import { useSession } from '../hooks/useService';
+import { useFeatures, applyFeatures, FEATURE_GROUPS, type FeatureKey } from '../lib/features';
+import { service, dataSource } from '../services';
+import type { AppConfigInfo } from '../services/contracts';
 
 /**
- * Settings, kept intentionally small: the two personal preferences that live
- * in the browser, and the admin-controlled feature visibility groups.
- *
- * The connection/data, session and deployment sections were removed — they
- * belong in docs, not on a settings surface users toggle.
+ * Settings, kept intentionally small: the one personal preference that lives
+ * in the browser (dark mode), the admin-controlled feature visibility groups,
+ * and a read-only deployment card (demo mode, feature-edit lock, OCR engine)
+ * fed by the environment — the .env file on the server, not the database.
  */
 export function SettingsPage() {
-  const [notifications, setNotifications] = useState(true);
   const [dark, setDark] = useState(localStorage.getItem('rr-dark') === '1');
 
   return (
     <div className="space-y-10">
       <PageHeader title="Settings" />
 
-      {/* ------------------------------------------------------ interface */}
       <section aria-label="Interface">
         <SectionHeader title="Interface" />
         <Card>
@@ -39,20 +45,18 @@ export function SettingsPage() {
                 document.documentElement.classList.toggle('dark', value);
               }}
             />
-            <Toggle
-              icon={<Bell />}
-              label="Operational notifications"
-              value={notifications}
-              setValue={setNotifications}
-            />
           </div>
         </Card>
       </section>
 
-      {/* ----------------------------------------------- feature visibility */}
       <section aria-label="Feature visibility">
         <SectionHeader title="Feature visibility" />
         <FeatureVisibilityCard />
+      </section>
+
+      <section aria-label="Deployment">
+        <SectionHeader title="Deployment" />
+        <DeploymentCard />
       </section>
     </div>
   );
@@ -85,9 +89,7 @@ function Toggle({
         }`}
       >
         <span
-          className={`block size-4 rounded-full bg-white transition ${
-            value ? 'translate-x-5' : ''
-          }`}
+          className={`block size-4 rounded-full bg-white transition ${value ? 'translate-x-5' : ''}`}
         />
       </span>
     </button>
@@ -97,13 +99,10 @@ function Toggle({
 /**
  * Feature visibility (ZILA_PANCHAYAT_CC §F): grouped switches that hide whole
  * capability areas without removing them. Admin-only writes; everyone sees the
- * current state. Local mode persists to localStorage; http mode writes the
- * API's FeatureSettings rows (audit-logged server-side).
- *
- * The card keeps its own `local` mirror of the feature flags and drives the
- * UI from that mirror — the external feature store does not always notify this
- * component on change, so relying on `useFeatures()` alone would leave the
- * switches stale until a full refresh.
+ * current state. When the deployment locked the switchboard
+ * (Settings:AllowFeatureEditing in the server's .env), the switches render
+ * read-only with a lock notice — the API refuses the write anyway, and the
+ * page says why instead of failing.
  */
 function FeatureVisibilityCard() {
   const features = useFeatures();
@@ -111,10 +110,15 @@ function FeatureVisibilityCard() {
   const isAdmin = user?.role === 'Admin';
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [locked, setLocked] = useState(false);
   const [local, setLocal] = useState<Record<FeatureKey, boolean>>(features);
 
   useEffect(() => {
     if (dataSource !== 'api') return;
+    void service.config
+      .info()
+      .then((info) => setLocked(!info.settingsEditable))
+      .catch(() => undefined);
     void service.config
       .features()
       .then((next) => {
@@ -125,7 +129,7 @@ function FeatureVisibilityCard() {
   }, []);
 
   const toggle = async (key: FeatureKey) => {
-    if (!isAdmin || busy) return;
+    if (!isAdmin || busy || locked) return;
 
     const previous = local;
     const nextValue = !local[key];
@@ -153,7 +157,7 @@ function FeatureVisibilityCard() {
       setLocal(previous);
       setError(err instanceof Error ? err.message : 'The feature groups could not be updated.');
     } finally {
-      setBusy(false); // ← always runs, even on throw / reject
+      setBusy(false);
     }
   };
 
@@ -167,17 +171,31 @@ function FeatureVisibilityCard() {
           <p className="text-sm font-semibold">Feature groups</p>
           <p className="muted text-xs">
             Enabling a group enables every related surface. Hidden groups stay built and tested.
-            {isAdmin ? '' : ' Only an admin can change these.'}
+            {isAdmin && !locked ? '' : ' Only an admin can change these.'}
           </p>
         </div>
       </div>
+
+      {locked && (
+        <div className="mt-4 flex items-start gap-2.5 rounded-lg border border-base bg-[var(--rr-bg)] p-3 text-sm leading-5">
+          <Lock size={18} weight="fill" className="mt-0.5 shrink-0 text-[var(--rr-warning)]" />
+          <div>
+            <strong>Locked by the server environment.</strong> This deployment controls feature
+            visibility through its <span className="mono">.env</span> file, so the switches are
+            read-only here and the API refuses changes. An operator edits{' '}
+            <span className="mono">Settings__AllowFeatureEditing</span> (and the{' '}
+            <span className="mono">Features__*</span> keys) in the deployment configuration and
+            restarts the API.
+          </div>
+        </div>
+      )}
 
       <div className="mt-5 space-y-3">
         {FEATURE_GROUPS.map((group) => (
           <button
             key={group.key}
             onClick={() => toggle(group.key)}
-            disabled={!isAdmin || busy}
+            disabled={!isAdmin || busy || locked}
             aria-pressed={local[group.key]}
             className="focus-ring flex w-full items-start justify-between gap-4 rounded-xl bg-[var(--rr-bg)] p-3 text-left disabled:cursor-default"
           >
@@ -216,5 +234,108 @@ function FeatureVisibilityCard() {
 
       {error && <p className="mt-3 text-xs text-[var(--rr-danger)]">{error}</p>}
     </Card>
+  );
+}
+
+/** Read-only deployment facts from GET /api/config — the environment decides, not the database. */
+function DeploymentCard() {
+  const [info, setInfo] = useState<AppConfigInfo | null>(null);
+
+  useEffect(() => {
+    void service.config
+      .info()
+      .then(setInfo)
+      .catch(() => setInfo(null));
+  }, []);
+
+  return (
+    <Card>
+      <div className="flex items-center gap-3">
+        <div className="rounded-lg bg-accent-soft p-2 text-accent">
+          <Database size={18} />
+        </div>
+        <div>
+          <p className="text-sm font-semibold">Deployment</p>
+          <p className="muted text-xs">
+            Read-only — these values come from the server environment (its .env file), not the
+            database.
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-5 space-y-3">
+        <Row
+          icon={<Database size={16} />}
+          label="Data"
+          value={
+            info
+              ? info.demoMode
+                ? 'Demo dataset'
+                : 'Live registry'
+              : dataSource === 'local'
+                ? 'Local demo (in this browser)'
+                : '…'
+          }
+          tone={info?.demoMode || dataSource === 'local' ? 'warning' : 'success'}
+        />
+        <Row
+          icon={<Sliders size={16} />}
+          label="Feature editing"
+          value={
+            info
+              ? info.settingsEditable
+                ? 'Allowed at runtime'
+                : 'Locked to the environment'
+              : '…'
+          }
+          tone={info?.settingsEditable === false ? 'neutral' : 'success'}
+        />
+        <Row
+          icon={<TextAa size={16} />}
+          label="OCR engine"
+          value={
+            info
+              ? info.ocr.available
+                ? `${info.ocr.engine} · ${info.ocr.languages}`
+                : info.ocr.note || 'Unavailable'
+              : '…'
+          }
+          tone={info ? (info.ocr.available ? 'success' : 'danger') : 'neutral'}
+        />
+        {info && !info.ocr.available && (
+          <p className="muted flex items-start gap-2 text-xs leading-5">
+            <WarningCircle
+              size={14}
+              weight="fill"
+              className="mt-0.5 shrink-0 text-[var(--rr-danger)]"
+            />
+            {info.ocr.note} Scans still store fine; their text is simply not extracted until the
+            engine is fixed.
+          </p>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function Row({
+  icon,
+  label,
+  value,
+  tone,
+}: {
+  icon: ReactNode;
+  label: string;
+  value: string;
+  tone: 'success' | 'warning' | 'danger' | 'neutral';
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-xl bg-[var(--rr-bg)] p-3">
+      <span className="flex items-center gap-2 text-sm font-semibold">
+        <span className="text-accent">{icon}</span>
+        {label}
+      </span>
+      <Badge tone={tone}>{value}</Badge>
+    </div>
   );
 }

@@ -50,12 +50,30 @@ public class DeliverablesController(IScanStudioService studio) : ControllerBase
         return ApiResults.FromResult(await studio.ReviewPdfAsync(derivativeId, input, ct));
     }
 
+    /// <summary>
+    /// Removes one deliverable build and its stored bytes — the missing delete
+    /// for the document version list. Rejected builds and superseded compressed
+    /// copies are the usual targets; the action is audited.
+    /// </summary>
+    [Authorize(Policy = "perm:studio.use")]
+    [HttpDelete("{derivativeId:long}")]
+    [HttpDelete("/api/derivatives/{derivativeId:long}")]
+    public async Task<IResult> Delete(int fileId, long derivativeId, CancellationToken ct)
+    {
+        // When routed with a positive fileId, verify the derivative belongs to it.
+        if (fileId > 0)
+        {
+            var list = await studio.ListPdfsAsync(fileId, ct);
+            if (list.All(d => d.Id != derivativeId)) return Results.NotFound();
+        }
+        return ApiResults.FromResult(await studio.DeletePdfAsync(derivativeId, ct));
+    }
+
     [HttpGet("{derivativeId:long}/content")]
     [HttpGet("/api/derivatives/{derivativeId:long}/content")]
     public async Task<IActionResult> Content(
         int fileId, long derivativeId, [FromQuery] bool download = true, CancellationToken ct = default)
-    {
-        var item = await studio.OpenPdfAsync(derivativeId, ct);
+    {        var item = await studio.OpenPdfAsync(derivativeId, ct);
         if (item is null) return NotFound();
         Response.Headers["Cache-Control"] = "private, no-store";
         Response.Headers["X-Content-Type-Options"] = "nosniff";

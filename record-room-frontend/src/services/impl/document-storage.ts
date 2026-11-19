@@ -288,6 +288,12 @@ export async function clearLocalDocumentStorage(): Promise<void> {
   await idbClear();
 }
 
+/** Removes one locally built deliverable's bytes; mirrors the API's delete. */
+export async function deleteLocalDerivativeBytes(id: string): Promise<void> {
+  derivativeBytes.delete(id);
+  await idbDelete(`derivative:${id}`);
+}
+
 function blobKey(scope: 'record' | 'page' | 'map', id: string): string {
   return `${scope}:${id}`;
 }
