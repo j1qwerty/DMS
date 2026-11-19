@@ -1,6 +1,7 @@
 import { X } from '@phosphor-icons/react';
 import type { ReactNode } from 'react';
 import { useEffect, useId, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { cn } from '../../lib/utils';
 
 const widths = { md: 'sm:max-w-xl', lg: 'sm:max-w-3xl', xl: 'sm:max-w-5xl' };
@@ -13,6 +14,13 @@ const FOCUSABLE =
  *
  * The body scrolls on its own so a long form or a PDF preview never pushes the
  * title bar or the footer off screen, and the page behind is locked while open.
+ *
+ * Rendered through a portal on `document.body`: `position: fixed` resolves
+ * against the nearest ancestor that has a transform, filter or `backdrop-filter`,
+ * and the command palette is mounted inside the Topbar, whose `backdrop-blur-xl`
+ * turned that 64px header into the containing block — the panel was centred on
+ * the header and its top half sat above the viewport. A portal puts every dialog
+ * on the root, so `inset-0` means the viewport again.
  *
  * Keyboard/SR behaviour (work plan §2.3 E2): focus is trapped inside the
  * dialog while it is open — Tab wraps at the edges instead of escaping into
@@ -94,7 +102,7 @@ export function Modal({
   }, [open]);
 
   if (!open) return null;
-  return (
+  return createPortal(
     <div
       className="animate-fade fixed inset-0 z-[60] flex items-end justify-center bg-slate-950/55 sm:items-center sm:p-4"
       role="dialog"
@@ -133,6 +141,7 @@ export function Modal({
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
