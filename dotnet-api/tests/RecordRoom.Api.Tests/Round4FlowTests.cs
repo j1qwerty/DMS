@@ -4,6 +4,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -17,6 +18,7 @@ using RecordRoom.Api.Infrastructure.Cache;
 using RecordRoom.Api.Infrastructure.Data;
 using RecordRoom.Api.Infrastructure.Features;
 using RecordRoom.Api.Infrastructure.Imaging;
+using RecordRoom.Api.Infrastructure.Jobs;
 using RecordRoom.Api.Infrastructure.Ocr;
 using RecordRoom.Api.Infrastructure.Realtime;
 
@@ -96,6 +98,23 @@ public sealed class Round4FlowTests
             Task.FromResult(Result<(byte[], string)>.Ok((source, $"{operation} (test)")));
     }
 
+    private sealed class SynchronousBackgroundJobs(IServiceProvider services) : Hangfire.IBackgroundJobClient
+    {
+        public string Create(Hangfire.Common.Job job, Hangfire.States.IState state)
+        {
+            if (job.Type == typeof(ScanProcessingJobs) && job.Method.Name == nameof(ScanProcessingJobs.ExtractOcrAsync))
+            {
+                var processor = new ScanProcessingJobs(services, NullLogger<ScanProcessingJobs>.Instance);
+                var scanId = (long)job.Args[0];
+                var targetStatus = (int)job.Args[1];
+                processor.ExtractOcrAsync(scanId, targetStatus).GetAwaiter().GetResult();
+            }
+            return Guid.NewGuid().ToString("N");
+        }
+
+        public bool ChangeState(string jobId, Hangfire.States.IState state, string? expectedState) => true;
+    }
+
     private sealed class TestEnvironment(string contentRoot) : IHostEnvironment
     {
         public string ApplicationName { get; set; } = "RecordRoom.Api.Tests";
@@ -153,12 +172,20 @@ public sealed class Round4FlowTests
             var flags = new FeatureFlags(configuration);
             var fileRefs = new FileRefs(Db, flags);
 
+            var services = new ServiceCollection()
+                .AddSingleton(Db)
+                .AddSingleton(ocr ?? new FakeOcr())
+                .AddSingleton(audit)
+                .AddSingleton<IConfiguration>(configuration)
+                .BuildServiceProvider();
+            var backgroundJobs = new SynchronousBackgroundJobs(services);
+
             Files = new FilesService(Db, audit, User, store, flags, configuration,
                 NullLogger<FilesService>.Instance);
             Issues = new IssuesService(Db, audit, User, fileRefs);
             Custody = new CustodyService(Db, audit, User);
             Scans = new FileScansService(Db, audit, User, store, fileRefs, configuration,
-                NullLogger<FileScansService>.Instance, ocr ?? new FakeOcr());
+                NullLogger<FileScansService>.Instance, backgroundJobs);
             Studio = new ScanStudioService(Db, audit, User, store, new FakeEnhancer(), fileRefs,
                 new ConsoleLogger<ScanStudioService>());
         }

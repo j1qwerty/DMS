@@ -4,7 +4,7 @@ import {
   ChartBar,
   ClipboardText,
   Files,
-  Gauge,
+  // Gauge, (unused while Overview is hidden)
   Gear,
   ListChecks,
   ShieldCheck,
@@ -43,7 +43,8 @@ const groups: Array<{ title: string; items: NavItem[] }> = [
   {
     title: 'Workspace',
     items: [
-      { label: 'Overview', to: '/overview', icon: Gauge },
+      // Overview hidden for this deployment (round 6); kept commented so it can return.
+      // { label: 'Overview', to: '/overview', icon: Gauge },
       { label: 'Documents', to: '/files', icon: Files, also: ['/search', '/maps'] },
       { label: 'Digitization', to: '/digitization', icon: Archive, also: ['/custody'] },
       { label: 'Review', to: '/review', icon: ListChecks, permission: 'digitization.view' },

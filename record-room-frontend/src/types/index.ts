@@ -289,7 +289,8 @@ export interface AuditEntry {
 
 // -------------------------------------------------------------- digitization
 
-export type PageStatus = 'Pending review' | 'Approved' | 'Rejected' | 'Duplicate' | 'Active';
+export type PageStatus =
+  'Pending review' | 'Approved' | 'Rejected' | 'Duplicate' | 'Active' | 'Processing';
 
 /**
  * One scanned page of a file (page-by-page digitization). Scans live on the

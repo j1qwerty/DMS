@@ -1,33 +1,34 @@
 /**
- * Scan composition studio (work plan §3.4): the gallery that turns "stored
- * scans" into "digitized properly". Thumbnail grid with drag-to-reorder,
- * per-page rotate / enhance / compare / duplicate / revert, and the deliverable
- * PDF built from the approved pages (§3.5). The original scan is never
- * modified — enhancements write a processed copy server-side.
- *
- * Round 4: the studio is the digitization workbench. Pages can be scanned /
- * uploaded right here (one or many images or PDFs), and existing PDF versions
- * can be previewed, edited, and reordered. Every build, approved or not, stays
- * in the history for tracking.
+ * Scan composition studio (work plan §3.4), redesigned: a clean page grid
+ * where cards show only the preview and a status dot — click a card for the
+ * full-screen preview, where every action (rotate, enhance, OCR, compare,
+ * duplicate, delete) lives. Reordering is an explicit mode behind the
+ * "Reorder" button: drag-and-drop is only on then, so a click never has to
+ * guess between "open" and "drag". Page-extraction and OCR of new uploads run
+ * as a background queue (the API OCRs in the background too), so the grid
+ * stays usable while pages land.
  */
 import { useCallback, useEffect, useRef, useState, lazy, Suspense, type ChangeEvent } from 'react';
 import { useParams } from 'react-router-dom';
 import {
   ArrowClockwise,
   ArrowCounterClockwise,
+  ArrowLeft,
+  ArrowRight,
+  ArrowsDownUp,
   ArrowsInLineHorizontal,
+  ArrowsOut,
   CheckCircle,
   Copy,
   DownloadSimple,
-  Eye,
   FilePdf,
   FloppyDisk,
-  MagnifyingGlass,
   PencilSimple,
   Plus,
+  Spinner,
   TextAa,
   Trash,
-  ArrowUUpLeft,
+  X,
   XCircle,
 } from '@phosphor-icons/react';
 import { Card } from '../components/ui/Card';
@@ -36,11 +37,20 @@ import { Badge } from '../components/ui/Badge';
 import { Modal } from '../components/ui/Modal';
 import { Field, TextArea, TextInput } from '../components/ui/Field';
 import { StatusBadge } from '../components/ui/Flash';
+import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { service } from '../services';
-import { useSession } from '../hooks/useService';
+import { useFlash, useSession } from '../hooks/useService';
 import { documentAcceptAttribute } from '../lib/document';
 import { extractPdfPagesToImages } from '../lib/pdf-unpack';
+import { cn } from '../lib/utils';
 import type { DocumentDerivative, FileScan, RecordFileDocument } from '../types';
+import {
+  type StudioDraftState,
+  type UnifiedDocumentVersion,
+  getStudioDraft,
+  setStudioDraft,
+  computeNextVersionName,
+} from '../lib/studioDraft';
 
 const PdfDocumentViewer = lazy(() =>
   import('../components/files/PdfDocumentViewer').then((module) => ({
@@ -50,17 +60,19 @@ const PdfDocumentViewer = lazy(() =>
 
 const ENHANCEMENTS = ['deskew', 'despeckle', 'binarize', 'crop', 'contrast'] as const;
 
-import {
-  type StudioDraftState,
-  type UnifiedDocumentVersion,
-  getStudioDraft,
-  setStudioDraft,
-  computeNextVersionName,
-} from '../lib/studioDraft';
+const STATUS_DOT: Record<string, string> = {
+  Processing: 'bg-amber-400 animate-pulse',
+  'Pending review': 'bg-amber-500',
+  Approved: 'bg-emerald-500',
+  Rejected: 'bg-rose-500',
+  Duplicate: 'bg-slate-400',
+  Active: 'bg-emerald-500',
+};
 
 export function ScanStudioPage() {
   const { fileId } = useParams<{ fileId: string }>();
   const { allowed } = useSession();
+  const { success, danger } = useFlash();
   const canUploadPages = allowed('digitization.upload');
   const canReview = allowed('digitization.review');
 
@@ -69,20 +81,37 @@ export function ScanStudioPage() {
   const [documents, setDocuments] = useState<RecordFileDocument[]>([]);
   const [previews, setPreviews] = useState<Record<string, string>>({});
   const [fileNumber, setFileNumber] = useState('');
-  const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const [uploading, setUploading] = useState(false);
+
+  // Uploads run as a background queue: the grid stays interactive and pages
+  // appear as they are added; the chip in the toolbar is the only progress UI.
+  const [queue, setQueue] = useState<{ done: number; total: number; label: string } | null>(null);
+  const queueBusy = useRef(false);
+
+  const [reorderMode, setReorderMode] = useState(false);
   const [orderDirty, setOrderDirty] = useState(false);
-  const [compare, setCompare] = useState<string | null>(null);
-  const [ocr, setOcr] = useState<Record<string, { text: string; method: string }>>({});
+
+  // The full-screen preview a card click opens.
+  const [lightboxId, setLightboxId] = useState<string | null>(null);
+  const [showOcr, setShowOcr] = useState(false);
+  const [ocrBusy, setOcrBusy] = useState(false);
+  const [compareUrl, setCompareUrl] = useState<string | null>(null);
+
+  const [versionPreview, setVersionPreview] = useState<{
+    version: UnifiedDocumentVersion;
+    url: string;
+  } | null>(null);
+
+  const [deleteTarget, setDeleteTarget] = useState<FileScan | null>(null);
+  const [confirmUnpack, setConfirmUnpack] = useState<UnifiedDocumentVersion | null>(null);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [rejectingPdf, setRejectingPdf] = useState<DocumentDerivative | null>(null);
-  const [previewingVersion, setPreviewingVersion] = useState<UnifiedDocumentVersion | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [buildingPdf, setBuildingPdf] = useState(false);
+
   const [draft, setDraft] = useState<StudioDraftState | null>(() =>
     fileId ? getStudioDraft(fileId) : null,
   );
-  const [buildingPdf, setBuildingPdf] = useState(false);
 
   const dragId = useRef<string | null>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
@@ -105,6 +134,7 @@ export function ScanStudioPage() {
     await Promise.all(
       pages
         .filter((page) => page.hasDocument)
+        .slice(0, 240)
         .map(async (page) => {
           try {
             let blob: Blob;
@@ -126,10 +156,9 @@ export function ScanStudioPage() {
                   return;
                 }
               } catch {
-                /* fallback to raw blob url */
+                /* fall back to the raw blob url */
               }
             }
-
             urls[page.id] = URL.createObjectURL(blob);
           } catch {
             /* a missing blob keeps the card's placeholder */
@@ -147,14 +176,45 @@ export function ScanStudioPage() {
     return () => window.clearTimeout(timer);
   }, [reload]);
 
-  // Clean up preview object url when active preview changes or unmounts
+  // While the API's background OCR pass is running on any page, refresh the
+  // grid so the status dots flip to their final colour on their own.
+  const hasProcessing = scans.some((scan) => scan.status === 'Processing');
   useEffect(() => {
-    return () => {
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
-    };
-  }, [previewUrl]);
+    if (!hasProcessing) return;
+    const timer = window.setInterval(() => void reload(), 3000);
+    return () => window.clearInterval(timer);
+  }, [hasProcessing, reload]);
 
-  // Unified versions list, sorted by date descending (latest on top)
+  // Revoke the compare blob url when the lightbox closes.
+  useEffect(() => {
+    if (compareUrl && lightboxId === null) {
+      URL.revokeObjectURL(compareUrl);
+      queueMicrotask(() => setCompareUrl(null));
+    }
+  }, [compareUrl, lightboxId]);
+
+  const baseSource =
+    draft?.sourceFilename ||
+    documents[0]?.filename ||
+    derivatives[0]?.filename ||
+    `${fileNumber || fileId}.pdf`;
+  const defaultBuildName =
+    draft?.draftFilename || computeNextVersionName(baseSource, derivatives, documents);
+
+  const touchDraft = (pageCount: number) => {
+    if (!fileId) return;
+    const updated: StudioDraftState = {
+      sourceVersionId: draft?.sourceVersionId,
+      sourceFilename: baseSource,
+      draftFilename:
+        draft?.draftFilename || computeNextVersionName(baseSource, derivatives, documents),
+      pageCount,
+      updatedAt: new Date().toISOString(),
+    };
+    setDraft(updated);
+    setStudioDraft(fileId, updated);
+  };
+
   const unifiedVersions: UnifiedDocumentVersion[] = [
     ...documents.map((doc): UnifiedDocumentVersion => ({
       id: doc.id,
@@ -185,7 +245,6 @@ export function ScanStudioPage() {
   const run = async (action: () => Promise<void>) => {
     setBusy(true);
     setError('');
-    setMessage('');
     try {
       await action();
     } catch (e) {
@@ -195,19 +254,22 @@ export function ScanStudioPage() {
   };
 
   /**
-   * Adds pages to the studio composition:
-   * Supports both image files and multi-page PDFs (which are automatically unpacked into pages).
+   * Adds pages as a background queue: images upload directly; multi-page PDFs
+   * are unpacked client-side into per-page images first. The grid refreshes
+   * in between so pages appear as they land, and the API's own OCR pass runs
+   * in the background on top of that — the queue only tracks the uploads.
    */
   const addPages = async (files: File[]) => {
-    if (files.length === 0 || !fileId) return;
-    setUploading(true);
-    setError('');
+    if (files.length === 0 || !fileId || queueBusy.current) return;
+    queueBusy.current = true;
+    setQueue({ done: 0, total: files.length, label: files[0]?.name ?? '' });
     try {
       let pageNo = scans.reduce((max, row) => Math.max(max, row.pageNo), 0);
       const failures: string[] = [];
-      let totalPagesAdded = 0;
+      let added = 0;
 
-      for (const upload of files) {
+      for (const [index, upload] of files.entries()) {
+        setQueue({ done: index, total: files.length, label: upload.name });
         const isPdf =
           upload.type === 'application/pdf' || upload.name.toLowerCase().endsWith('.pdf');
         if (isPdf) {
@@ -215,17 +277,18 @@ export function ScanStudioPage() {
             const extracted = await extractPdfPagesToImages(upload, upload.name);
             for (const pageFile of extracted) {
               pageNo += 1;
-              const added = await service.digitization.add(fileId, {
+              const meta = await service.digitization.add(fileId, {
                 pageNo,
                 filename: pageFile.name,
                 documentSize: 'A4',
                 note: `Extracted from ${upload.name}.`,
               });
-              if (added.ok) {
-                await service.digitization.addDocument(added.value.id, pageFile);
-                totalPagesAdded += 1;
+              if (meta.ok) {
+                const withDoc = await service.digitization.addDocument(meta.value.id, pageFile);
+                if (withDoc.ok) added += 1;
+                else failures.push(`${pageFile.name}: ${withDoc.error}`);
               } else {
-                failures.push(`${pageFile.name}: ${added.error}`);
+                failures.push(`${pageFile.name}: ${meta.error}`);
               }
             }
           } catch (e) {
@@ -235,47 +298,35 @@ export function ScanStudioPage() {
           }
         } else {
           pageNo += 1;
-          const added = await service.digitization.add(fileId, {
+          const meta = await service.digitization.add(fileId, {
             pageNo,
             filename: upload.name,
             documentSize: '',
             note: 'Uploaded in the scan studio.',
           });
-          if (!added.ok) {
-            failures.push(`${upload.name}: ${added.error}`);
+          if (!meta.ok) {
+            failures.push(`${upload.name}: ${meta.error}`);
             continue;
           }
-          const withDocument = await service.digitization.addDocument(added.value.id, upload);
-          if (!withDocument.ok) failures.push(`${upload.name}: ${withDocument.error}`);
-          else totalPagesAdded += 1;
+          const withDoc = await service.digitization.addDocument(meta.value.id, upload);
+          if (withDoc.ok) added += 1;
+          else failures.push(`${upload.name}: ${withDoc.error}`);
         }
+
+        // Progressive refresh: every second file the grid picks up what has
+        // landed so far; a final reload runs after the loop.
+        if (index % 2 === 1) await reload();
       }
 
       await reload();
-      if (failures.length > 0) setError(failures.join(' · '));
-      if (totalPagesAdded > 0) {
-        const baseSource =
-          draft?.sourceFilename ||
-          documents[0]?.filename ||
-          derivatives[0]?.filename ||
-          `${fileNumber || fileId}.pdf`;
-        const nextName = computeNextVersionName(baseSource, derivatives, documents);
-        const updatedDraft: StudioDraftState = {
-          sourceVersionId: draft?.sourceVersionId,
-          sourceFilename: baseSource,
-          draftFilename: nextName,
-          pageCount: scans.length + totalPagesAdded,
-          updatedAt: new Date().toISOString(),
-        };
-        setDraft(updatedDraft);
-        setStudioDraft(fileId, updatedDraft);
-
-        setMessage(
-          `${totalPagesAdded} page(s) added to the studio. Drag to rearrange or click "Build deliverable PDF" when ready.`,
-        );
+      if (failures.length > 0) setError(failures.slice(0, 4).join(' · '));
+      if (added > 0) {
+        touchDraft(scans.length + added);
+        success(`${added} page(s) added — text extraction and OCR finish in the background.`);
       }
     } finally {
-      setUploading(false);
+      queueBusy.current = false;
+      setQueue(null);
       if (uploadRef.current) uploadRef.current.value = '';
     }
   };
@@ -284,40 +335,25 @@ export function ScanStudioPage() {
     void addPages(Array.from(event.target.files ?? []));
   };
 
-  /**
-   * Loads an existing PDF version into the studio grid by extracting its pages,
-   * enabling basic editing (rearranging pages by drag-and-drop, adding new pages, etc.).
-   */
+  /** Loads an existing PDF version into the studio grid by extracting its pages. */
   const unpackVersionIntoStudio = async (version: UnifiedDocumentVersion) => {
     if (!fileId) return;
+    setConfirmUnpack(null);
 
     if (draft?.sourceVersionId === version.id && scans.length > 0) {
-      setMessage(`Pages from ${version.filename} are already open in the studio grid.`);
-      setPreviewingVersion(null);
+      success(`Pages from ${version.filename} are already open in the studio grid.`);
       return;
     }
 
-    if (scans.length > 0) {
-      const confirmReplace = window.confirm(
-        `Load "${version.filename}" into the studio? This will replace the current workspace pages with the ${version.pageCount ?? ''} pages from this version.`,
-      );
-      if (!confirmReplace) return;
-
-      setBusy(true);
-      setError('');
-      setMessage(`Replacing workspace with pages from ${version.filename}…`);
-
-      // Clear previous working scan pages so duplicate pages are not appended
+    setBusy(true);
+    setError('');
+    try {
+      // Clear the previous working pages so the new version's pages do not
+      // append to a stale workspace.
       for (const scan of scans) {
         await service.digitization.remove(scan.id);
       }
-    } else {
-      setBusy(true);
-      setError('');
-      setMessage(`Loading pages from ${version.filename} into the studio…`);
-    }
 
-    try {
       const blob =
         version.source === 'document'
           ? await service.files.documentBlob(fileId, version.id)
@@ -326,22 +362,20 @@ export function ScanStudioPage() {
       const extracted = await extractPdfPagesToImages(blob, version.filename);
       let pageNo = 0;
       let count = 0;
-
       for (const pageFile of extracted) {
         pageNo += 1;
-        const added = await service.digitization.add(fileId, {
+        const meta = await service.digitization.add(fileId, {
           pageNo,
           filename: pageFile.name,
           documentSize: 'A4',
           note: `Imported from ${version.filename}`,
         });
-        if (added.ok) {
-          await service.digitization.addDocument(added.value.id, pageFile);
+        if (meta.ok) {
+          await service.digitization.addDocument(meta.value.id, pageFile);
           count += 1;
         }
       }
 
-      // Record active draft session with smart version filename
       const nextName = computeNextVersionName(version.filename, derivatives, documents);
       const newDraft: StudioDraftState = {
         sourceVersionId: version.id,
@@ -352,11 +386,7 @@ export function ScanStudioPage() {
       };
       setDraft(newDraft);
       setStudioDraft(fileId, newDraft);
-
-      setMessage(
-        `Loaded ${count} page(s) from ${version.filename}. You can now drag to rearrange, add more pages, or build a new version.`,
-      );
-      setPreviewingVersion(null);
+      success(`Loaded ${count} page(s) from ${version.filename} into the workspace.`);
       await reload();
     } catch (e) {
       setError(
@@ -367,16 +397,23 @@ export function ScanStudioPage() {
     }
   };
 
-  const baseSource =
-    draft?.sourceFilename ||
-    documents[0]?.filename ||
-    derivatives[0]?.filename ||
-    `${fileNumber || fileId}.pdf`;
-  const defaultBuildName =
-    draft?.draftFilename || computeNextVersionName(baseSource, derivatives, documents);
+  const openVersionPreview = async (version: UnifiedDocumentVersion) => {
+    if (!fileId) return;
+    try {
+      const blob =
+        version.source === 'document'
+          ? await service.files.documentBlob(fileId, version.id)
+          : await service.digitization.pdfBlob(version.id);
+      if (versionPreview) URL.revokeObjectURL(versionPreview.url);
+      setVersionPreview({ version, url: URL.createObjectURL(blob) });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not load PDF preview.');
+    }
+  };
 
-  const startBuildPdf = () => {
-    setBuildingPdf(true);
+  const closeVersionPreview = () => {
+    if (versionPreview) URL.revokeObjectURL(versionPreview.url);
+    setVersionPreview(null);
   };
 
   const executeBuildPdf = async (name: string, remarks: string) => {
@@ -390,9 +427,7 @@ export function ScanStudioPage() {
         setStudioDraft(fileId, null);
         setDraft(null);
         setOrderDirty(false);
-        setMessage(
-          `${result.value.filename} built successfully (${result.value.status}) from ${scans.length} page(s).`,
-        );
+        success(`${result.value.filename} built (${result.value.status.toLowerCase()}).`);
         await reload();
       } else {
         setError(result.error ?? 'The PDF could not be built.');
@@ -400,33 +435,6 @@ export function ScanStudioPage() {
     } finally {
       setBusy(false);
     }
-  };
-
-  const openPreview = async (version: UnifiedDocumentVersion) => {
-    if (!fileId) return;
-    setBusy(true);
-    setError('');
-    try {
-      const blob =
-        version.source === 'document'
-          ? await service.files.documentBlob(fileId, version.id)
-          : await service.digitization.pdfBlob(version.id);
-
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
-      const url = URL.createObjectURL(blob);
-      setPreviewUrl(url);
-      setPreviewingVersion(version);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not load PDF preview.');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const closePreview = () => {
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-    setPreviewUrl(null);
-    setPreviewingVersion(null);
   };
 
   const reviewPdf = async (
@@ -437,12 +445,128 @@ export function ScanStudioPage() {
     await run(async () => {
       const result = await service.digitization.reviewPdf(item.id, decision, note, fileId);
       if (result.ok) {
-        setMessage(`${item.filename} ${decision.toLowerCase()}.`);
+        success(`${item.filename} ${decision.toLowerCase()}.`);
         await reload();
       } else setError(result.error ?? 'The review could not be saved.');
     });
   };
 
+  // ---------------------------------------------------------------- lightbox
+  const lightboxIndex = lightboxId ? scans.findIndex((scan) => scan.id === lightboxId) : -1;
+  const lightboxScan = lightboxIndex >= 0 ? scans[lightboxIndex] : null;
+  const openLightbox = (scan: FileScan) => {
+    if (reorderMode) return;
+    setLightboxId(scan.id);
+    setShowOcr(false);
+  };
+  const stepLightbox = (delta: number) => {
+    const next = lightboxIndex + delta;
+    if (next < 0 || next >= scans.length) return;
+    setLightboxId(scans[next].id);
+    setShowOcr(false);
+  };
+
+  const patch = (scanId: string, updater: (page: FileScan) => FileScan) =>
+    setScans((rows) => rows.map((row) => (row.id === scanId ? updater(row) : row)));
+
+  const lightboxRotate = async (degrees: 90 | 270) => {
+    if (!lightboxScan) return;
+    const result = await service.digitization.rotate(lightboxScan.id, degrees);
+    if (result.ok) {
+      patch(lightboxScan.id, () => result.value);
+      await reload();
+    } else danger(result.error ?? 'Rotation failed.');
+  };
+
+  const lightboxEnhance = async (operation: string) => {
+    if (!lightboxScan) return;
+    const result = await service.digitization.enhance(lightboxScan.id, operation);
+    if (result.ok) {
+      patch(lightboxScan.id, () => result.value);
+      await reload();
+    } else danger(result.error ?? 'Enhancement failed.');
+  };
+
+  const lightboxOcr = async () => {
+    if (!lightboxScan) return;
+    setOcrBusy(true);
+    try {
+      const result = await service.digitization.runOcr(lightboxScan.id);
+      if (result.ok) {
+        patch(lightboxScan.id, (page) => ({ ...page, ocrText: result.value.ocrText }));
+        success(
+          result.value.ocrText.trim()
+            ? `OCR finished (${result.value.method}).`
+            : `OCR ran (${result.value.method}) but found no text — try enhancing the page first.`,
+        );
+      } else danger(result.error ?? 'OCR failed.');
+    } finally {
+      setOcrBusy(false);
+    }
+  };
+
+  const lightboxCompare = async () => {
+    if (!lightboxScan) return;
+    if (compareUrl) {
+      URL.revokeObjectURL(compareUrl);
+      setCompareUrl(null);
+    }
+    try {
+      const blob = await service.digitization.scanBlob(lightboxScan.id, 'original');
+      setCompareUrl(URL.createObjectURL(blob));
+    } catch {
+      danger('The original scan could not be loaded.');
+    }
+  };
+
+  const lightboxDuplicate = async () => {
+    if (!lightboxScan) return;
+    const result = await service.digitization.duplicate(lightboxScan.id);
+    if (result.ok) {
+      success('Page duplicated.');
+      await reload();
+    } else danger(result.error ?? 'Duplicate failed.');
+  };
+
+  const lightboxRevert = async () => {
+    if (!lightboxScan) return;
+    const result = await service.digitization.revert(lightboxScan.id);
+    if (result.ok) {
+      patch(lightboxScan.id, () => result.value);
+      await reload();
+    } else danger(result.error ?? 'Revert failed.');
+  };
+
+  const deletePage = async () => {
+    if (!deleteTarget) return;
+    const result = await service.digitization.remove(deleteTarget.id);
+    setDeleteTarget(null);
+    if (result.ok) {
+      if (lightboxId === deleteTarget.id) setLightboxId(null);
+      success('Page removed from the workspace.');
+      await reload();
+    } else danger(result.error ?? 'Delete failed.');
+  };
+
+  const discardDraft = async () => {
+    setConfirmDiscard(false);
+    if (!fileId) return;
+    setBusy(true);
+    try {
+      for (const scan of scans) {
+        await service.digitization.remove(scan.id);
+      }
+      setStudioDraft(fileId, null);
+      setDraft(null);
+      setOrderDirty(false);
+      await reload();
+      success('Studio workspace reset.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // ----------------------------------------------------------------- reorder
   const move = (from: string, to: string) => {
     setScans((rows) => {
       const next = [...rows];
@@ -454,31 +578,24 @@ export function ScanStudioPage() {
       return next;
     });
     setOrderDirty(true);
-    if (fileId) {
-      const baseSource =
-        draft?.sourceFilename ||
-        documents[0]?.filename ||
-        derivatives[0]?.filename ||
-        `${fileNumber || fileId}.pdf`;
-      const nextName =
-        draft?.draftFilename || computeNextVersionName(baseSource, derivatives, documents);
-      const updatedDraft: StudioDraftState = {
-        sourceVersionId: draft?.sourceVersionId,
-        sourceFilename: baseSource,
-        draftFilename: nextName,
-        pageCount: scans.length,
-        updatedAt: new Date().toISOString(),
-      };
-      setDraft(updatedDraft);
-      setStudioDraft(fileId, updatedDraft);
-    }
   };
 
-  const patch = (scanId: string, updater: (page: FileScan) => FileScan) =>
-    setScans((rows) => rows.map((row) => (row.id === scanId ? updater(row) : row)));
+  const saveOrder = () =>
+    run(async () => {
+      const result = await service.digitization.reorder(
+        fileId ?? '',
+        scans.map((row) => row.id),
+      );
+      if (result.ok) {
+        setScans(result.value);
+        setOrderDirty(false);
+        touchDraft(result.value.length);
+        success('Page order saved.');
+      } else setError(result.error ?? 'The order could not be saved.');
+    });
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <input
         ref={uploadRef}
         type="file"
@@ -486,484 +603,260 @@ export function ScanStudioPage() {
         accept={documentAcceptAttribute()}
         onChange={onUploadChange}
         className="hidden"
-        disabled={uploading}
       />
 
-      {/* The studio renders inside the file page (round 5); the top bar owns
-          the back button, so the grid starts right below the file's tabs. */}
-      {message && (
-        <div className="rounded-xl border border-[var(--rr-success)]/30 bg-[var(--rr-success)]/10 p-3 text-xs font-medium text-[var(--rr-success)]">
-          {message}
-        </div>
-      )}
       {error && (
-        <div className="rounded-xl border border-[var(--rr-danger)]/30 bg-[var(--rr-danger)]/10 p-3 text-xs font-medium text-[var(--rr-danger)]">
+        <div className="rounded-xl border border-[color-mix(in_srgb,var(--rr-danger)_40%,transparent)] bg-[color-mix(in_srgb,var(--rr-danger)_8%,transparent)] p-3 text-xs font-medium text-[var(--rr-danger)]">
           {error}
         </div>
       )}
 
-      {/* Two-column layout: Main editing / preview area on left, all versions on right */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
-        {/* Main Studio Area */}
-        <div className="space-y-6">
-          {previewingVersion && previewUrl ? (
-            <Card>
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-3 border-b border-base pb-3">
-                <div className="flex items-center gap-2">
-                  <FilePdf size={20} className="text-accent" />
-                  <div>
-                    <p className="text-sm font-semibold">{previewingVersion.filename}</p>
-                    <p className="muted text-xs">
-                      {previewingVersion.versionLabel} ·{' '}
-                      {new Date(previewingVersion.updatedAt).toLocaleString()}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    icon={<PencilSimple size={15} />}
-                    onClick={() => void unpackVersionIntoStudio(previewingVersion)}
-                    disabled={busy}
-                    title="Load all pages of this PDF into the studio grid for drag-and-drop reordering"
-                  >
-                    Edit pages in studio
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={closePreview}>
-                    Close preview
-                  </Button>
-                </div>
-              </div>
-
-              <Suspense
-                fallback={
-                  <div className="grid h-[50vh] place-items-center text-sm muted">
-                    Loading PDF reader…
-                  </div>
-                }
-              >
-                <PdfDocumentViewer
-                  src={previewUrl}
-                  filename={previewingVersion.filename}
-                  heightClassName="h-[calc(100vh-18rem)] min-h-[480px]"
-                />
-              </Suspense>
-            </Card>
-          ) : (
-            <Card>
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm font-semibold">
-                    Pages <span className="muted">({scans.length})</span>
-                  </p>
-                  <p className="muted mt-0.5 text-xs">
-                    Drag and drop cards to rearrange page order.
-                  </p>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  {canUploadPages && (
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      icon={<Plus size={15} />}
-                      onClick={() => uploadRef.current?.click()}
-                      disabled={uploading}
-                    >
-                      {uploading ? 'Adding…' : 'Add pages'}
-                    </Button>
-                  )}
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    icon={<FloppyDisk size={15} />}
-                    disabled={!orderDirty || busy}
-                    onClick={() =>
-                      run(async () => {
-                        const result = await service.digitization.reorder(
-                          fileId ?? '',
-                          scans.map((row) => row.id),
-                        );
-                        if (result.ok) {
-                          setScans(result.value);
-                          setOrderDirty(false);
-                          setMessage('Page order saved.');
-                          if (fileId) {
-                            const baseSource =
-                              draft?.sourceFilename ||
-                              documents[0]?.filename ||
-                              derivatives[0]?.filename ||
-                              `${fileNumber || fileId}.pdf`;
-                            const nextName =
-                              draft?.draftFilename ||
-                              computeNextVersionName(baseSource, derivatives, documents);
-                            const updatedDraft: StudioDraftState = {
-                              sourceVersionId: draft?.sourceVersionId,
-                              sourceFilename: baseSource,
-                              draftFilename: nextName,
-                              pageCount: result.value.length,
-                              updatedAt: new Date().toISOString(),
-                            };
-                            setDraft(updatedDraft);
-                            setStudioDraft(fileId, updatedDraft);
-                          }
-                        } else setError(result.error ?? 'The order could not be saved.');
-                      })
-                    }
-                  >
-                    Save order
-                  </Button>
-                  <Button
-                    size="sm"
-                    icon={<FilePdf size={15} />}
-                    disabled={busy || scans.length === 0}
-                    onClick={startBuildPdf}
-                    title="Build deliverable PDF from current workspace pages"
-                  >
-                    Build deliverable PDF
-                  </Button>
-                </div>
-              </div>
-
-              {canUploadPages && scans.length === 0 && (
-                <div className="mb-4 rounded-xl border border-dashed border-base p-6 text-center">
-                  <p className="text-sm font-semibold">No scan pages in the current workspace</p>
-                  <p className="muted mt-1 text-xs">
-                    Upload images or PDFs to start, or select any version from the right to edit its
-                    pages.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => uploadRef.current?.click()}
-                    disabled={uploading}
-                    className="focus-ring mt-3 inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-[var(--rr-accent-fill)] px-4 text-xs font-semibold text-white hover:opacity-90"
-                  >
-                    <Plus size={15} weight="bold" />
-                    {uploading ? 'Adding pages…' : 'Add scanned pages (Images or PDFs)'}
-                  </button>
-                </div>
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
+        {/* ------------------------------------------------ main studio area */}
+        <div className="space-y-4">
+          {/* Toolbar: workspace state on the left, the three actions on the right. */}
+          <div className="flex flex-col gap-3 rounded-xl border border-base bg-[var(--rr-surface)] p-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <p className="flex items-center gap-2 text-sm font-semibold">
+                Workspace
+                <span className="muted font-normal">{scans.length} page(s)</span>
+                {draft && <Badge tone="warning">draft · {draft.draftFilename}</Badge>}
+              </p>
+              <p className="muted mt-0.5 text-xs">
+                {reorderMode
+                  ? 'Drag the cards into the right order, then save.'
+                  : 'Click a page to open it large; hover a card for the expand icon.'}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {canUploadPages && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  icon={<Plus size={15} />}
+                  onClick={() => uploadRef.current?.click()}
+                  disabled={queue !== null}
+                >
+                  Add pages
+                </Button>
               )}
+              {scans.length > 1 && (
+                <Button
+                  size="sm"
+                  variant={reorderMode ? 'primary' : 'secondary'}
+                  icon={<ArrowsDownUp size={15} />}
+                  onClick={() => {
+                    setReorderMode((on) => !on);
+                    if (reorderMode && orderDirty) setOrderDirty(false);
+                    if (!reorderMode) setLightboxId(null);
+                    // Leaving reorder with unsaved moves restores stored order.
+                    if (reorderMode) void reload();
+                  }}
+                  className={cn(reorderMode && 'shadow-sm')}
+                  title="Toggle drag-and-drop reordering"
+                >
+                  {reorderMode ? 'Done reordering' : 'Reorder'}
+                </Button>
+              )}
+              {reorderMode && (
+                <Button
+                  size="sm"
+                  icon={<FloppyDisk size={15} />}
+                  disabled={!orderDirty || busy}
+                  onClick={saveOrder}
+                >
+                  Save order
+                </Button>
+              )}
+              <Button
+                size="sm"
+                icon={<FilePdf size={15} />}
+                disabled={busy || queue !== null || scans.length === 0}
+                onClick={() => setBuildingPdf(true)}
+                title="Build a deliverable PDF from the workspace pages"
+              >
+                Build PDF
+              </Button>
+            </div>
+          </div>
 
-              {scans.length > 0 && (
-                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                  {scans.map((scan, index) => (
-                    <div
-                      key={scan.id}
-                      draggable
-                      onDragStart={() => (dragId.current = scan.id)}
-                      onDragOver={(event) => event.preventDefault()}
-                      onDrop={() => {
-                        if (dragId.current && dragId.current !== scan.id)
-                          move(dragId.current, scan.id);
-                        dragId.current = null;
-                      }}
-                      className="group cursor-move rounded-xl border border-base bg-[var(--rr-bg)] p-3 transition hover:border-[var(--rr-accent)]"
-                    >
-                      <div className="mb-2 flex items-center justify-between gap-2">
-                        <span className="text-xs font-semibold">
-                          #{index + 1} · page {scan.pageNo} · v{scan.version}
-                        </span>
-                        <StatusBadge status={scan.status} />
-                      </div>
+          {/* Background queue chip: upload progress only — extraction and OCR
+              continue in the background without blocking the grid. */}
+          {queue && (
+            <div className="flex items-center gap-3 rounded-xl border border-base bg-[var(--rr-bg)] p-3">
+              <Spinner size={16} className="animate-spin text-accent" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-xs font-semibold">
+                  Adding pages — {queue.done + 1} of {queue.total}
+                  <span className="muted font-normal"> · {queue.label}</span>
+                </p>
+                <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--rr-surface-2)]">
+                  <div
+                    className="h-full rounded-full bg-[var(--rr-accent)] transition-all"
+                    style={{ width: `${Math.round((queue.done / queue.total) * 100)}%` }}
+                  />
+                </div>
+              </div>
+              <span className="muted text-[11px]">runs in the background</span>
+            </div>
+          )}
 
-                      <div className="grid aspect-[3/4] place-items-center overflow-hidden rounded-lg bg-[var(--rr-surface-2)]">
-                        {previews[scan.id] ? (
-                          <img
-                            src={previews[scan.id]}
-                            alt={`Page ${scan.pageNo}`}
-                            className="max-h-full max-w-full object-contain"
-                            style={
-                              scan.enhancement?.startsWith('rotated 90') ||
-                              scan.enhancement?.startsWith('rotated 270')
-                                ? { transform: 'rotate(90deg)' }
-                                : undefined
-                            }
-                          />
-                        ) : (
-                          <div className="flex flex-col items-center gap-1.5 p-3 text-center">
-                            <FilePdf size={28} className="text-accent" />
-                            <span className="muted text-xs font-semibold">Page {scan.pageNo}</span>
-                            <span className="muted text-[10px] break-all">{scan.filename}</span>
-                          </div>
-                        )}
-                      </div>
+          {hasProcessing && !queue && (
+            <div className="flex items-center gap-2.5 rounded-xl border border-base bg-[var(--rr-bg)] p-3 text-xs">
+              <Spinner size={15} className="animate-spin text-amber-500" />
+              <p className="font-medium">
+                {scans.filter((scan) => scan.status === 'Processing').length} page(s) are being
+                OCR-processed in the background — their text arrives here on its own.
+              </p>
+            </div>
+          )}
 
-                      <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                        {scan.enhancement && <Badge tone="info">{scan.enhancement}</Badge>}
-                        {scan.dpi && <Badge tone="neutral">{scan.dpi} DPI</Badge>}
-                        <Badge tone="neutral">{scan.documentSize || 'A4'}</Badge>
-                      </div>
-
-                      <div className="mt-3 flex flex-wrap gap-1.5">
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          disabled={busy}
-                          aria-label="Rotate left"
-                          title="Rotate 90° left"
-                          onClick={() =>
-                            run(async () => {
-                              const result = await service.digitization.rotate(scan.id, 270);
-                              if (result.ok) patch(scan.id, () => result.value);
-                              else setError(result.error ?? 'Rotation failed.');
-                            })
+          <Card>
+            {scans.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-base p-8 text-center">
+                <FilePdf size={28} className="mx-auto text-accent" />
+                <p className="mt-3 text-sm font-semibold">No pages in the workspace</p>
+                <p className="muted mx-auto mt-1 max-w-md text-xs leading-5">
+                  Add images or multi-page PDFs — a PDF is unpacked into pages automatically, and
+                  every page's OCR runs in the background. Or load any stored version from the right
+                  to edit its pages.
+                </p>
+                {canUploadPages && (
+                  <Button
+                    size="sm"
+                    className="mt-4"
+                    icon={<Plus size={15} />}
+                    onClick={() => uploadRef.current?.click()}
+                    disabled={queue !== null}
+                  >
+                    Add scanned pages
+                  </Button>
+                )}
+              </div>
+            ) : (
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                {scans.map((scan, index) => (
+                  <div
+                    key={scan.id}
+                    draggable={reorderMode}
+                    onDragStart={() => (dragId.current = scan.id)}
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={() => {
+                      if (reorderMode && dragId.current && dragId.current !== scan.id)
+                        move(dragId.current, scan.id);
+                      dragId.current = null;
+                    }}
+                    className={cn(
+                      'group relative overflow-hidden rounded-xl border bg-[var(--rr-bg)] transition',
+                      reorderMode
+                        ? 'cursor-grab border-base active:cursor-grabbing hover:border-[var(--rr-accent)]'
+                        : 'cursor-pointer border-base hover:border-[var(--rr-accent)] hover:shadow-md',
+                    )}
+                    onClick={() => openLightbox(scan)}
+                  >
+                    <div className="grid aspect-[3/4] place-items-center overflow-hidden bg-[var(--rr-surface-2)]">
+                      {previews[scan.id] ? (
+                        <img
+                          src={previews[scan.id]}
+                          alt={`Page ${scan.pageNo}`}
+                          className="max-h-full max-w-full object-contain"
+                          style={
+                            scan.enhancement?.startsWith('rotated 90') ||
+                            scan.enhancement?.startsWith('rotated 270')
+                              ? { transform: 'rotate(90deg)' }
+                              : undefined
                           }
-                        >
-                          <ArrowCounterClockwise size={14} />
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          disabled={busy}
-                          aria-label="Rotate right"
-                          title="Rotate 90° right"
-                          onClick={() =>
-                            run(async () => {
-                              const result = await service.digitization.rotate(scan.id, 90);
-                              if (result.ok) patch(scan.id, () => result.value);
-                              else setError(result.error ?? 'Rotation failed.');
-                            })
-                          }
-                        >
-                          <ArrowClockwise size={14} />
-                        </Button>
-                        <select
-                          className="h-8 rounded-lg border border-base bg-[var(--rr-surface)] px-2 text-xs"
-                          defaultValue=""
-                          disabled={busy}
-                          aria-label="Enhance page"
-                          onChange={(event) => {
-                            const operation = event.target.value;
-                            event.target.value = '';
-                            if (!operation) return;
-                            void run(async () => {
-                              const result = await service.digitization.enhance(scan.id, operation);
-                              if (result.ok) patch(scan.id, () => result.value);
-                              else setError(result.error ?? 'Enhancement failed.');
-                            });
-                          }}
-                        >
-                          <option value="">Enhance…</option>
-                          {ENHANCEMENTS.map((operation) => (
-                            <option key={operation} value={operation}>
-                              {operation}
-                            </option>
-                          ))}
-                        </select>
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          disabled={busy || !scan.hasDocument}
-                          aria-label="Run OCR"
-                          title="Run OCR and store text"
-                          onClick={() =>
-                            run(async () => {
-                              const result = await service.digitization.runOcr(scan.id);
-                              if (result.ok) {
-                                setOcr((current) => ({
-                                  ...current,
-                                  [scan.id]: {
-                                    text: result.value.ocrText,
-                                    method: result.value.method,
-                                  },
-                                }));
-                                await reload();
-                              } else setError(result.error ?? 'OCR failed.');
-                            })
-                          }
-                        >
-                          <TextAa size={14} />
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          disabled={busy || !scan.hasProcessed}
-                          aria-label="Compare with original"
-                          title="Compare with original"
-                          onClick={() => setCompare(compare === scan.id ? null : scan.id)}
-                        >
-                          <ArrowsInLineHorizontal size={14} />
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          disabled={busy}
-                          aria-label="Duplicate page"
-                          title="Duplicate page"
-                          onClick={() =>
-                            run(async () => {
-                              const result = await service.digitization.duplicate(scan.id);
-                              if (result.ok) await reload();
-                              else setError(result.error ?? 'Duplicate failed.');
-                            })
-                          }
-                        >
-                          <Copy size={14} />
-                        </Button>
-                        {scan.hasProcessed && (
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            disabled={busy}
-                            aria-label="Revert to original"
-                            title="Revert to original"
-                            onClick={() =>
-                              run(async () => {
-                                const result = await service.digitization.revert(scan.id);
-                                if (result.ok) patch(scan.id, () => result.value);
-                                else setError(result.error ?? 'Revert failed.');
-                              })
-                            }
-                          >
-                            <ArrowUUpLeft size={14} />
-                          </Button>
-                        )}
-                        <Button
-                          size="sm"
-                          variant="danger"
-                          disabled={busy}
-                          aria-label="Delete page"
-                          title="Delete page"
-                          onClick={() =>
-                            run(async () => {
-                              const result = await service.digitization.remove(scan.id);
-                              if (result.ok) await reload();
-                              else setError(result.error ?? 'Delete failed.');
-                            })
-                          }
-                        >
-                          <Trash size={14} />
-                        </Button>
-                      </div>
-
-                      {(ocr[scan.id] || scan.ocrText) && (
-                        <div className="mt-3 rounded-lg bg-[var(--rr-bg)] p-2.5">
-                          <p className="muted text-[10px] uppercase tracking-wider">
-                            OCR text{ocr[scan.id] ? ` · ${ocr[scan.id].method}` : ''}
-                          </p>
-                          <p className="mt-1 max-h-28 overflow-y-auto whitespace-pre-wrap break-words text-[11px] leading-5">
-                            {ocr[scan.id]?.text || scan.ocrText}
-                          </p>
-                        </div>
-                      )}
-
-                      {compare === scan.id && (
-                        <div className="mt-3 grid grid-cols-2 gap-2 text-[10px]">
-                          <div>
-                            <p className="muted mb-1">Original</p>
-                            <div className="grid aspect-[3/4] place-items-center rounded bg-[var(--rr-surface-2)]">
-                              {scan.hasDocument ? (
-                                <span className="muted">
-                                  <MagnifyingGlass size={16} /> stored scan
-                                </span>
-                              ) : (
-                                <span className="muted">no document</span>
-                              )}
-                            </div>
-                          </div>
-                          <div>
-                            <p className="muted mb-1">Processed</p>
-                            <div className="grid aspect-[3/4] place-items-center rounded bg-[var(--rr-surface-2)]">
-                              {previews[scan.id] ? (
-                                <img
-                                  src={previews[scan.id]}
-                                  alt="Processed"
-                                  className="max-h-full object-contain"
-                                />
-                              ) : (
-                                <span className="muted">no processed copy</span>
-                              )}
-                            </div>
-                          </div>
+                        />
+                      ) : (
+                        <div className="flex flex-col items-center gap-1.5 p-3 text-center">
+                          <FilePdf size={26} className="text-accent" />
+                          <span className="muted text-xs font-semibold">Page {scan.pageNo}</span>
+                          <span className="muted break-all text-[10px]">{scan.filename}</span>
                         </div>
                       )}
                     </div>
-                  ))}
-                </div>
-              )}
-            </Card>
-          )}
+
+                    {/* Number + status — glanceable without opening anything. */}
+                    <div className="pointer-events-none absolute left-2 top-2 rounded-md bg-[var(--rr-surface)]/90 px-1.5 py-0.5 text-[11px] font-bold backdrop-blur">
+                      {reorderMode ? `#${index + 1}` : `Page ${scan.pageNo}`}
+                    </div>
+                    <div className="pointer-events-none absolute right-2 top-2 flex items-center gap-1.5 rounded-md bg-[var(--rr-surface)]/90 px-1.5 py-0.5 backdrop-blur">
+                      <span
+                        className={cn(
+                          'size-2 rounded-full',
+                          STATUS_DOT[scan.status] ?? 'bg-slate-400',
+                        )}
+                        title={scan.status}
+                      />
+                      <span className="muted text-[10px] font-semibold">
+                        {scan.status === 'Processing' ? 'OCR…' : `v${scan.version}`}
+                      </span>
+                    </div>
+
+                    {/* Hover: the expand icon — the one affordance on the card. */}
+                    {!reorderMode && (
+                      <div className="absolute inset-0 hidden items-center justify-center bg-slate-950/0 transition group-hover:bg-slate-950/10 sm:flex">
+                        <span className="grid size-11 translate-y-2 place-items-center rounded-full bg-[var(--rr-surface)] text-[var(--rr-text)] opacity-0 shadow-lg transition group-hover:translate-y-0 group-hover:opacity-100">
+                          <ArrowsOut size={19} />
+                        </span>
+                      </div>
+                    )}
+
+                    {reorderMode && (
+                      <div className="absolute bottom-2 right-2 rounded-md bg-[var(--rr-surface)]/90 px-1.5 py-0.5 text-[10px] font-semibold text-[var(--rr-muted)] backdrop-blur">
+                        drag to reorder
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
         </div>
 
-        {/* Right Side Area: Document Versions list */}
+        {/* ------------------------------------------------- versions sidebar */}
         <div className="space-y-4">
           <Card>
             <div className="mb-3 flex items-center justify-between border-b border-base pb-3">
               <div>
                 <p className="text-sm font-semibold">Document versions</p>
                 <p className="muted mt-0.5 text-xs">
-                  {unifiedVersions.length} version(s) · Latest on top
+                  {unifiedVersions.length} version(s) · latest on top
                 </p>
               </div>
               <FilePdf size={20} className="text-accent" />
             </div>
 
-            {/* Active Studio Draft workspace indicator if a draft is in progress */}
             {Boolean(draft) && (
               <div className="mb-3 rounded-xl border-2 border-dashed border-amber-400 bg-amber-50/60 p-3 dark:border-amber-600/50 dark:bg-amber-950/20">
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="truncate font-semibold text-xs text-amber-900 dark:text-amber-200">
-                        {draft?.draftFilename ||
-                          computeNextVersionName(
-                            draft?.sourceFilename ||
-                              documents[0]?.filename ||
-                              derivatives[0]?.filename ||
-                              `${fileNumber || fileId}.pdf`,
-                            derivatives,
-                            documents,
-                          )}
-                      </span>
-                    </div>
+                    <span className="block truncate text-xs font-semibold text-amber-900 dark:text-amber-200">
+                      {draft?.draftFilename ?? defaultBuildName}
+                    </span>
                     <p className="mt-1 text-[11px] text-amber-800 dark:text-amber-300">
                       Studio workspace · {scans.length} page(s)
-                      {orderDirty ? ' · Unsaved order' : ''}
-                      {draft?.updatedAt
-                        ? ` · Edited ${new Date(draft.updatedAt).toLocaleTimeString()}`
-                        : ''}
+                      {orderDirty ? ' · unsaved order' : ''}
                     </p>
                   </div>
                   <Badge tone="warning">Unsaved draft</Badge>
                 </div>
-
                 <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-amber-200/60 pt-2.5 dark:border-amber-800/60">
                   <Button
                     size="sm"
                     icon={<FilePdf size={13} />}
-                    onClick={startBuildPdf}
+                    onClick={() => setBuildingPdf(true)}
                     disabled={busy || scans.length === 0}
                     className="!h-7 !px-2 text-[11px]"
-                    title="Build Deliverable PDF from current workspace pages"
                   >
                     Build deliverable PDF
                   </Button>
                   <Button
                     size="sm"
                     variant="ghost"
-                    onClick={() => {
-                      if (
-                        window.confirm(
-                          'Discard all working pages from studio workspace and reset draft?',
-                        )
-                      ) {
-                        void (async () => {
-                          setBusy(true);
-                          for (const s of scans) {
-                            await service.digitization.remove(s.id);
-                          }
-                          setStudioDraft(fileId ?? '', null);
-                          setDraft(null);
-                          setOrderDirty(false);
-                          await reload();
-                          setBusy(false);
-                          setMessage('Studio workspace reset.');
-                        })();
-                      }
-                    }}
+                    onClick={() => setConfirmDiscard(true)}
                     disabled={busy}
                     className="!h-7 !px-2 text-[11px] text-amber-900 hover:bg-amber-100 dark:text-amber-200 dark:hover:bg-amber-900/50"
-                    title="Clear pages from studio workspace"
                   >
                     Discard draft
                   </Button>
@@ -978,28 +871,25 @@ export function ScanStudioPage() {
                 {unifiedVersions.map((version, index) => {
                   const isCurrent = index === 0;
                   const isPending = version.status === 'Pending approval';
-                  const isRejected = version.status === 'Rejected';
-
                   return (
                     <div
                       key={version.id}
-                      className={`rounded-xl border p-3 transition ${
-                        previewingVersion?.id === version.id
+                      className={cn(
+                        'rounded-xl border p-3 transition',
+                        versionPreview?.version.id === version.id
                           ? 'border-[var(--rr-accent)] bg-accent-soft/30'
-                          : 'border-base bg-[var(--rr-surface)] hover:border-base'
-                      }`}
+                          : 'border-base bg-[var(--rr-surface)]',
+                      )}
                     >
                       <div className="flex flex-wrap items-start justify-between gap-2">
                         <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            <span className="truncate font-semibold text-xs">
-                              {version.filename}
-                            </span>
-                          </div>
+                          <span className="block truncate text-xs font-semibold">
+                            {version.filename}
+                          </span>
                           <p className="muted mt-1 text-[11px]">
                             {version.versionLabel} ·{' '}
-                            {new Date(version.updatedAt).toLocaleDateString()} ·{' '}
-                            {version.pageCount ? `${version.pageCount} page(s)` : ''}
+                            {new Date(version.updatedAt).toLocaleDateString()}
+                            {version.pageCount ? ` · ${version.pageCount} page(s)` : ''}
                             {version.sizeBytes
                               ? ` · ${Math.max(1, Math.round(version.sizeBytes / 1024))} KB`
                               : ''}
@@ -1011,7 +901,7 @@ export function ScanStudioPage() {
                             tone={
                               version.status === 'Approved'
                                 ? 'success'
-                                : isRejected
+                                : version.status === 'Rejected'
                                   ? 'danger'
                                   : 'warning'
                             }
@@ -1031,11 +921,9 @@ export function ScanStudioPage() {
                         <Button
                           size="sm"
                           variant="secondary"
-                          icon={<Eye size={13} />}
-                          onClick={() => void openPreview(version)}
+                          onClick={() => void openVersionPreview(version)}
                           disabled={busy}
                           className="!h-7 !px-2 text-[11px]"
-                          title="Preview this PDF in reader"
                         >
                           Preview
                         </Button>
@@ -1043,10 +931,14 @@ export function ScanStudioPage() {
                           size="sm"
                           variant="secondary"
                           icon={<PencilSimple size={13} />}
-                          onClick={() => void unpackVersionIntoStudio(version)}
+                          onClick={() => {
+                            if (scans.length > 0 && draft?.sourceVersionId !== version.id)
+                              setConfirmUnpack(version);
+                            else void unpackVersionIntoStudio(version);
+                          }}
                           disabled={busy}
                           className="!h-7 !px-2 text-[11px]"
-                          title="Edit and rearrange pages of this PDF"
+                          title="Load this PDF's pages into the studio grid"
                         >
                           Edit in studio
                         </Button>
@@ -1055,7 +947,6 @@ export function ScanStudioPage() {
                           variant="ghost"
                           icon={<DownloadSimple size={13} />}
                           className="!h-7 !px-2 text-[11px]"
-                          title="Download PDF"
                           onClick={async () => {
                             const blob =
                               version.source === 'document'
@@ -1083,7 +974,7 @@ export function ScanStudioPage() {
                             <button
                               type="button"
                               onClick={() => setRejectingPdf(version.rawDeriv!)}
-                              className="focus-ring inline-flex h-7 items-center gap-1 rounded-md bg-[var(--rr-danger)]/10 px-2 text-[11px] font-semibold text-[var(--rr-danger)] hover:bg-[var(--rr-danger)]/20"
+                              className="focus-ring inline-flex h-7 items-center gap-1 rounded-md bg-[color-mix(in_srgb,var(--rr-danger)_10%,transparent)] px-2 text-[11px] font-semibold text-[var(--rr-danger)]"
                             >
                               <XCircle size={12} /> Reject
                             </button>
@@ -1098,6 +989,360 @@ export function ScanStudioPage() {
           </Card>
         </div>
       </div>
+
+      {/* ------------------------------------------------ full-screen preview */}
+      {lightboxScan && (
+        <div
+          className="fixed inset-0 z-[60] flex flex-col bg-slate-950/90"
+          role="dialog"
+          aria-modal="true"
+        >
+          {/* header: identity + status + close */}
+          <div className="flex items-center justify-between gap-3 p-3 text-white">
+            <div className="min-w-0">
+              <p className="flex flex-wrap items-center gap-2 text-sm font-semibold">
+                {lightboxScan.filename}
+                <StatusBadge status={lightboxScan.status} />
+                {lightboxScan.enhancement && <Badge tone="info">{lightboxScan.enhancement}</Badge>}
+              </p>
+              <p className="muted mt-0.5 text-xs text-white/70">
+                Page {lightboxScan.pageNo} · v{lightboxScan.version} · position {lightboxIndex + 1}{' '}
+                of {scans.length}
+                {lightboxScan.dpi ? ` · ${lightboxScan.dpi} DPI` : ''}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setLightboxId(null)}
+              className="focus-ring grid size-10 shrink-0 place-items-center rounded-lg hover:bg-white/10"
+              aria-label="Close preview"
+            >
+              <X size={20} />
+            </button>
+          </div>
+
+          {/* body: filmstrip + page + OCR panel */}
+          <div className="flex min-h-0 flex-1 gap-2 px-3 pb-3">
+            {/* filmstrip of the other pages */}
+            <div className="hidden w-[92px] shrink-0 space-y-2 overflow-y-auto rounded-xl bg-black/20 p-2 md:block">
+              {scans.map((scan) => (
+                <button
+                  key={scan.id}
+                  type="button"
+                  onClick={() => {
+                    setLightboxId(scan.id);
+                    setShowOcr(false);
+                  }}
+                  className={cn(
+                    'relative block w-full shrink-0 overflow-hidden rounded-lg border transition',
+                    scan.id === lightboxScan.id
+                      ? 'border-[var(--rr-accent)] ring-2 ring-[var(--rr-accent)]'
+                      : 'border-white/20 opacity-70 hover:opacity-100',
+                  )}
+                  aria-label={`Open page ${scan.pageNo}`}
+                >
+                  {previews[scan.id] ? (
+                    <img
+                      src={previews[scan.id]}
+                      alt={`Page ${scan.pageNo}`}
+                      className="aspect-[3/4] w-full object-cover"
+                    />
+                  ) : (
+                    <span className="grid aspect-[3/4] w-full place-items-center text-[10px] text-white/70">
+                      {scan.pageNo}
+                    </span>
+                  )}
+                  <span className="absolute bottom-0.5 right-0.5 rounded bg-black/60 px-1 text-[10px] font-bold text-white">
+                    {scan.pageNo}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            {/* the page itself, with prev/next */}
+            <div className="flex min-w-0 flex-1 items-stretch gap-1">
+              <button
+                type="button"
+                onClick={() => stepLightbox(-1)}
+                disabled={lightboxIndex <= 0}
+                className="focus-ring my-auto grid size-11 shrink-0 place-items-center self-center rounded-full bg-white/10 text-white disabled:opacity-30"
+                aria-label="Previous page"
+              >
+                <ArrowLeft size={18} />
+              </button>
+              <div className="grid min-w-0 flex-1 place-items-center overflow-hidden rounded-xl bg-white">
+                {previews[lightboxScan.id] ? (
+                  <img
+                    src={previews[lightboxScan.id]}
+                    alt={`Page ${lightboxScan.pageNo}`}
+                    className="max-h-full max-w-full object-contain"
+                  />
+                ) : (
+                  <div className="flex flex-col items-center gap-2 p-8 text-center">
+                    <FilePdf size={30} className="text-accent" />
+                    <p className="muted text-xs">No preview for this page</p>
+                  </div>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => stepLightbox(1)}
+                disabled={lightboxIndex >= scans.length - 1}
+                className="focus-ring my-auto grid size-11 shrink-0 place-items-center self-center rounded-full bg-white/10 text-white disabled:opacity-30"
+                aria-label="Next page"
+              >
+                <ArrowRight size={18} />
+              </button>
+            </div>
+
+            {/* OCR on demand — only when asked for */}
+            {showOcr && (
+              <div className="hidden w-80 shrink-0 flex-col overflow-hidden rounded-xl bg-[var(--rr-surface)] lg:flex">
+                <div className="flex items-center justify-between border-b border-base px-3 py-2">
+                  <p className="flex items-center gap-1.5 text-xs font-semibold">
+                    <TextAa size={13} className="text-accent" /> OCR text
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setShowOcr(false)}
+                    className="focus-ring muted rounded p-1 hover:text-[var(--rr-text)]"
+                    aria-label="Hide OCR"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+                <div className="flex-1 overflow-y-auto p-3">
+                  {lightboxScan.ocrText?.trim() ? (
+                    <p className="whitespace-pre-wrap break-words font-mono text-[12px] leading-6">
+                      {lightboxScan.ocrText}
+                    </p>
+                  ) : (
+                    <p className="muted py-6 text-center text-xs leading-5">
+                      No OCR text yet.
+                      {lightboxScan.status === 'Processing'
+                        ? ' The background pass is running — it will appear on its own.'
+                        : ' Run recognition from the action bar.'}
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* original-vs-processed compare */}
+            {compareUrl && (
+              <div className="hidden w-80 shrink-0 flex-col overflow-hidden rounded-xl bg-[var(--rr-surface)] xl:flex">
+                <div className="flex items-center justify-between border-b border-base px-3 py-2">
+                  <p className="text-xs font-semibold">Compare</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      URL.revokeObjectURL(compareUrl);
+                      setCompareUrl(null);
+                    }}
+                    className="focus-ring muted rounded p-1 hover:text-[var(--rr-text)]"
+                    aria-label="Close compare"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+                <div className="grid flex-1 grid-cols-2 gap-2 overflow-hidden p-2">
+                  <div className="flex min-h-0 flex-col">
+                    <p className="muted mb-1 text-center text-[10px] font-semibold">Original</p>
+                    <div className="grid min-h-0 flex-1 place-items-center overflow-hidden rounded-lg bg-[var(--rr-surface-2)]">
+                      <img
+                        src={compareUrl}
+                        alt="Original scan"
+                        className="max-h-full object-contain"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex min-h-0 flex-col">
+                    <p className="muted mb-1 text-center text-[10px] font-semibold">Processed</p>
+                    <div className="grid min-h-0 flex-1 place-items-center overflow-hidden rounded-lg bg-[var(--rr-surface-2)]">
+                      {previews[lightboxScan.id] ? (
+                        <img
+                          src={previews[lightboxScan.id]}
+                          alt="Processed copy"
+                          className="max-h-full object-contain"
+                        />
+                      ) : (
+                        <span className="muted text-[10px]">no processed copy</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* action bar — every per-page action lives here, off the cards */}
+          <div className="flex flex-wrap items-center justify-center gap-2 rounded-t-xl bg-slate-950/95 p-3">
+            <button
+              type="button"
+              onClick={() => void lightboxRotate(270)}
+              disabled={busy}
+              className="focus-ring inline-flex items-center gap-1.5 rounded-lg bg-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/20 disabled:opacity-40"
+              title="Rotate 90° left"
+            >
+              <ArrowCounterClockwise size={15} />
+            </button>
+            <button
+              type="button"
+              onClick={() => void lightboxRotate(90)}
+              disabled={busy}
+              className="focus-ring inline-flex items-center gap-1.5 rounded-lg bg-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/20 disabled:opacity-40"
+              title="Rotate 90° right"
+            >
+              <ArrowClockwise size={15} />
+            </button>
+            <select
+              className="h-9 rounded-lg border border-white/20 bg-white/10 px-2 text-xs font-semibold text-white outline-none"
+              defaultValue=""
+              disabled={busy}
+              aria-label="Enhance page"
+              onChange={(event) => {
+                const operation = event.target.value;
+                event.target.value = '';
+                if (operation) void lightboxEnhance(operation);
+              }}
+            >
+              <option value="" className="text-[var(--rr-text)]">
+                Enhance…
+              </option>
+              {ENHANCEMENTS.map((operation) => (
+                <option key={operation} value={operation} className="text-[var(--rr-text)]">
+                  {operation}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={() => setShowOcr((open) => !open)}
+              className={cn(
+                'focus-ring inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition',
+                showOcr
+                  ? 'bg-[var(--rr-accent-fill)] text-white'
+                  : 'bg-white/10 text-white hover:bg-white/20',
+              )}
+              aria-pressed={showOcr}
+            >
+              <TextAa size={15} /> OCR text
+            </button>
+            <button
+              type="button"
+              onClick={() => void lightboxOcr()}
+              disabled={ocrBusy || !lightboxScan.hasDocument}
+              className="focus-ring inline-flex items-center gap-1.5 rounded-lg bg-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/20 disabled:opacity-40"
+              title="Run OCR on this page"
+            >
+              {ocrBusy ? <Spinner size={15} className="animate-spin" /> : <TextAa size={15} />}
+              Re-run OCR
+            </button>
+            {lightboxScan.hasProcessed && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => void lightboxCompare()}
+                  className={cn(
+                    'focus-ring inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition',
+                    compareUrl
+                      ? 'bg-[var(--rr-accent-fill)] text-white'
+                      : 'bg-white/10 text-white hover:bg-white/20',
+                  )}
+                  title="Compare the processed copy with the original"
+                >
+                  <ArrowsInLineHorizontal size={15} /> Compare
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void lightboxRevert()}
+                  disabled={busy}
+                  className="focus-ring inline-flex items-center gap-1.5 rounded-lg bg-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/20 disabled:opacity-40"
+                  title="Drop the processed copy, serve the original again"
+                >
+                  Original
+                </button>
+              </>
+            )}
+            <button
+              type="button"
+              onClick={() => void lightboxDuplicate()}
+              disabled={busy}
+              className="focus-ring inline-flex items-center gap-1.5 rounded-lg bg-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/20 disabled:opacity-40"
+              title="Duplicate this page"
+            >
+              <Copy size={15} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setDeleteTarget(lightboxScan)}
+              className="focus-ring inline-flex items-center gap-1.5 rounded-lg bg-[color-mix(in_srgb,var(--rr-danger)_25%,transparent)] px-3 py-2 text-xs font-semibold text-white hover:bg-[color-mix(in_srgb,var(--rr-danger)_45%,transparent)]"
+              title="Delete this page"
+            >
+              <Trash size={15} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Version preview overlay (stored PDFs read in their own reader). */}
+      {versionPreview && (
+        <div
+          className="fixed inset-0 z-[60] flex flex-col bg-slate-950/90 p-3"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="flex items-center justify-between gap-3 pb-3 text-white">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold">{versionPreview.version.filename}</p>
+              <p className="muted mt-0.5 text-xs text-white/70">
+                {versionPreview.version.versionLabel} ·{' '}
+                {new Date(versionPreview.version.updatedAt).toLocaleString()}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="secondary"
+                icon={<PencilSimple size={14} />}
+                onClick={() => {
+                  const version = versionPreview.version;
+                  closeVersionPreview();
+                  if (scans.length > 0 && draft?.sourceVersionId !== version.id)
+                    setConfirmUnpack(version);
+                  else void unpackVersionIntoStudio(version);
+                }}
+                disabled={busy}
+              >
+                Edit in studio
+              </Button>
+              <button
+                type="button"
+                onClick={closeVersionPreview}
+                className="focus-ring grid size-10 place-items-center rounded-lg hover:bg-white/10"
+                aria-label="Close preview"
+              >
+                <X size={20} />
+              </button>
+            </div>
+          </div>
+          <div className="min-h-0 flex-1 overflow-hidden rounded-xl bg-white">
+            <Suspense
+              fallback={
+                <div className="grid h-full place-items-center text-sm muted">
+                  Loading PDF reader…
+                </div>
+              }
+            >
+              <PdfDocumentViewer
+                src={versionPreview.url}
+                filename={versionPreview.version.filename}
+                heightClassName="h-full"
+              />
+            </Suspense>
+          </div>
+        </div>
+      )}
 
       <Modal
         open={buildingPdf}
@@ -1132,6 +1377,34 @@ export function ScanStudioPage() {
           />
         )}
       </Modal>
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="Delete this page?"
+        description={`Page ${deleteTarget?.pageNo ?? ''} (${deleteTarget?.filename ?? ''}) will be removed from the workspace permanently. This cannot be undone.`}
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={() => void deletePage()}
+      />
+
+      <ConfirmDialog
+        open={confirmUnpack !== null}
+        title="Replace the workspace?"
+        description={`Loading "${confirmUnpack?.filename ?? ''}" unpacks its pages into the studio grid and removes the ${scans.length} working page(s) currently open. The stored versions are not touched.`}
+        confirmLabel="Load its pages"
+        onCancel={() => setConfirmUnpack(null)}
+        onConfirm={() => {
+          if (confirmUnpack) void unpackVersionIntoStudio(confirmUnpack);
+        }}
+      />
+
+      <ConfirmDialog
+        open={confirmDiscard}
+        title="Discard the studio draft?"
+        description={`All ${scans.length} working page(s) will be removed from the workspace. Stored versions stay as they are.`}
+        confirmLabel="Discard draft"
+        onCancel={() => setConfirmDiscard(false)}
+        onConfirm={() => void discardDraft()}
+      />
     </div>
   );
 }
@@ -1160,9 +1433,9 @@ function BuildDeliverablePdfForm({
       }}
     >
       <Field
-        label="Deliverable File Name"
+        label="Deliverable file name"
         htmlFor="build-pdf-filename"
-        hint="Keeps original base name and appends the next version suffix."
+        hint="Keeps the original base name and appends the next version suffix."
         required
       >
         <TextInput
@@ -1174,21 +1447,19 @@ function BuildDeliverablePdfForm({
           autoFocus
         />
       </Field>
-
       <Field
-        label="Remarks / Notes"
+        label="Remarks"
         htmlFor="build-pdf-remarks"
-        hint="Optional: describe what changed in this version (e.g. 'Reordered pages, added supplementary sheet')."
+        hint="Optional: describe what changed in this version."
       >
         <TextArea
           id="build-pdf-remarks"
           value={remarks}
           onChange={(event) => setRemarks(event.target.value)}
-          placeholder="Remarks describing what changed or was added in this document version…"
+          placeholder="Reordered pages, added supplementary sheet…"
           rows={3}
         />
       </Field>
-
       <div className="flex items-center justify-end gap-2 pt-2">
         <Button type="button" variant="secondary" onClick={onCancel} disabled={busy}>
           Cancel

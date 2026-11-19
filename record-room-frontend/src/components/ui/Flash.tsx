@@ -70,7 +70,10 @@ export function StatusBadge({ status }: { status: string }) {
             status === 'Restricted' ||
             status === 'Inactive'
           ? 'warning'
-          : status === 'Pending review' || status === 'Duplicate' || status === 'In progress'
+          : status === 'Pending review' ||
+              status === 'Duplicate' ||
+              status === 'In progress' ||
+              status === 'Processing'
             ? 'info'
             : 'neutral';
 

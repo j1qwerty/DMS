@@ -4,7 +4,8 @@ import { AppShell } from './layouts/AppShell';
 import { ToastHost } from './components/ui/Toasts';
 import { AdminLayout } from './admin/AdminLayout';
 import { RequireAuth, RequirePermission } from './layouts/RouteGuards';
-import { DashboardPage } from './pages/DashboardPage';
+// Overview is hidden for this deployment (round 6); the dashboard code stays for when it returns.
+// import { DashboardPage } from './pages/DashboardPage';
 import { LoginPage } from './pages/LoginPage';
 import { RequireFeature } from './components/RequireFeature';
 import { loadRuntimeFeatures } from './lib/features';
@@ -33,9 +34,8 @@ const FileDetailPage = lazy(() =>
 const NewFilePage = lazy(() =>
   import('./pages/NewFilePage').then((m) => ({ default: m.NewFilePage })),
 );
-const IssuePage = lazy(() => import('./pages/IssuePage').then((m) => ({ default: m.IssuePage })));
-const ReturnPage = lazy(() =>
-  import('./pages/ReturnPage').then((m) => ({ default: m.ReturnPage })),
+const IssueReturnDeskPage = lazy(() =>
+  import('./pages/IssueReturnDeskPage').then((m) => ({ default: m.IssueReturnDeskPage })),
 );
 const MovementPage = lazy(() =>
   import('./pages/MovementPage').then((m) => ({ default: m.MovementPage })),
@@ -136,7 +136,7 @@ export function App() {
             }
           >
             <Route path="/" element={<Navigate to="/files" replace />} />
-            <Route path="/overview" element={<DashboardPage />} />
+            {/* <Route path="/overview" element={<DashboardPage />} /> — Overview hidden (round 6). */}
             <Route path="/search" element={<KeyedSearchPage />} />
             <Route
               path="/rooms"
@@ -168,8 +168,9 @@ export function App() {
                 <RequireFeature feature="maps">{guarded(MapsPage, 'files.view')}</RequireFeature>
               }
             />
-            <Route path="/issue" element={<IssuePage />} />
-            <Route path="/return" element={<ReturnPage />} />
+            {/* Round 6: one desk — the receipt log on the page, issue/return sections expand on demand. */}
+            <Route path="/issue" element={<IssueReturnDeskPage />} />
+            <Route path="/return" element={<IssueReturnDeskPage initialSection="return" />} />
             <Route path="/movement" element={<MovementPage />} />
             <Route
               path="/barcodes"

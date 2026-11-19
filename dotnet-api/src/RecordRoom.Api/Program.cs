@@ -194,6 +194,7 @@ builder.Services.AddSingleton<RecordRoom.Api.Infrastructure.Ocr.OcrTextExtractor
 builder.Services.AddScoped<IOcrService, OcrService>();
 builder.Services.AddScoped<IReportsService, ReportsService>();
 builder.Services.AddScoped<RecordRoomJobs>();
+builder.Services.AddScoped<ScanProcessingJobs>();
 builder.Services.AddSingleton<IRealtimePublisher, RealtimePublisher>();
 builder.Services.AddHttpContextAccessor();
 
@@ -346,6 +347,16 @@ app.MapHub<RecordRoomHub>("/hubs/recordroom");
 // the first request can enqueue work. Guarded by configuration: a test run or a
 // read-only replica should not start sweeping the registry behind the operator's
 // back.
+// Starts the background worker. It dequeues both the recurring definitions
+// below and the fire-and-forget jobs the request paths enqueue (the scan OCR
+// pass after an upload), so it runs unconditionally: EnableScheduling gates
+// only the cron definitions, not enqueued work.
+app.UseHangfireServer(new BackgroundJobServerOptions
+{
+    // Short polling so a fresh deployment does not idle until the next tick.
+    SchedulePollingInterval = TimeSpan.FromSeconds(15),
+});
+
 if (app.Configuration.GetValue("Hangfire:EnableScheduling", true))
 {
     // IRecurringJobManager from DI, not the static RecurringJob helper: the
@@ -365,18 +376,8 @@ if (app.Configuration.GetValue("Hangfire:EnableScheduling", true))
         pruneCron,
         new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
 
-    // Starts the background worker. Without this the recurring definitions above
-    // are written to storage but nothing ever dequeues or runs them, so the
-    // overdue sweep and audit retention silently never happen.
-    app.UseHangfireServer(new BackgroundJobServerOptions
-    {
-        // Schedule the overdue sweep on a short interval so a fresh deployment
-        // does not idle until the next cron tick.
-        SchedulePollingInterval = TimeSpan.FromSeconds(15),
-    });
-
     app.Logger.LogInformation(
-        "Hangfire scheduled and worker started: overdue receipts '{OverdueCron}', audit retention '{PruneCron}' (UTC).",
+        "Hangfire recurring jobs scheduled: overdue receipts '{OverdueCron}', audit retention '{PruneCron}' (UTC).",
         overdueCron,
         pruneCron);
 }

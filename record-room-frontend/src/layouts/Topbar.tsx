@@ -111,47 +111,54 @@ export function Topbar({
   }, []);
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center gap-2 border-b border-base bg-[color-mix(in_srgb,var(--rr-surface)_92%,transparent)] px-3 backdrop-blur-xl sm:gap-3 md:px-6">
-      <button
-        onClick={onMenu}
-        className="focus-ring grid size-11 place-items-center rounded-lg hover:bg-[var(--rr-surface-2)] lg:hidden"
-        aria-label="Open navigation"
-      >
-        <List size={22} />
-      </button>
-      <Link to="/files" className="focus-ring flex items-center gap-2 rounded-lg lg:hidden">
-        <BrandMark size={30} />
-        <span className="hidden text-[15px] font-bold tracking-tight min-[400px]:inline">
-          {APP_SHORT}
-        </span>
-      </Link>
+    <header className="sticky top-0 z-30 grid h-16 grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)] items-center gap-2 border-b border-base bg-[color-mix(in_srgb,var(--rr-surface)_92%,transparent)] px-3 backdrop-blur-xl sm:gap-3 md:px-6">
+      {/* Left: navigation, brand, back */}
+      <div className="flex min-w-0 items-center gap-2">
+        <button
+          onClick={onMenu}
+          className="focus-ring grid size-11 place-items-center rounded-lg hover:bg-[var(--rr-surface-2)] lg:hidden"
+          aria-label="Open navigation"
+        >
+          <List size={22} />
+        </button>
+        <Link to="/files" className="focus-ring flex items-center gap-2 rounded-lg lg:hidden">
+          <BrandMark size={30} />
+          <span className="hidden text-[15px] font-bold tracking-tight min-[400px]:inline">
+            {APP_SHORT}
+          </span>
+        </Link>
 
-      {back && (
+        {back && (
+          <button
+            type="button"
+            onClick={goBack}
+            className="focus-ring grid size-11 shrink-0 place-items-center rounded-lg border border-base bg-[var(--rr-surface)] hover:bg-[var(--rr-surface-2)]"
+            aria-label="Go back"
+          >
+            <ArrowLeft size={19} />
+          </button>
+        )}
+      </div>
+
+      {/* Center: the command palette entry point, on every page (round 5) —
+          optically centered through the three-column grid. */}
+      <div className="flex min-w-0 justify-center">
         <button
           type="button"
-          onClick={goBack}
-          className="focus-ring grid size-11 shrink-0 place-items-center rounded-lg border border-base bg-[var(--rr-surface)] hover:bg-[var(--rr-surface-2)]"
-          aria-label="Go back"
+          onClick={() => setPaletteOpen(true)}
+          aria-label="Open search and commands"
+          className="focus-ring flex h-11 w-full max-w-xl min-w-0 items-center gap-2.5 rounded-lg border border-base bg-[var(--rr-bg)] pl-3.5 pr-3 text-left"
         >
-          <ArrowLeft size={19} />
+          <MagnifyingGlass size={17} className="muted shrink-0" />
+          <span className="muted min-w-0 flex-1 truncate text-sm">Search or jump to…</span>
+          <kbd className="muted hidden shrink-0 rounded border border-base px-1.5 text-[11px] sm:inline">
+            Ctrl K
+          </kbd>
         </button>
-      )}
+      </div>
 
-      {/* The command palette entry point, on every page (round 5). */}
-      <button
-        type="button"
-        onClick={() => setPaletteOpen(true)}
-        aria-label="Open search and commands"
-        className="focus-ring flex h-11 min-w-0 flex-1 items-center gap-2.5 rounded-lg border border-base bg-[var(--rr-bg)] pl-3.5 pr-3 text-left md:max-w-xl"
-      >
-        <MagnifyingGlass size={17} className="muted shrink-0" />
-        <span className="muted min-w-0 flex-1 truncate text-sm">Search or jump to…</span>
-        <kbd className="muted hidden shrink-0 rounded border border-base px-1.5 text-[11px] sm:inline">
-          Ctrl K
-        </kbd>
-      </button>
-
-      <div className="ml-auto flex shrink-0 items-center gap-1">
+      {/* Right: data source and theme */}
+      <div className="flex shrink-0 items-center justify-end gap-1">
         <DataSourceBadge />
         <button
           onClick={() => setDark(!dark)}

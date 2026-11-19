@@ -31,7 +31,7 @@ const COMMANDS: Array<{ label: string; to: string; permission?: Permission; feat
   [
     { label: 'Registry', to: '/files' },
     { label: 'Search the registry', to: '/search' },
-    { label: 'Overview dashboard', to: '/overview' },
+    // { label: 'Overview dashboard', to: '/overview' }, — Overview hidden (round 6)
     { label: 'Issue desk', to: '/issue' },
     { label: 'Return desk', to: '/return' },
     { label: 'Movement log', to: '/movement' },

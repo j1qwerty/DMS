@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type ReactNode } from 'react';
 import {
   Link,
   NavLink,
@@ -35,6 +35,7 @@ import { StatusBadge } from '../components/ui/Flash';
 import { BarcodeSymbol } from '../components/BarcodeSymbol';
 import { ShelfView } from '../components/ShelfView';
 import { DocumentViewer } from '../components/files/DocumentViewer';
+import { PageOcrViewer } from '../components/files/PageOcrViewer';
 import { OcrPanel } from '../components/files/OcrPanel';
 import { CompressModal } from '../components/files/CompressModal';
 import {
@@ -368,6 +369,8 @@ export function FileDetailPage() {
     reloadMovements();
   };
 
+  // Segmented tab control: one glanceable row, active tab filled, counts on
+  // the tabs that have them.
   const tabLink = (
     to: string,
     label: string,
@@ -379,15 +382,23 @@ export function FileDetailPage() {
       to={to}
       end
       className={cn(
-        'focus-ring -mb-px inline-flex min-h-11 items-center gap-2 rounded-t-lg border-b-2 px-4 text-sm font-semibold transition',
+        'focus-ring inline-flex min-h-9 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 text-[13px] font-semibold transition',
         isActive
-          ? 'border-[var(--rr-accent)] text-accent'
-          : 'muted border-transparent hover:text-[var(--rr-text)]',
+          ? 'bg-[var(--rr-accent-fill)] text-white shadow-sm'
+          : 'text-[var(--rr-muted)] hover:bg-[var(--rr-surface-2)] hover:text-[var(--rr-text)]',
       )}
     >
-      <IconCmp size={17} /> {label}
-      {count !== undefined && (
-        <span className="rounded-full bg-[var(--rr-surface-2)] px-1.5 text-xs">{count}</span>
+      <IconCmp size={15} weight={isActive ? 'fill' : 'regular'} />
+      {label}
+      {count !== undefined && count > 0 && (
+        <span
+          className={cn(
+            'rounded-full px-1.5 text-[11px] font-bold',
+            isActive ? 'bg-white/25 text-white' : 'bg-[var(--rr-surface-2)] text-[var(--rr-muted)]',
+          )}
+        >
+          {count}
+        </span>
       )}
     </NavLink>
   );
@@ -445,7 +456,7 @@ export function FileDetailPage() {
       </div>
 
       {/* Unified Tab Row */}
-      <div className="no-scrollbar flex gap-1 overflow-x-auto border-b border-base">
+      <div className="no-scrollbar flex gap-1 overflow-x-auto rounded-xl border border-base bg-[var(--rr-bg)] p-1.5">
         {tabLink(
           `/files/${file.id}/scan`,
           'Document',
@@ -472,8 +483,7 @@ export function FileDetailPage() {
           {/* Main Viewer Area (Full Height & Page-size Responsive) */}
           <div className="min-w-0">
             {selectedVersion ? (
-              <DocumentViewer
-                fill
+              <PageOcrViewer
                 docKey={selectedVersion.id}
                 load={() =>
                   selectedVersion.source === 'document'
@@ -481,35 +491,30 @@ export function FileDetailPage() {
                     : service.digitization.pdfBlob(selectedVersion.id)
                 }
                 filename={selectedVersion.filename}
-                contentType={
-                  selectedVersion.source === 'document'
-                    ? selectedVersion.rawDoc?.contentType
-                    : 'application/pdf'
-                }
-                toolbar={
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="truncate text-sm font-semibold">{selectedVersion.filename}</p>
-                      {selectedVersion.source === 'derivative' &&
-                        selectedVersion.status !== 'Approved' && (
-                          <Badge
-                            tone={selectedVersion.status === 'Rejected' ? 'danger' : 'warning'}
-                          >
-                            {selectedVersion.status}
-                          </Badge>
-                        )}
-                    </div>
-                    <p className="muted text-xs">
-                      {selectedVersion.versionLabel} ·{' '}
+                meta={
+                  <>
+                    <Badge tone={selectedVersion.source === 'document' ? 'info' : 'neutral'}>
+                      {selectedVersion.source === 'document' ? 'Scan PDF' : 'Built PDF'}
+                    </Badge>
+                    {selectedVersion.source === 'derivative' &&
+                      selectedVersion.status !== 'Approved' && (
+                        <Badge tone={selectedVersion.status === 'Rejected' ? 'danger' : 'warning'}>
+                          {selectedVersion.status}
+                        </Badge>
+                      )}
+                    <span className="muted text-xs">
+                      {selectedVersion.versionLabel}
                       {selectedVersion.sizeBytes
-                        ? formatDocumentSize(selectedVersion.sizeBytes)
+                        ? ` · ${formatDocumentSize(selectedVersion.sizeBytes)}`
                         : ''}
                       {selectedVersion.pageCount
                         ? ` · ${describePageCount(selectedVersion.pageCount)}`
                         : ''}
-                    </p>
-                  </div>
+                    </span>
+                  </>
                 }
+                scanPages={scanPages}
+                fileId={file.id}
               />
             ) : (
               <Card>
@@ -762,23 +767,35 @@ export function FileDetailPage() {
                 </div>
                 <StatusBadge status={file.status} />
               </div>
-              <div className="mt-6 grid gap-5 sm:grid-cols-2">
-                <Info label="File number" value={file.fileNumber} />
-                <Info label="Department" value={file.department} />
-                <Info label="Type" value={file.fileType} />
-                <Info label="Year" value={String(file.year)} />
-                <Info label="Codal life" value={file.codalLife} />
-                <Info label="Created" value={`${file.createdAt} by ${file.createdBy}`} />
-                <Info
-                  label="Area / pincode"
-                  value={`${file.area || '—'} / ${file.pincode || '—'}`}
-                />
-                <Info
-                  label="Property"
-                  value={`${file.propertyNo || '—'} · ${file.propertyArea || '—'}`}
-                />
-                <Info label="Dealer" value={file.dealer || '—'} />
-                <Info label="Last movement" value={file.lastMovement} />
+              <div className="mt-6 space-y-6">
+                <DetailSection title="Classification">
+                  <Info label="File number" value={file.fileNumber} />
+                  <Info label="Department" value={file.department} />
+                  <Info label="Type" value={file.fileType} />
+                  <Info label="Year" value={String(file.year)} />
+                  <Info label="Codal life" value={file.codalLife} />
+                  <Info label="Last movement" value={file.lastMovement} />
+                </DetailSection>
+                <DetailSection title="Origin & area">
+                  <Info label="Created" value={`${file.createdAt} by ${file.createdBy}`} />
+                  <Info
+                    label="Area / pincode"
+                    value={`${file.area || '—'} / ${file.pincode || '—'}`}
+                  />
+                  <Info label="Dealer" value={file.dealer || '—'} />
+                </DetailSection>
+                <DetailSection title="Property">
+                  <Info label="Property number" value={file.propertyNo || '—'} />
+                  <Info label="Property area" value={file.propertyArea || '—'} />
+                </DetailSection>
+                <section>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--rr-muted)]">
+                    Description
+                  </p>
+                  <p className="muted mt-3 text-sm leading-7">
+                    {file.description || 'No description provided.'}
+                  </p>
+                </section>
               </div>
               {barcode && (
                 <div className="mt-6 rounded-xl bg-[var(--rr-bg)] p-4 text-[var(--rr-text)]">
@@ -827,16 +844,6 @@ export function FileDetailPage() {
                   </div>
                 </div>
               )}
-            </Card>
-
-            <Card>
-              <div className="flex items-center gap-2">
-                <FileText className="text-accent" size={19} />
-                <p className="text-sm font-semibold">Description</p>
-              </div>
-              <p className="muted mt-4 text-sm leading-7">
-                {file.description || 'No description provided.'}
-              </p>
             </Card>
 
             <Card padding={false} className="overflow-hidden">
@@ -1193,6 +1200,17 @@ export function FileDetailPage() {
         />
       )}
     </div>
+  );
+}
+
+function DetailSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section>
+      <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--rr-muted)]">
+        {title}
+      </p>
+      <div className="mt-3 grid gap-x-6 gap-y-4 sm:grid-cols-2 xl:grid-cols-3">{children}</div>
+    </section>
   );
 }
 

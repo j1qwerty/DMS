@@ -1,8 +1,10 @@
+using Hangfire;
 using Microsoft.EntityFrameworkCore;
 using RecordRoom.Api.Application.Contracts;
 using RecordRoom.Api.Domain;
 using RecordRoom.Api.Infrastructure.Auth;
 using RecordRoom.Api.Infrastructure.Data;
+using RecordRoom.Api.Infrastructure.Jobs;
 
 namespace RecordRoom.Api.Application.Services;
 
@@ -53,7 +55,7 @@ public sealed class FileScansService(
     IFileRefs fileRefs,
     Microsoft.Extensions.Configuration.IConfiguration configuration,
     ILogger<FileScansService> logger,
-    IOcrService ocr) : IFileScansService
+    Hangfire.IBackgroundJobClient backgroundJobs) : IFileScansService
 {
     private static readonly string[] DocumentSizes = ["A0", "A1", "A2", "A3", "A4", "Other"];
 
@@ -138,25 +140,16 @@ public sealed class FileScansService(
     }
 
     /// <summary>
-    /// OCR runs as part of the upload (round 3): the text layer of typed PDFs,
-    /// or a raster+tesseract pass for scans, lands in the searchable OcrText
-    /// column right away. Best effort — an OCR failure must never fail an
-    /// otherwise good upload.
+    /// OCR moved to the background: a multi-page Hindi scan can take minutes
+    /// through tesseract, so the upload request stores the document, marks the
+    /// page "Processing" and returns immediately. The job rasterizes and OCRs
+    /// the stored bytes, writes the text and lands the page on its real status
+    /// (`targetStatus`, captured here because a rescan can be a duplicate).
+    /// The UI hears "page.processed" on the digitization channel and refreshes.
     /// </summary>
-    private async Task<string> TryOcrAsync(string storageKey, string? contentType, CancellationToken ct)
-    {
-        try
-        {
-            if (!configuration.GetValue("Ocr:Enabled", true)) return "";
-            var extraction = await ocr.ExtractAsync(storageKey, contentType ?? "application/octet-stream", ct);
-            return extraction.Text;
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Inline OCR failed for {StorageKey}; run OCR again from the studio.", storageKey);
-            return "";
-        }
-    }
+    private void QueueOcr(FileScanPage page, PageStatus targetStatus) =>
+        backgroundJobs.Enqueue<ScanProcessingJobs>(
+            job => job.ExtractOcrAsync(page.Id, (int)targetStatus));
 
     public async Task<Result<FileScanPageDto>> AddDocumentAsync(
         long scanId, Microsoft.AspNetCore.Http.IFormFile? document, CancellationToken ct = default)
@@ -194,7 +187,11 @@ public sealed class FileScansService(
             page.Sha256 = stored.Sha256;
             page.PageCount = stored.PageCount;
             page.Dpi = stored.Dpi;
-            page.OcrText = await TryOcrAsync(stored.StorageKey, stored.ContentType, ct);
+            // The page keeps whatever status it was registered with, shows
+            // "Processing" while the background OCR pass runs, and lands back
+            // on that status when the pass finishes.
+            var existingTargetStatus = page.Status;
+            page.Status = PageStatus.Processing;
             await audit.LogAsync(db, AuditAction.Update, "FileScanPage", page.Id.ToString(),
                 beforeFile,
                 $"{stored.OriginalFileName}; bytes={stored.SizeBytes}; sha256={stored.Sha256}",
@@ -209,6 +206,7 @@ public sealed class FileScansService(
             catch { await TryDeleteAsync(stored.StorageKey); throw; }
             await audit.AnnounceAsync(RealtimeChannels.Digitization, "page.added", page.Id.ToString(),
                 $"{stored.OriginalFileName} attached to {page.Barcode} page {page.PageNo}");
+            QueueOcr(page, existingTargetStatus);
             var fileForRow = await db.Files.AsNoTracking().FirstAsync(f => f.Barcode == page.Barcode, ct);
             return Result<FileScanPageDto>.Ok(
                 (await fileRefs.EnrichAsync(new[] { ToPage(page, fileForRow.Id) }, ct))[0]);
@@ -219,16 +217,17 @@ public sealed class FileScansService(
             .Select(p => (int?)p.Version).MaxAsync(ct) ?? 0) + 1;
         var hasActive = await db.ScanPages.AnyAsync(p =>
             p.Barcode == page.Barcode && p.PageNo == page.PageNo && p.Status == PageStatus.Active, ct);
+        var targetStatus = version > 1 && hasActive ? PageStatus.Duplicate : PageStatus.PendingReview;
         var rescan = new FileScanPage
         {
             Barcode = page.Barcode, FileName = stored.OriginalFileName,
             PageNo = page.PageNo, Version = version, DocumentSize = page.DocumentSize,
-            Status = version > 1 && hasActive ? PageStatus.Duplicate : PageStatus.PendingReview,
+            // "Processing" until the background OCR pass lands it on targetStatus.
+            Status = PageStatus.Processing,
             Note = $"Uploaded document version {version} for page {page.PageNo}.",
             UploadedAt = DateTime.UtcNow, UploadedBy = current.UserName,
             StorageKey = stored.StorageKey, ContentType = stored.ContentType, SizeBytes = stored.SizeBytes, Sha256 = stored.Sha256,
-            PageCount = stored.PageCount, Dpi = stored.Dpi,
-            OcrText = await TryOcrAsync(stored.StorageKey, stored.ContentType, ct)
+            PageCount = stored.PageCount, Dpi = stored.Dpi
         };
         db.ScanPages.Add(rescan);
         await audit.LogAsync(db, AuditAction.Create, "FileScanPage", "pending",
@@ -245,6 +244,7 @@ public sealed class FileScansService(
         catch { await TryDeleteAsync(stored.StorageKey); throw; }
         await audit.AnnounceAsync(RealtimeChannels.Digitization, "page.added", rescan.Id.ToString(),
             $"{stored.OriginalFileName} added as version {version}");
+        QueueOcr(rescan, targetStatus);
         var fileId = await db.Files.AsNoTracking().Where(f => f.Barcode == page.Barcode)
             .Select(f => (int?)f.Id).FirstOrDefaultAsync(ct) ?? 0;
         return Result<FileScanPageDto>.Ok((await fileRefs.EnrichAsync(new[] { ToPage(rescan, fileId) }, ct))[0]);
@@ -287,6 +287,12 @@ public sealed class FileScansService(
     {
         var page = await db.ScanPages.FirstOrDefaultAsync(p => p.Id == scanId, ct);
         if (page is null) return Result<FileScanPageDto>.Fail("Scan page not found.", "scanId");
+
+        // A decision on a page whose OCR pass is still running would approve a
+        // page the reviewer has not seen finished processing.
+        if (page.Status == PageStatus.Processing)
+            return Result<FileScanPageDto>.Fail(
+                "This page is still processing its scan — try again in a moment.", "scanId");
 
         var approve = string.Equals(input.Decision, "Approved", StringComparison.OrdinalIgnoreCase);
         if (!approve && string.IsNullOrWhiteSpace(input.Note))
@@ -354,11 +360,17 @@ public sealed class FileScansService(
 
         // The ids must belong to this file's pages; anything else is ignored so
         // a stale review screen cannot decide on rows that moved elsewhere.
-        var pages = await db.ScanPages
-            .Where(p => p.Barcode == file.Barcode && scanIds.Contains(p.Id))
-            .ToListAsync(ct);
+        // Pages still running their background OCR pass are skipped for the
+        // same reason as the single-page review.
+        var pages = (await db.ScanPages
+                .Where(p => p.Barcode == file.Barcode && scanIds.Contains(p.Id))
+                .ToListAsync(ct))
+            .Where(p => p.Status != PageStatus.Processing)
+            .ToList();
         if (pages.Count == 0)
-            return Result<int>.Fail("None of the selected pages belong to this file.", "scanIds");
+            return Result<int>.Fail(
+                "None of the selected pages are ready to review (they may still be processing).",
+                "scanIds");
 
         foreach (var page in pages)
         {

@@ -10,8 +10,8 @@
  * them from a service instead.
  */
 
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import { service, store, type RecordRoomService } from '../services';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { service, store, dataSource, type RecordRoomService } from '../services';
 import { session } from '../services/impl/session';
 import { realtime, type Channel } from '../services/realtime';
 import { pushToast } from '../lib/toastStore';
@@ -78,15 +78,52 @@ export function useQuery<T>(
     return realtime.subscribe(() => setNonce((n) => n + 1));
   }, [channelKey]);
 
+  // Local mode has no SignalR: the in-memory store publishes after every
+  // mutation, so refetch straight from it. Without this, a write on one screen
+  // (an admin edit, an issue desk receipt) leaves every other screen's queries
+  // stale until a manual refresh — exactly the "data arrives but the table
+  // stays as it is" symptom.
+  useEffect(() => {
+    if (dataSource !== 'local') return;
+    const unsubscribe = store.subscribe(() => setNonce((n) => n + 1));
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
+  // Refetch when the tab becomes visible again: a dropped realtime connection
+  // or a sleep/wake cycle otherwise leaves the screen on old rows until F5.
+  // Cheap and a reliable last line of defence for the http adapter.
+  useEffect(() => {
+    const refresh = () => {
+      if (document.visibilityState === 'visible') setNonce((n) => n + 1);
+    };
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, []);
+
+  // A generation counter on top of the unmount guard: two refetches can be in
+  // flight at once (deps change + reload, or a notification during a fetch),
+  // and without it the older response can land last and overwrite the newer
+  // rows — the other half of "the data is fetched but the UI shows the old
+  // state until I refresh".
+  const generation = useRef(0);
+
   useEffect(() => {
     let live = true;
+    const runGeneration = ++generation.current;
 
     run().then(
       (value) => {
-        if (live) setState({ key, data: value, error: null });
+        if (live && runGeneration === generation.current)
+          setState({ key, data: value, error: null });
       },
       (cause: unknown) => {
-        if (!live) return;
+        if (!live || runGeneration !== generation.current) return;
         const error = cause instanceof Error ? cause.message : String(cause);
         // Keep the previous rows on failure: an empty table plus an error reads
         // as "there is nothing here", which is a different claim.

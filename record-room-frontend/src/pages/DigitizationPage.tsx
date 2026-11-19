@@ -10,13 +10,12 @@ import { EmptyState } from '../components/ui/EmptyState';
 import { RowSkeleton } from '../components/ui/Skeletons';
 import { StatusBadge } from '../components/ui/Flash';
 import { useQuery, useService, useSession } from '../hooks/useService';
-import type { AuditEntry, CustodyEvent, DocumentDerivative, RecordFile } from '../types';
+import type { CustodyEvent, DocumentDerivative, RecordFile } from '../types';
 import type { FileDigitizationProgress, Page } from '../services/contracts';
 import { CustodyRegister } from './CustodyPage';
 
 const EMPTY_PROGRESS: FileDigitizationProgress[] = [];
 const EMPTY_CUSTODY: Page<CustodyEvent> = { items: [], total: 0, page: 1, pageSize: 200 };
-const EMPTY_AUDIT: AuditEntry[] = [];
 
 /**
  * The Digitization section (round 5): the operator's home. The worklist tab
@@ -244,13 +243,8 @@ function Worklist({ onOpenStudio }: { onOpenStudio: () => void }) {
     ['digitization'],
   );
 
-  const { data: recent } = useQuery(
-    () => service.audit.list({ group: 'digitization', limit: 6 }),
-    [],
-    EMPTY_AUDIT,
-    ['audit'],
-  );
-
+  // Recent activity removed (round 6): the worklist numbers and batches are
+  // the desk's own state; the audit trail stays in Administration.
   const openBatches = custody.items.filter((event) => !event.signedOffAt).length;
   const totalPages = rows.reduce((sum, row) => sum + row.pagesTotal, 0);
   const approvedPages = rows.reduce((sum, row) => sum + row.pagesApproved, 0);
@@ -406,26 +400,6 @@ function Worklist({ onOpenStudio }: { onOpenStudio: () => void }) {
             </div>
             <p className="mt-3 text-2xl font-bold tabular-nums">{openBatches}</p>
             <p className="muted text-xs">intake batches still out with digitization</p>
-          </Card>
-
-          <Card padding={false} className="overflow-hidden">
-            <div className="border-b border-base p-4">
-              <p className="text-sm font-semibold">Recent activity</p>
-            </div>
-            {recent.length === 0 ? (
-              <p className="muted p-4 text-xs">No digitization activity recorded yet.</p>
-            ) : (
-              <ul className="divide-y divide-[var(--rr-border)]">
-                {recent.map((entry) => (
-                  <li key={entry.id} className="px-4 py-3">
-                    <p className="text-xs font-medium leading-5">{entry.summary}</p>
-                    <p className="muted mt-0.5 text-[11px]">
-                      {entry.actor} · {new Date(entry.at).toLocaleString()}
-                    </p>
-                  </li>
-                ))}
-              </ul>
-            )}
           </Card>
 
           <Card>

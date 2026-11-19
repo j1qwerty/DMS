@@ -85,6 +85,7 @@ public enum PageStatus
     Rejected = 2,
     Duplicate = 3,
     Active = 4,
+    Processing = 5,
 }
 
 public enum EmployeeStatus
