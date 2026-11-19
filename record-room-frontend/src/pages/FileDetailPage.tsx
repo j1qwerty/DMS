@@ -360,7 +360,7 @@ export function FileDetailPage() {
       </div>
 
       {/* Unified Tab Row */}
-      <div className="flex gap-1 overflow-x-auto border-b border-base">
+      <div className="no-scrollbar flex gap-1 overflow-x-auto border-b border-base">
         {tabLink(
           `/files/${file.id}/scan`,
           'Document Preview',
