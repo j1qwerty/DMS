@@ -723,6 +723,11 @@ export const httpDigitizationService: ScanApi = {
   async pendingReviewCount() {
     return get<number>('/api/digitization/pending-review-count');
   },
+
+  async pendingPdfs(query = {}) {
+    const dtos = await get<Dto[]>(`/api/digitization/pending-pdfs${qs({ search: query.search })}`);
+    return dtos.map(toDerivative);
+  },
   // -------------------------------------------------- scan studio (§3.4)
   async reorder(fileId, scanIds) {
     const result = await attempt<Dto[]>(
@@ -796,18 +801,20 @@ export const httpDigitizationService: ScanApi = {
     return result.ok ? ok(toDerivative(result.value)) : result;
   },
 
-  async reviewPdf(derivativeId, decision, note) {
-    const result = await attempt<Dto>(
-      'POST',
-      `/api/files/0/pdf/${toApiId(derivativeId, 'derivative')}/review`,
-      { decision, note: note ?? '' },
-    );
+  async reviewPdf(derivativeId, decision, note, fileId) {
+    const fId = fileId ? toApiId(fileId, 'file') : 0;
+    const dId = toApiId(derivativeId, 'derivative');
+    const path = fId > 0 ? `/api/files/${fId}/pdf/${dId}/review` : `/api/derivatives/${dId}/review`;
+    const result = await attempt<Dto>('POST', path, { decision, note: note ?? '' });
     return result.ok ? ok(toDerivative(result.value)) : result;
   },
 
-  async pdfBlob(derivativeId) {
-    // The route is file-scoped; the controller resolves the derivative by id.
-    return getBlob(`/api/files/0/pdf/${toApiId(derivativeId, 'derivative')}/content`);
+  async pdfBlob(derivativeId, fileId) {
+    const fId = fileId ? toApiId(fileId, 'file') : 0;
+    const dId = toApiId(derivativeId, 'derivative');
+    const path =
+      fId > 0 ? `/api/files/${fId}/pdf/${dId}/content` : `/api/derivatives/${dId}/content`;
+    return getBlob(path);
   },
 };
 

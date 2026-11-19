@@ -52,6 +52,9 @@ public interface IScanStudioService
     Task<Result<DocumentDerivativeDto>> ReviewPdfAsync(long derivativeId, DeliverableReviewInput input, CancellationToken ct = default);
 
     Task<PrivateDocumentContent?> OpenPdfAsync(long derivativeId, CancellationToken ct = default);
+
+    /// <summary>Generated PDF deliverables across all files awaiting review ("Pending approval").</summary>
+    Task<DocumentDerivativeDto[]> PendingPdfsAsync(string? search = null, CancellationToken ct = default);
 }
 
 public sealed class ScanStudioService(
@@ -302,6 +305,36 @@ public sealed class ScanStudioService(
             .OrderByDescending(d => d.CreatedAt).ThenByDescending(d => d.Id)
             .ToListAsync(ct);
         return rows.Select(d => ToDto(d, file)).ToArray();
+    }
+
+    public async Task<DocumentDerivativeDto[]> PendingPdfsAsync(string? search = null, CancellationToken ct = default)
+    {
+        var query = db.Derivatives.AsNoTracking()
+            .Where(d => d.Status == "Pending approval");
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var term = search.Trim().ToLower();
+            query = query.Where(d => d.Barcode.ToLower().Contains(term) || d.FileName.ToLower().Contains(term));
+        }
+
+        var rows = await query
+            .OrderByDescending(d => d.CreatedAt)
+            .Take(100)
+            .ToListAsync(ct);
+
+        if (rows.Count == 0) return [];
+
+        var barcodes = rows.Select(r => r.Barcode).Distinct().ToList();
+        var files = await db.Files.AsNoTracking()
+            .Where(f => barcodes.Contains(f.Barcode))
+            .ToDictionaryAsync(f => f.Barcode, ct);
+
+        return rows.Select(d =>
+        {
+            files.TryGetValue(d.Barcode, out var file);
+            return ToDto(d, file ?? new RecordFile { Barcode = d.Barcode, FileNumber = d.Barcode, Subject = d.Barcode });
+        }).ToArray();
     }
 
     private static DocumentDerivativeDto ToDto(DocumentDerivative d, RecordFile file) => new(

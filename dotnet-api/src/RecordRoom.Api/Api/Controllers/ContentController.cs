@@ -24,6 +24,11 @@ public class DigitizationController(IFileScansService scans) : ControllerBase
     [HttpGet("pending")]
     public async Task<IResult> Queue([FromQuery] string? search, CancellationToken ct) =>
         Results.Ok(ApiResponse<FileScanPageDto[]>.Ok(await scans.PendingAsync(search, ct)));
+
+    /// <summary>The pending deliverable PDFs across files awaiting review.</summary>
+    [HttpGet("pending-pdfs")]
+    public async Task<IResult> PendingPdfs([FromQuery] string? search, [FromServices] IScanStudioService studio, CancellationToken ct) =>
+        Results.Ok(ApiResponse<DocumentDerivativeDto[]>.Ok(await studio.PendingPdfsAsync(search, ct)));
 }
 
 [ApiController]

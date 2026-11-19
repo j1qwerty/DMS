@@ -343,6 +343,8 @@ export interface ScanApi {
   /** The pending-review queue across all files. */
   pending(query?: { search?: string }): Promise<FileScan[]>;
   pendingReviewCount(): Promise<number>;
+  /** The pending deliverable PDFs awaiting review across all files. */
+  pendingPdfs(query?: { search?: string }): Promise<DocumentDerivative[]>;
 
   // -------------------------------------------------- scan studio (§3.4)
 
@@ -377,8 +379,9 @@ export interface ScanApi {
     derivativeId: string,
     decision: 'Approved' | 'Rejected',
     note?: string,
+    fileId?: string,
   ): Promise<Result<DocumentDerivative>>;
-  pdfBlob(derivativeId: string): Promise<Blob>;
+  pdfBlob(derivativeId: string, fileId?: string): Promise<Blob>;
 }
 
 /** What one OCR pass produced, and how. */

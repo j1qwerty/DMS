@@ -37,17 +37,21 @@ public class DeliverablesController(IScanStudioService studio) : ControllerBase
     /// </summary>
     [Authorize(Policy = "perm:digitization.review")]
     [HttpPost("{derivativeId:long}/review")]
+    [HttpPost("/api/derivatives/{derivativeId:long}/review")]
     public async Task<IResult> Review(
         int fileId, long derivativeId, DeliverableReviewInput input, CancellationToken ct)
     {
-        // The derivative must belong to the routed file; a mismatched pair is a
-        // client bug, not a missing row.
-        var list = await studio.ListPdfsAsync(fileId, ct);
-        if (list.All(d => d.Id != derivativeId)) return Results.NotFound();
+        // When routed with a positive fileId, verify the derivative belongs to it.
+        if (fileId > 0)
+        {
+            var list = await studio.ListPdfsAsync(fileId, ct);
+            if (list.All(d => d.Id != derivativeId)) return Results.NotFound();
+        }
         return ApiResults.FromResult(await studio.ReviewPdfAsync(derivativeId, input, ct));
     }
 
     [HttpGet("{derivativeId:long}/content")]
+    [HttpGet("/api/derivatives/{derivativeId:long}/content")]
     public async Task<IActionResult> Content(
         int fileId, long derivativeId, [FromQuery] bool download = true, CancellationToken ct = default)
     {

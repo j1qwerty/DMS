@@ -2,7 +2,9 @@ import { useEffect, useState, type ReactNode } from 'react';
 import {
   CheckCircle,
   Eye,
+  FilePdf,
   MagnifyingGlass,
+  PencilSimple,
   Plus,
   Scan,
   WarningCircle,
@@ -11,13 +13,14 @@ import {
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
+import { Badge } from '../components/ui/Badge';
 import { Modal } from '../components/ui/Modal';
 import { Field, TextArea, TextInput } from '../components/ui/Field';
 import { EmptyState } from '../components/ui/EmptyState';
 import { RowSkeleton } from '../components/ui/Skeletons';
 import { DocumentViewer } from '../components/files/DocumentViewer';
 import { useFlash, useQuery, useService, useSession } from '../hooks/useService';
-import type { FileScan, RecordFile } from '../types';
+import type { DocumentDerivative, FileScan, RecordFile } from '../types';
 import { CustodyRegister } from './CustodyPage';
 
 /**
@@ -204,26 +207,43 @@ function WorkbenchPicker({ onOpenFile }: { onOpenFile: (fileId: string) => void 
  */
 function ScanReviewQueue() {
   const service = useService();
+  const navigate = useNavigate();
   const { allowed } = useSession();
 
   const [search, setSearch] = useState('');
+  const [subQueue, setSubQueue] = useState<'deliverables' | 'pages'>('deliverables');
   const [busyId, setBusyId] = useState('');
-  const [rejecting, setRejecting] = useState<FileScan | null>(null);
-  const [previewing, setPreviewing] = useState<FileScan | null>(null);
+  const [rejectingScan, setRejectingScan] = useState<FileScan | null>(null);
+  const [previewingScan, setPreviewingScan] = useState<FileScan | null>(null);
+  const [rejectingPdf, setRejectingPdf] = useState<DocumentDerivative | null>(null);
+  const [previewingPdf, setPreviewingPdf] = useState<DocumentDerivative | null>(null);
   const { success, danger } = useFlash();
 
-  // The API owns the filtering; the rows on screen are exactly the pending
-  // queue for the current search. Live updates from other screens arrive on
-  // the 'digitization' channel.
   const {
     data: queue,
-    loading,
-    reload,
+    loading: loadingPages,
+    reload: reloadPages,
   } = useQuery(() => service.digitization.pending({ search }), [search], [] as FileScan[], [
     'digitization',
   ]);
 
-  const review = async (scan: FileScan, decision: 'Approved' | 'Rejected', note = '') => {
+  const {
+    data: pendingPdfs,
+    loading: loadingPdfs,
+    reload: reloadPdfs,
+  } = useQuery(
+    () => service.digitization.pendingPdfs({ search }),
+    [search],
+    [] as DocumentDerivative[],
+    ['digitization'],
+  );
+
+  const reloadAll = () => {
+    reloadPages();
+    reloadPdfs();
+  };
+
+  const reviewScan = async (scan: FileScan, decision: 'Approved' | 'Rejected', note = '') => {
     setBusyId(scan.id);
     try {
       const result = await service.digitization.review(scan.id, decision, note);
@@ -232,7 +252,26 @@ function ScanReviewQueue() {
         return;
       }
       success(`${scan.filename} ${decision.toLowerCase()}.`);
-      reload();
+      reloadAll();
+    } finally {
+      setBusyId('');
+    }
+  };
+
+  const reviewPdf = async (
+    pdf: DocumentDerivative,
+    decision: 'Approved' | 'Rejected',
+    note = '',
+  ) => {
+    setBusyId(pdf.id);
+    try {
+      const result = await service.digitization.reviewPdf(pdf.id, decision, note, pdf.fileId);
+      if (!result.ok) {
+        danger(result.error);
+        return;
+      }
+      success(`${pdf.filename} ${decision.toLowerCase()}.`);
+      reloadAll();
     } finally {
       setBusyId('');
     }
@@ -240,8 +279,20 @@ function ScanReviewQueue() {
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-4 md:grid-cols-2">
-        <Metric icon={<Scan />} label="In queue" value={String(queue.length)} />
+      <div className="grid gap-4 md:grid-cols-3">
+        <Metric
+          icon={<FilePdf />}
+          label="Generated Documents"
+          value={String(pendingPdfs.length)}
+          tone={pendingPdfs.length > 0 ? 'warning' : 'neutral'}
+          hint="Compiled deliverable PDFs awaiting approval"
+        />
+        <Metric
+          icon={<Scan />}
+          label="Scan Pages"
+          value={String(queue.length)}
+          hint="Individual pages awaiting review"
+        />
         <Metric
           icon={<WarningCircle />}
           label="Reviewer"
@@ -256,116 +307,315 @@ function ScanReviewQueue() {
           <TextInput
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="File barcode, file number or scan name…"
+            placeholder="File barcode, file number or document name…"
             aria-label="Search the review queue"
           />
         </div>
 
-        {loading && queue.length === 0 ? (
-          <RowSkeleton rows={6} />
-        ) : queue.length === 0 ? (
-          <div className="p-6">
-            <EmptyState
-              title="Nothing awaits review"
-              description="Add page scans from a file page or the studio; they appear here for review."
-              action={
-                <Link to="/files" className="focus-ring text-xs font-semibold text-accent">
-                  Open the registry
-                </Link>
-              }
-            />
-          </div>
-        ) : (
-          <ul className="divide-y divide-[var(--rr-border)]">
-            {queue.map((scan) => (
-              <li key={scan.id} className="p-5">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                  <div className="min-w-0">
-                    <p className="break-all font-semibold">{scan.filename}</p>
-                    <p className="muted mt-1 text-[11px]">
-                      Page {scan.pageNo} · v{scan.version} · {scan.documentSize} · uploaded{' '}
-                      {scan.uploadedAt} by {scan.uploadedBy}
-                    </p>
-                    <p className="muted mt-1 text-[11px]">
-                      File{' '}
-                      <Link
-                        to={`/files/${scan.fileId}`}
-                        className="focus-ring font-mono text-accent"
-                      >
-                        {scan.fileNumber || scan.fileBarcode}
-                      </Link>{' '}
-                      · {scan.fileBarcode}
-                    </p>
-                    {scan.note && <p className="muted mt-1 text-[11px]">{scan.note}</p>}
-                  </div>
-                  <div className="flex shrink-0 flex-wrap gap-2">
-                    <Button
-                      variant="ghost"
-                      icon={<Eye size={16} />}
-                      disabled={!scan.hasDocument}
-                      onClick={() => setPreviewing(scan)}
+        {/* Sub-Queue Selector: Generated Documents vs Scan Pages */}
+        <div className="flex flex-wrap items-center gap-2 border-b border-base bg-[var(--rr-surface)] px-4 py-2.5">
+          <button
+            type="button"
+            onClick={() => setSubQueue('deliverables')}
+            className={`focus-ring inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+              subQueue === 'deliverables'
+                ? 'bg-[var(--rr-accent-fill)] text-white'
+                : 'muted hover:bg-[var(--rr-surface-2)] hover:text-[var(--rr-text)]'
+            }`}
+          >
+            <FilePdf size={15} />
+            Generated Documents
+            {pendingPdfs.length > 0 && (
+              <span
+                className={`ml-1 rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
+                  subQueue === 'deliverables'
+                    ? 'bg-white text-[var(--rr-accent-fill)]'
+                    : 'bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200'
+                }`}
+              >
+                {pendingPdfs.length}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => setSubQueue('pages')}
+            className={`focus-ring inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+              subQueue === 'pages'
+                ? 'bg-[var(--rr-accent-fill)] text-white'
+                : 'muted hover:bg-[var(--rr-surface-2)] hover:text-[var(--rr-text)]'
+            }`}
+          >
+            <Scan size={15} />
+            Scan Pages
+            {queue.length > 0 && (
+              <span
+                className={`ml-1 rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
+                  subQueue === 'pages'
+                    ? 'bg-white text-[var(--rr-accent-fill)]'
+                    : 'bg-[var(--rr-surface-2)]'
+                }`}
+              >
+                {queue.length}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {/* TAB A: Deliverable PDF Documents */}
+        {subQueue === 'deliverables' && (
+          <>
+            {loadingPdfs && pendingPdfs.length === 0 ? (
+              <RowSkeleton rows={4} />
+            ) : pendingPdfs.length === 0 ? (
+              <div className="p-6">
+                <EmptyState
+                  title="No generated documents awaiting review"
+                  description="When a deliverable PDF is built in the studio, it appears here for supervisor sign-off."
+                  action={
+                    <button
+                      type="button"
+                      onClick={() => setSubQueue('pages')}
+                      className="focus-ring text-xs font-semibold text-accent underline"
                     >
-                      Preview
-                    </Button>
-                    {allowed('digitization.review') && (
-                      <>
-                        <Button
-                          icon={<CheckCircle size={16} />}
-                          disabled={busyId === scan.id}
-                          onClick={() => void review(scan, 'Approved')}
-                        >
-                          Approve
-                        </Button>
+                      View scan pages queue ({queue.length})
+                    </button>
+                  }
+                />
+              </div>
+            ) : (
+              <ul className="divide-y divide-[var(--rr-border)]">
+                {pendingPdfs.map((pdf) => (
+                  <li key={pdf.id} className="p-5">
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <FilePdf size={18} className="text-accent" />
+                          <p className="break-all font-semibold">{pdf.filename}</p>
+                          <Badge tone="warning">Pending approval</Badge>
+                        </div>
+                        <p className="muted mt-1 text-[11px]">
+                          File{' '}
+                          <Link
+                            to={`/files/${pdf.fileId}`}
+                            className="focus-ring font-mono font-semibold text-accent"
+                          >
+                            {pdf.fileNumber || pdf.fileBarcode}
+                          </Link>{' '}
+                          · {pdf.pageCount} page(s)
+                          {pdf.sizeBytes
+                            ? ` · ${Math.max(1, Math.round(pdf.sizeBytes / 1024))} KB`
+                            : ''}{' '}
+                          · Built {new Date(pdf.createdAt).toLocaleString()} by {pdf.createdBy}
+                        </p>
+                        {pdf.reviewNote && (
+                          <p className="mt-1.5 rounded-md bg-[var(--rr-bg)] p-2 text-[11px] text-[var(--rr-warning)]">
+                            Remarks: {pdf.reviewNote}
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex shrink-0 flex-wrap items-center gap-2">
                         <Button
                           variant="ghost"
-                          icon={<XCircle size={16} />}
-                          disabled={busyId === scan.id}
-                          onClick={() => setRejecting(scan)}
+                          icon={<Eye size={16} />}
+                          onClick={() => setPreviewingPdf(pdf)}
                         >
-                          Reject…
+                          Preview
                         </Button>
-                      </>
-                    )}
-                  </div>
-                </div>
-              </li>
-            ))}
-          </ul>
+                        <Button
+                          variant="secondary"
+                          icon={<PencilSimple size={15} />}
+                          onClick={() => navigate(`/files/${pdf.fileId}/studio`)}
+                          title="Open studio composition for this file"
+                        >
+                          Edit in studio
+                        </Button>
+                        {allowed('digitization.review') && (
+                          <>
+                            <Button
+                              icon={<CheckCircle size={16} />}
+                              disabled={busyId === pdf.id}
+                              onClick={() => void reviewPdf(pdf, 'Approved')}
+                            >
+                              Approve
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              icon={<XCircle size={16} />}
+                              disabled={busyId === pdf.id}
+                              onClick={() => setRejectingPdf(pdf)}
+                            >
+                              Reject…
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        )}
+
+        {/* TAB B: Individual Scan Pages */}
+        {subQueue === 'pages' && (
+          <>
+            {loadingPages && queue.length === 0 ? (
+              <RowSkeleton rows={6} />
+            ) : queue.length === 0 ? (
+              <div className="p-6">
+                <EmptyState
+                  title="No scan pages awaiting review"
+                  description="Add page scans from a file page or the studio; they appear here for review."
+                  action={
+                    <button
+                      type="button"
+                      onClick={() => setSubQueue('deliverables')}
+                      className="focus-ring text-xs font-semibold text-accent underline"
+                    >
+                      View generated documents ({pendingPdfs.length})
+                    </button>
+                  }
+                />
+              </div>
+            ) : (
+              <ul className="divide-y divide-[var(--rr-border)]">
+                {queue.map((scan) => (
+                  <li key={scan.id} className="p-5">
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                      <div className="min-w-0">
+                        <p className="break-all font-semibold">{scan.filename}</p>
+                        <p className="muted mt-1 text-[11px]">
+                          Page {scan.pageNo} · v{scan.version} · {scan.documentSize} · uploaded{' '}
+                          {scan.uploadedAt} by {scan.uploadedBy}
+                        </p>
+                        <p className="muted mt-1 text-[11px]">
+                          File{' '}
+                          <Link
+                            to={`/files/${scan.fileId}`}
+                            className="focus-ring font-mono text-accent"
+                          >
+                            {scan.fileNumber || scan.fileBarcode}
+                          </Link>{' '}
+                          · {scan.fileBarcode}
+                        </p>
+                        {scan.note && <p className="muted mt-1 text-[11px]">{scan.note}</p>}
+                      </div>
+                      <div className="flex shrink-0 flex-wrap gap-2">
+                        <Button
+                          variant="ghost"
+                          icon={<Eye size={16} />}
+                          disabled={!scan.hasDocument}
+                          onClick={() => setPreviewingScan(scan)}
+                        >
+                          Preview
+                        </Button>
+                        {allowed('digitization.review') && (
+                          <>
+                            <Button
+                              icon={<CheckCircle size={16} />}
+                              disabled={busyId === scan.id}
+                              onClick={() => void reviewScan(scan, 'Approved')}
+                            >
+                              Approve
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              icon={<XCircle size={16} />}
+                              disabled={busyId === scan.id}
+                              onClick={() => setRejectingScan(scan)}
+                            >
+                              Reject…
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
         )}
       </Card>
 
+      {/* Preview Page Modal */}
       <Modal
-        open={previewing !== null}
-        onClose={() => setPreviewing(null)}
-        title={`Scan preview — ${previewing?.filename ?? ''}`}
+        open={previewingScan !== null}
+        onClose={() => setPreviewingScan(null)}
+        title={`Scan preview — ${previewingScan?.filename ?? ''}`}
         description={
-          previewing
-            ? `Page ${previewing.pageNo} · v${previewing.version} of ${previewing.fileBarcode}`
+          previewingScan
+            ? `Page ${previewingScan.pageNo} · v${previewingScan.version} of ${previewingScan.fileBarcode}`
             : undefined
         }
       >
-        {previewing && (
+        {previewingScan && (
           <DocumentViewer
-            docKey={previewing.id}
-            load={() => service.digitization.scanBlob(previewing.id)}
-            filename={previewing.filename}
-            contentType={previewing.contentType}
-            pageIndex={previewing.pageIndex}
+            docKey={previewingScan.id}
+            load={() => service.digitization.scanBlob(previewingScan.id)}
+            filename={previewingScan.filename}
+            contentType={previewingScan.contentType}
+            pageIndex={previewingScan.pageIndex}
             fill
           />
         )}
       </Modal>
 
+      {/* Preview Deliverable PDF Modal */}
       <Modal
-        open={rejecting !== null}
-        onClose={() => setRejecting(null)}
-        title={`Reject ${rejecting?.filename ?? ''}`}
+        open={previewingPdf !== null}
+        onClose={() => setPreviewingPdf(null)}
+        title={`Deliverable preview — ${previewingPdf?.filename ?? ''}`}
+        description={
+          previewingPdf
+            ? `Built from ${previewingPdf.pageCount} page(s) · Status: ${previewingPdf.status}`
+            : undefined
+        }
       >
-        {rejecting && (
+        {previewingPdf && (
+          <DocumentViewer
+            docKey={previewingPdf.id}
+            load={() => service.digitization.pdfBlob(previewingPdf.id, previewingPdf.fileId)}
+            filename={previewingPdf.filename}
+            contentType="application/pdf"
+            fill
+          />
+        )}
+      </Modal>
+
+      {/* Reject Page Modal */}
+      <Modal
+        open={rejectingScan !== null}
+        onClose={() => setRejectingScan(null)}
+        title={`Reject ${rejectingScan?.filename ?? ''}`}
+      >
+        {rejectingScan && (
           <RejectForm
+            title="Reject page"
             onSubmit={async (note) => {
-              await review(rejecting, 'Rejected', note);
-              setRejecting(null);
+              await reviewScan(rejectingScan, 'Rejected', note);
+              setRejectingScan(null);
+            }}
+          />
+        )}
+      </Modal>
+
+      {/* Reject Deliverable PDF Modal */}
+      <Modal
+        open={rejectingPdf !== null}
+        onClose={() => setRejectingPdf(null)}
+        title={`Reject deliverable — ${rejectingPdf?.filename ?? ''}`}
+        description="The build stays in history with your rejection reason; the operator can fix composition in studio and rebuild."
+      >
+        {rejectingPdf && (
+          <RejectForm
+            title="Reject deliverable PDF"
+            placeholder="Wrong page order, missing signature on page 3…"
+            onSubmit={async (note) => {
+              await reviewPdf(rejectingPdf, 'Rejected', note);
+              setRejectingPdf(null);
             }}
           />
         )}
@@ -410,7 +660,15 @@ function Metric({
   );
 }
 
-function RejectForm({ onSubmit }: { onSubmit: (note: string) => void }) {
+function RejectForm({
+  onSubmit,
+  title = 'Reject',
+  placeholder = 'Skew beyond tolerance, missing half the page…',
+}: {
+  onSubmit: (note: string) => void;
+  title?: string;
+  placeholder?: string;
+}) {
   const [note, setNote] = useState('');
 
   return (
@@ -426,11 +684,11 @@ function RejectForm({ onSubmit }: { onSubmit: (note: string) => void }) {
           id="reject-note"
           value={note}
           onChange={(event) => setNote(event.target.value)}
-          placeholder="Skew beyond tolerance, missing half the page…"
+          placeholder={placeholder}
         />
       </Field>
       <Button type="submit" disabled={!note.trim()}>
-        Reject page
+        {title}
       </Button>
     </form>
   );

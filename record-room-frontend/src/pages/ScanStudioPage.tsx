@@ -447,7 +447,7 @@ export function ScanStudioPage({ embedded = false }: { embedded?: boolean }) {
     note = '',
   ) => {
     await run(async () => {
-      const result = await service.digitization.reviewPdf(item.id, decision, note);
+      const result = await service.digitization.reviewPdf(item.id, decision, note, fileId);
       if (result.ok) {
         setMessage(`${item.filename} ${decision.toLowerCase()}.`);
         await reload();

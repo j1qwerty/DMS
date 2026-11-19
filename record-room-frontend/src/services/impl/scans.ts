@@ -287,6 +287,19 @@ export const scansService: ScanApi = {
     return store.getState().scanPages.filter((row) => row.status === 'Pending review').length;
   },
 
+  async pendingPdfs(query = {}) {
+    const search = query.search?.trim().toLowerCase() ?? '';
+    return store
+      .getState()
+      .derivatives.filter((row) => row.status === 'Pending approval')
+      .filter((row) => {
+        if (!search) return true;
+        const haystack = `${row.filename} ${row.fileBarcode} ${row.fileNumber ?? ''}`.toLowerCase();
+        return haystack.includes(search);
+      })
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  },
+
   // -------------------------------------------------- scan studio (§3.4, §3.2)
   //
   // Local mode simulates the pixel work: rotations and enhancements are
