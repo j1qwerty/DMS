@@ -189,7 +189,7 @@ small-component removal, document-quad crop, CLAHE contrast, rotate.
    per stored page for reproducibility.
 3. Extracted text stored in OCR tables → full-text indexed (§3.1).
 
-### 3.4 Scan composition studio
+### 3.4 Scan composition studio 
 
 The gallery work that turns "we store scans" into "we digitise properly":
 
@@ -248,6 +248,84 @@ and dusting themselves are physical work and stay out of software
 - HTTPS via a domain (VPS currently on a bare IP)
 - CI that boots SQL Server so `test-api.ps1` and the frontend contract suite
   always run; add the barcode-gun simulator as a CI flow
+
+### 3.10 Round 5 — UI overhaul, Review section, PDF compression, OCR page (2026-11-19)
+
+Frontend round, committed on `v2`. The goal the user set: clean and intuitive
+enough to understand at a glance, less text, no eyebrow labels, no `?` info
+tags anywhere in this product (the design skill's `InfoTip` guidance does not
+apply here).
+
+**Shell and navigation**
+
+- Command palette (E8) is reachable from the top bar on **every** page — a
+  persistent trigger styled like a search field with the `Ctrl K` hint; the
+  old inline topbar search (hidden on `/files`) is gone. `docs/skills/command-palette.md`
+  updated to match.
+- One **back button on the top bar** (`useBackTarget`): browser-back when the
+  user arrived by in-app navigation, section-up on a deep link. All per-page
+  back links removed (file detail, room detail, new file, studio).
+- Signed-in user + **sign-out moved to the sidebar footer**; the topbar keeps
+  only the data-source badge and the theme toggle.
+- Kicker/eyebrow props deleted from `PageHeader`/`SectionHeader` and every
+  call site; page descriptions cut to one sentence.
+
+**Review section (the former scan review queue)**
+
+- Own menu entry `/review` ("Review"), moved out of Digitization where it was
+  the "Scan review queue" tab; old `?tab=queue` links redirect.
+- One row **per file**: changed page numbers folded to `3, 5, 8–10`
+  (`lib/reviewGroup.formatPageNumbers`), pending build count, last activity.
+- `FilePagesPreview` modal: full-file page grid with the changed pages ringed
+  and badged **New / Updated**, an "All pages / Changed" toggle, selection
+  checkboxes, and one remark that is saved with the decision. Pending
+  deliverable builds are reviewed in the same modal (preview, approve, reject
+  with reason). A zoom overlay pages through single pages.
+- Service additions: `pendingByFile` (grouping), `reviewScans` (bulk
+  approve/reject with remark), both adapters.
+
+**Digitization = the operator's desk**
+
+- Tabs: **Worklist** (default) and **Batches** (the custody register); the
+  studio stays the scanning surface, opened per file.
+- Worklist: one row per file under digitization — pages approved/total with a
+  progress bar, pending/rejected, deliverable counts, last activity, open
+  studio — plus desk figures (files, pages approved, pages awaiting review,
+  builds awaiting approval), open batch count and recent digitization audit
+  activity. Backed by the new `progress()` aggregation.
+
+**PDF compression (feature 1)**
+
+- `lib/pdf-compress.ts`: pdf.js rasterize → JPEG re-encode → DCTDecode PDF
+  writer, fully client-side in local mode; `lib/compression-levels.ts` holds
+  the three levels (light / balanced / strong) and the recommendation
+  (bytes-per-page thresholds; ≥400 KB/page → strong, ≥150 KB → balanced,
+  else light).
+- Compress action on every stored version of a document page. The dialog
+  **measures** each level on the first pages (probe) and shows estimated size
+  + exact percent saved per level with one marked *Recommended*; if no level
+  shrinks the file it says so and refuses to apply. The compressed copy is a
+  new pending build (original untouched), carrying `compressedFrom` and
+  `savedPercent` into the version history and the review flow.
+- HTTP mode maps to `POST /api/derivatives/{id}/compress` (and the
+  documents variant) — **API endpoints still to be implemented** (open items
+  below); the estimate probe stays client-side either way.
+
+**OCR page (feature 2)**
+
+- New **OCR tab** on the document page: per-page OCR text with search,
+  "Copy all", **re-run recognition** and **manual text correction**
+  (`saveOcrText`; who edited and when is kept on the page and audit-logged).
+- Viewing follows file access; editing/re-running needs `digitization.upload`
+  (Operator and above).
+
+**Open items**
+
+- [ ] API: `GET /api/digitization/progress`, `PUT /api/scans/{id}/ocr/text`,
+      `POST …/compress` endpoints (frontend http adapters already map them;
+      local/demo mode is fully functional without them).
+- [ ] `?` info-tag ban is a product decision — do not reintroduce `InfoTip`
+      from `docs/skills/design.md` in this app.
 
 ---
 

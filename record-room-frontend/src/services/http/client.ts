@@ -155,6 +155,45 @@ export async function send<T>(
 }
 
 /**
+ * Reads an endpoint that answers a bare DTO rather than the `{ success, data }`
+ * envelope.
+ *
+ * `/api/config` is the one public route that does this: the shell asks it for
+ * the product name and the feature flags before anyone signs in. Sending it
+ * through `get` made every call fail, because `unwrap` reads a missing
+ * `success` as a refusal — that is what broke the Settings switchboard.
+ */
+export async function getPlain<T>(path: string): Promise<T> {
+  const response = await raw(path, 'GET');
+
+  if (response.status === 401) {
+    handleUnauthorized();
+    throw new ApiError(401, 'Your session has expired. Sign in again.');
+  }
+
+  if (!response.ok) {
+    throw new ApiError(
+      response.status,
+      response.status === 403
+        ? 'Your role does not permit that action.'
+        : `Request failed (${response.status}).`,
+    );
+  }
+
+  const text = await response.text();
+  if (text.length === 0) return undefined as T;
+
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new ApiError(
+      response.status,
+      `The API returned a non-JSON response (${response.status}).`,
+    );
+  }
+}
+
+/**
  * A read expressed as a POST body.
  *
  * The `validate` endpoints take a payload to check rather than an id to fetch,

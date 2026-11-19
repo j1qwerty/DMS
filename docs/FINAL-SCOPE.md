@@ -65,6 +65,13 @@ Per the round-3/round-4 notes folded from root `TEMP-TODO.md` (now in
 - `Permitted()` bug fix: feature-gated items actually hide — round 3
 - Harness/web/API tests for all of the above (full pnpm round and
   `dotnet build`/`dotnet test` green)
+- UI overhaul + Review section + PDF compression + OCR page (round 5,
+  2026-11-19, `docs/WORK-PLAN.md` §3.10): command palette always reachable
+  from the top bar, top-bar back button everywhere, user + sign-out in the
+  sidebar footer, eyebrow/kicker labels removed, one-row-per-file review
+  queue with changed-page preview (`/review`), operator worklist + batches
+  under Digitization, measured PDF compression (percent + recommended level)
+  and the document-page OCR tab (view / re-run / manual correction)
 
 ## 2. Outstanding v1 items (still open)
 

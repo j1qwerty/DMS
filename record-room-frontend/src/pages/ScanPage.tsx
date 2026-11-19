@@ -53,9 +53,8 @@ export function ScanPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        kicker="Physical movement"
         title="Scan validation"
-        description="Resolve a scanned Code 128 payload or a QR sticker URL against the registry and the location tables."
+        description="Resolve a scanned barcode or QR sticker against the registry."
       />
 
       <div className="grid gap-5 xl:grid-cols-[.9fr_1.1fr]">

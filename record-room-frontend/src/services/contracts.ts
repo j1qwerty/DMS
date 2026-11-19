@@ -345,6 +345,29 @@ export interface ScanApi {
   pendingReviewCount(): Promise<number>;
   /** The pending deliverable PDFs awaiting review across all files. */
   pendingPdfs(query?: { search?: string }): Promise<DocumentDerivative[]>;
+  /**
+   * The pending-review queue grouped per file (round 5): one row per file in the
+   * Review section, with the changed page numbers instead of one row per page.
+   */
+  pendingByFile(query?: { search?: string }): Promise<ReviewFileGroup[]>;
+  /** Approves or rejects a specific set of scan pages in one action. */
+  reviewScans(
+    scanIds: string[],
+    decision: 'Approved' | 'Rejected',
+    note?: string,
+  ): Promise<Result<number>>;
+  /** Stores a manual correction of one page's OCR text. */
+  saveOcrText(scanId: string, text: string): Promise<Result<FileScan>>;
+  /** Per-level compression estimates for one stored version (client-side probe). */
+  compressionEstimate(target: CompressionTarget): Promise<Result<CompressionEstimate>>;
+  /** Writes a compressed copy of a stored version as a new pending deliverable. */
+  applyCompression(
+    target: CompressionTarget,
+    level: CompressionLevelKey,
+    remarks?: string,
+  ): Promise<Result<DocumentDerivative>>;
+  /** Operator worklist: per-file digitization progress across the registry. */
+  progress(query?: { search?: string }): Promise<FileDigitizationProgress[]>;
 
   // -------------------------------------------------- scan studio (§3.4)
 
@@ -394,6 +417,86 @@ export interface ScanOcrResult {
   /** "tesseract hin+eng" or "none" — what produced the text. */
   method: string;
   ranAt: string;
+}
+
+// ------------------------------------------------- review grouping (round 5)
+
+/** How one pending page differs from what the file already had. */
+export type ReviewChangeKind = 'new' | 'updated';
+
+/** One pending page inside a review group. */
+export interface ReviewPageChange {
+  scan: FileScan;
+  kind: ReviewChangeKind;
+}
+
+/**
+ * One file's pending changes (round 5): the Review table shows one row per
+ * file — the changed page numbers plus any pending deliverable builds — so a
+ * five-page rescan is one reviewable unit instead of five rows.
+ */
+export interface ReviewFileGroup {
+  fileId: string;
+  fileBarcode: string;
+  fileNumber?: string;
+  subject: string;
+  department?: string;
+  pages: ReviewPageChange[];
+  /** Pending deliverable PDF builds of this file. */
+  pdfs: DocumentDerivative[];
+  /** Newest uploadedAt / createdAt across the group. */
+  lastActivityAt: string;
+}
+
+/** Operator worklist row: how far one file's digitization has progressed. */
+export interface FileDigitizationProgress {
+  fileId: string;
+  fileBarcode: string;
+  fileNumber?: string;
+  subject: string;
+  department?: string;
+  status?: string;
+  pagesTotal: number;
+  pagesApproved: number;
+  pagesPending: number;
+  pagesRejected: number;
+  deliverables: number;
+  deliverablesPending: number;
+  lastActivityAt: string | null;
+}
+
+// ------------------------------------------------------ pdf compression
+
+export type CompressionLevelKey = 'light' | 'balanced' | 'strong';
+
+/** Which stored version to compress: an uploaded document or a built deliverable. */
+export interface CompressionTarget {
+  fileId: string;
+  source: 'document' | 'derivative';
+  id: string;
+}
+
+/** One level's numbers, as shown in the compression dialog. */
+export interface CompressionLevelEstimate {
+  level: CompressionLevelKey;
+  label: string;
+  /** Estimated output size in bytes. */
+  estimatedBytes: number;
+  /** Fraction saved against the current size; negative when it would grow. */
+  savedFraction: number;
+  qualityNote: string;
+  recommended: boolean;
+}
+
+/** What the probe pass reports for one stored version. */
+export interface CompressionEstimate {
+  currentBytes: number;
+  pageCount: number;
+  /** Source bytes per page; drives the recommendation. */
+  bytesPerPage: number;
+  levels: CompressionLevelEstimate[];
+  /** True when no level can meaningfully shrink this file. */
+  notWorthIt: boolean;
 }
 
 // ------------------------------------------------------------- custody chain

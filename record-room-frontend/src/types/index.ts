@@ -330,6 +330,9 @@ export interface FileScan {
   hasProcessed?: boolean;
   /** Extracted OCR text of the page; searchable through the registry search. */
   ocrText?: string;
+  /** Who last corrected the OCR text by hand, and when. */
+  ocrEditedBy?: string;
+  ocrEditedAt?: string;
 }
 
 /** A generated PDF deliverable built from a file's approved scan pages. */
@@ -356,6 +359,10 @@ export interface DocumentDerivative {
   reviewedBy?: string;
   reviewedAt?: string;
   reviewNote?: string;
+  /** Set when this build is a compressed copy of another stored version. */
+  compressedFrom?: string;
+  compressionLevel?: string;
+  savedPercent?: number;
 }
 
 export type CustodyDirection = 'Intake' | 'Return';

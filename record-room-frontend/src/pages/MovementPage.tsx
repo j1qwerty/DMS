@@ -81,9 +81,8 @@ export function MovementPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        kicker="Traceability"
         title="Movement log"
-        description="A chronological record of issue, return, relocation and digitization events, written in the same transaction as the change itself."
+        description="Issue, return, relocation and digitization events, newest first."
       />
 
       <section className="grid gap-4 md:grid-cols-3">

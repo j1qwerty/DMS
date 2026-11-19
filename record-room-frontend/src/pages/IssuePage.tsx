@@ -173,9 +173,8 @@ export function IssuePage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        kicker="Physical movement"
         title="Issue desk"
-        description="Scan one file or a whole requisition. Several files can go out on a single receipt, which is what the legacy multipleFileIssue flow did."
+        description="Scan one file or a whole requisition — several files can go out on one receipt."
         actions={
           <Link to="/return" className="focus-ring text-xs font-semibold text-accent">
             Go to return desk

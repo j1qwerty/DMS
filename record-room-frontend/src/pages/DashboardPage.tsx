@@ -133,7 +133,7 @@ export function DashboardPage() {
       icon: Archive,
       tone: 'text-accent',
       text: `${stats.pendingApprovals} scanned ${stats.pendingApprovals === 1 ? 'page' : 'pages'} waiting for review`,
-      to: '/digitization',
+      to: '/review',
     });
 
   return (

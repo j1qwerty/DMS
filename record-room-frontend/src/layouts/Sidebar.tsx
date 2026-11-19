@@ -6,6 +6,7 @@ import {
   Files,
   Gauge,
   Gear,
+  ListChecks,
   ShieldCheck,
   SignOut,
   Stack,
@@ -32,10 +33,11 @@ interface NavItem {
 
 /**
  * The product is a Document Management System. The menu follows the work: the
- * overview first, then the register, digitization (scan review and custody on
- * one page), the issue desk and the rooms. Maps are a Documents filter, not a
- * separate destination, and support lives in Settings — so nothing opens the
- * same page twice.
+ * overview first, then the register, digitization (the operator's worklist and
+ * the custody batches) and its Review section (the pending pages and builds,
+ * one row per file), then the issue desk and the rooms. Maps are a Documents
+ * filter, not a separate destination, and support lives in Settings — so
+ * nothing opens the same page twice.
  */
 const groups: Array<{ title: string; items: NavItem[] }> = [
   {
@@ -44,6 +46,7 @@ const groups: Array<{ title: string; items: NavItem[] }> = [
       { label: 'Overview', to: '/overview', icon: Gauge },
       { label: 'Documents', to: '/files', icon: Files, also: ['/search', '/maps'] },
       { label: 'Digitization', to: '/digitization', icon: Archive, also: ['/custody'] },
+      { label: 'Review', to: '/review', icon: ListChecks, permission: 'digitization.view' },
       {
         label: 'Issue & return',
         to: '/issue',
@@ -170,16 +173,36 @@ export function Sidebar({ mobileOpen, onClose }: { mobileOpen: boolean; onClose:
 
         <div className="shrink-0 border-t border-base p-3">
           <div className="space-y-0.5">{footerLinks.filter(permitted).map(link)}</div>
-          {/* The signed-in user shows on the topbar only; here a quiet way out. */}
-          <button
-            type="button"
-            onClick={signOut}
-            className="focus-ring muted mt-2 flex min-h-10 w-full items-center gap-3 rounded-lg px-3 text-[15px] transition hover:bg-[var(--rr-danger)] hover:text-white"
-            aria-label="Sign out"
-          >
-            <SignOut size={20} />
-            Sign out
-          </button>
+
+          {/* The signed-in user lives here (round 5): who is working, and the
+              way out. The card opens Settings. */}
+          <div className="mt-3 rounded-xl bg-[var(--rr-bg)] p-3">
+            <Link
+              to="/settings"
+              onClick={onClose}
+              className="focus-ring flex items-center gap-3 rounded-lg"
+            >
+              <span className="grid size-9 shrink-0 place-items-center rounded-full bg-[var(--rr-accent-fill)] text-sm font-bold text-white">
+                {(user?.displayName ?? '?').slice(0, 1).toUpperCase()}
+              </span>
+              <span className="min-w-0 flex-1 leading-tight">
+                <span className="block truncate text-[13px] font-semibold">
+                  {user?.displayName}
+                </span>
+                <span className="muted block truncate text-xs">
+                  {user?.role} · {user?.userName}
+                </span>
+              </span>
+            </Link>
+            <button
+              type="button"
+              onClick={signOut}
+              className="focus-ring muted mt-3 flex min-h-10 w-full items-center justify-center gap-2 rounded-lg border border-base text-[13px] font-semibold transition hover:bg-[var(--rr-danger)] hover:text-white"
+            >
+              <SignOut size={16} />
+              Sign out
+            </button>
+          </div>
         </div>
       </aside>
     </>

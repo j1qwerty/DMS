@@ -1562,8 +1562,8 @@ export const galleryItems: GalleryItem[] = [
   },
   {
     id: 'g3',
-    title: 'Scan review queue',
-    text: 'Operators can monitor page scans, quality checks and exceptions in one place.',
+    title: 'Review queue',
+    text: 'Page scans, resubmissions and builds wait for sign-off in one place, grouped per file.',
     height: 290,
   },
   {

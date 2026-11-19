@@ -30,12 +30,16 @@ import type {
   AuditApi,
 } from '../contracts';
 import type { RolePermissionMatrix } from '../permissions-matrix';
+import type { Features } from '../../lib/features';
 import { err, ok } from '../contracts';
+import { groupPendingByFile } from '../../lib/reviewGroup';
+import { buildLevelEstimates, COMPRESSION_LEVELS } from '../../lib/compression-levels';
 import {
   attempt,
   attemptForm,
   get,
   getBlob,
+  getPlain,
   getToken,
   post,
   qs,
@@ -728,6 +732,105 @@ export const httpDigitizationService: ScanApi = {
     const dtos = await get<Dto[]>(`/api/digitization/pending-pdfs${qs({ search: query.search })}`);
     return dtos.map(toDerivative);
   },
+
+  // ------------------------------------------------ review grouping (round 5)
+  //
+  // The grouping is client-side over the two existing pending endpoints; the
+  // file rows are fetched per file because the queue only carries ids.
+
+  async pendingByFile(query = {}) {
+    const [pages, pdfs] = await Promise.all([this.pending(query), this.pendingPdfs(query)]);
+    const fileIds = [...new Set([...pages.map((p) => p.fileId), ...pdfs.map((p) => p.fileId)])];
+    const files = (await Promise.all(fileIds.map((id) => httpFilesService.get(id)))).filter(
+      (file): file is NonNullable<typeof file> => file !== null,
+    );
+    return groupPendingByFile(pages, pdfs, files);
+  },
+
+  async reviewScans(scanIds, decision, note) {
+    if (scanIds.length === 0) return err('Select at least one page.', 'scanIds');
+    if (decision === 'Rejected' && !note?.trim()) {
+      return err('A rejection reason is required.', 'note');
+    }
+    let done = 0;
+    for (const scanId of scanIds) {
+      const result = await this.review(scanId, decision, note ?? '');
+      if (!result.ok) return result;
+      done += 1;
+    }
+    return ok(done);
+  },
+
+  async saveOcrText(scanId, text) {
+    const result = await attempt<Dto>('PUT', `/api/scans/${toApiId(scanId, 'scan')}/ocr/text`, {
+      text,
+    });
+    return result.ok ? ok(toFileScan(result.value)) : result;
+  },
+
+  async compressionEstimate(target) {
+    const { probeCompression } = await import('../../lib/pdf-compress');
+    const blob =
+      target.source === 'document'
+        ? await httpFilesService.documentBlob(target.fileId, target.id)
+        : await this.pdfBlob(target.id, target.fileId);
+    const currentBytes = blob.size;
+    const perLevel = { light: 0, balanced: 0, strong: 0 } as Record<
+      'light' | 'balanced' | 'strong',
+      number
+    >;
+    let pageCount = 0;
+    for (const def of COMPRESSION_LEVELS) {
+      try {
+        const probe = await probeCompression(blob, def.key);
+        pageCount = probe.pageCount;
+        perLevel[def.key] = Math.round(probe.bytesPerPage * probe.pageCount + 1024);
+      } catch {
+        perLevel[def.key] = 0;
+      }
+    }
+    if (pageCount === 0) return err('The PDF could not be read for compression.', 'id');
+    const levels = buildLevelEstimates(currentBytes, pageCount, perLevel);
+    const best = Math.min(...levels.map((level) => level.estimatedBytes));
+    return ok({
+      currentBytes,
+      pageCount,
+      bytesPerPage: currentBytes / pageCount,
+      levels,
+      notWorthIt: best >= currentBytes * 0.95,
+    });
+  },
+
+  async applyCompression(target, level, remarks) {
+    // Server-side pipeline (QuestPDF); the endpoint ships with the API update.
+    const dId = toApiId(target.id, 'derivative');
+    const path =
+      target.source === 'document'
+        ? `/api/files/${toApiId(target.fileId, 'file')}/documents/${toApiId(target.id, 'document')}/compress`
+        : `/api/derivatives/${dId}/compress`;
+    const result = await attempt<Dto>('POST', path, { level, remarks: remarks ?? '' });
+    return result.ok ? ok(toDerivative(result.value)) : result;
+  },
+
+  async progress(query = {}) {
+    return get<Dto[]>(`/api/digitization/progress${qs({ search: query.search })}`).then((dtos) =>
+      dtos.map((dto) => ({
+        fileId: toId(dto.fileId as number),
+        fileBarcode: str(dto.fileBarcode),
+        fileNumber: str(dto.fileNumber) || undefined,
+        subject: str(dto.subject),
+        department: str(dto.department) || undefined,
+        status: str(dto.status) || undefined,
+        pagesTotal: num(dto.pagesTotal),
+        pagesApproved: num(dto.pagesApproved),
+        pagesPending: num(dto.pagesPending),
+        pagesRejected: num(dto.pagesRejected),
+        deliverables: num(dto.deliverables),
+        deliverablesPending: num(dto.deliverablesPending),
+        lastActivityAt: str(dto.lastActivityAt) || null,
+      })),
+    );
+  },
   // -------------------------------------------------- scan studio (§3.4)
   async reorder(fileId, scanIds) {
     const result = await attempt<Dto[]>(
@@ -1248,9 +1351,31 @@ export const httpDepartmentsService: DepartmentsApi = {
 
 // ------------------------------------------------------------ feature config
 
+/** One `FeatureSettings` row as `GET`/`PUT /api/config/features` returns it. */
+interface FeatureRow {
+  key: string;
+  enabled: boolean;
+}
+
+/**
+ * Rows to the contract's fixed four-group shape. The PUT answer already carries
+ * every row, so the switchboard reads its result from the write itself instead
+ * of re-asking `/api/config` — a second round trip made the optimistic switch
+ * flip back whenever that read raced or failed.
+ */
+function fromFeatureRows(rows: FeatureRow[] | null): Features {
+  const enabled = new Map((rows ?? []).map((row) => [row.key, row.enabled]));
+  return {
+    barcode: enabled.get('barcode') === true,
+    recordRoom: enabled.get('recordRoom') === true,
+    maps: enabled.get('maps') === true,
+    support: enabled.get('support') === true,
+  };
+}
+
 export const httpConfigService: ConfigApi = {
   async features() {
-    const body = await get<{ features: Record<string, unknown> }>('/api/config');
+    const body = await getPlain<{ features?: Record<string, unknown> }>('/api/config');
     return {
       barcode: body.features?.barcode === true,
       recordRoom: body.features?.recordRoom === true,
@@ -1260,10 +1385,9 @@ export const httpConfigService: ConfigApi = {
   },
 
   async updateFeatures(patch) {
-    const result = await attempt<unknown>('PUT', '/api/config/features', {
+    const result = await attempt<FeatureRow[] | null>('PUT', '/api/config/features', {
       features: patch,
     });
-    if (!result.ok) return result;
-    return ok(await this.features());
+    return result.ok ? ok(fromFeatureRows(result.value)) : result;
   },
 };

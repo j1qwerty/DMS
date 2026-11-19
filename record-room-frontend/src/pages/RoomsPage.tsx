@@ -55,7 +55,7 @@ export function RoomsPage() {
     <div className="space-y-5">
       <PageHeader
         title="Record rooms"
-        description="Every room in the registry. Add a room here, then set up its sections, almirahs and shelves in Room layout."
+        description="Every room in the registry."
         actions={
           <>
             {allowed('locations.view') && (

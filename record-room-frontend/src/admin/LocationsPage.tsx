@@ -128,9 +128,8 @@ export function LocationsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        kicker="Physical configuration"
         title="Location designer"
-        description="Room → section → almirah → shelf. Every change is saved as you make it; the button in Layout history records who changed what and why."
+        description="Room → section → almirah → shelf, saved as you edit."
       />
 
       <div className="grid gap-5 xl:grid-cols-[300px_1fr]">

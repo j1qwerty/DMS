@@ -1,10 +1,9 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { Gear, List, MagnifyingGlass, Moon, SignOut, Sun } from '@phosphor-icons/react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { useSession } from '../hooks/useService';
+import { useEffect, useState } from 'react';
+import { ArrowLeft, List, MagnifyingGlass, Moon, Sun } from '@phosphor-icons/react';
+import { Link } from 'react-router-dom';
 import { BrandMark } from './Sidebar';
 import { CommandPalette } from '../components/CommandPalette';
-import { useFeatures } from '../lib/features';
+import { useBackTarget } from '../hooks/useBackTarget';
 import { APP_SHORT } from '../lib/brand';
 import { apiBase, dataSource } from '../services';
 
@@ -73,6 +72,12 @@ function DataSourceBadge() {
   );
 }
 
+/**
+ * The top bar (round 5): one back button that works everywhere (pages no
+ * longer carry their own), the command palette always reachable from every
+ * page, and the data-source + theme controls. The signed-in user lives in the
+ * sidebar footer.
+ */
 export function Topbar({
   dark,
   setDark,
@@ -82,20 +87,11 @@ export function Topbar({
   setDark: (value: boolean) => void;
   onMenu: () => void;
 }) {
-  const navigate = useNavigate();
-  const path = useLocation().pathname;
-  const hideSearch = path === '/files';
-  const { user, signOut } = useSession();
-  const features = useFeatures();
-  const [term, setTerm] = useState('');
-  const [menuOpen, setMenuOpen] = useState(false);
+  const { back, goBack } = useBackTarget();
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
 
-  // "/" and Ctrl/Cmd+K open the command palette (E8) from anywhere that is not
-  // already a text field. On /files the topbar search box is hidden, so the
-  // palette is the only search surface this shortcut reaches there.
+  // "/" and Ctrl/Cmd+K open the command palette (E8) from anywhere that is
+  // not already a text field.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
@@ -114,22 +110,6 @@ export function Topbar({
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  useEffect(() => {
-    if (!menuOpen) return;
-    const close = (event: MouseEvent) => {
-      if (!menuRef.current?.contains(event.target as Node)) setMenuOpen(false);
-    };
-    document.addEventListener('mousedown', close);
-    return () => document.removeEventListener('mousedown', close);
-  }, [menuOpen]);
-
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
-    const value = term.trim();
-    navigate(value ? `/files?q=${encodeURIComponent(value)}` : '/files');
-    inputRef.current?.blur();
-  };
-
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center gap-2 border-b border-base bg-[color-mix(in_srgb,var(--rr-surface)_92%,transparent)] px-3 backdrop-blur-xl sm:gap-3 md:px-6">
       <button
@@ -146,35 +126,32 @@ export function Topbar({
         </span>
       </Link>
 
-      <form
-        onSubmit={submit}
-        role="search"
-        className={`relative ml-auto min-w-0 flex-1 md:max-w-xl lg:ml-0 ${hideSearch ? 'hidden' : ''}`}
-      >
-        <MagnifyingGlass
-          size={18}
-          className="muted pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2"
-        />
-        <input
-          ref={inputRef}
-          value={term}
-          onChange={(event) => setTerm(event.target.value)}
-          type="search"
-          enterKeyHint="search"
-          aria-label="Search records"
-          placeholder={
-            features.barcode
-              ? 'Find a document by file number, barcode or subject'
-              : 'Find a document by file number or subject'
-          }
-          className="focus-ring h-11 w-full rounded-lg border border-base bg-[var(--rr-bg)] pl-10 pr-10 text-base outline-none placeholder:text-[var(--rr-muted)] sm:text-sm"
-        />
-        <kbd className="muted pointer-events-none absolute right-3 top-1/2 hidden -translate-y-1/2 rounded border border-base px-1.5 text-[11px] md:block">
-          /
-        </kbd>
-      </form>
+      {back && (
+        <button
+          type="button"
+          onClick={goBack}
+          className="focus-ring grid size-11 shrink-0 place-items-center rounded-lg border border-base bg-[var(--rr-surface)] hover:bg-[var(--rr-surface-2)]"
+          aria-label="Go back"
+        >
+          <ArrowLeft size={19} />
+        </button>
+      )}
 
-      <div className="ml-auto flex items-center gap-1">
+      {/* The command palette entry point, on every page (round 5). */}
+      <button
+        type="button"
+        onClick={() => setPaletteOpen(true)}
+        aria-label="Open search and commands"
+        className="focus-ring flex h-11 min-w-0 flex-1 items-center gap-2.5 rounded-lg border border-base bg-[var(--rr-bg)] pl-3.5 pr-3 text-left md:max-w-xl"
+      >
+        <MagnifyingGlass size={17} className="muted shrink-0" />
+        <span className="muted min-w-0 flex-1 truncate text-sm">Search or jump to…</span>
+        <kbd className="muted hidden shrink-0 rounded border border-base px-1.5 text-[11px] sm:inline">
+          Ctrl K
+        </kbd>
+      </button>
+
+      <div className="ml-auto flex shrink-0 items-center gap-1">
         <DataSourceBadge />
         <button
           onClick={() => setDark(!dark)}
@@ -183,52 +160,6 @@ export function Topbar({
         >
           {dark ? <Sun size={19} /> : <Moon size={19} />}
         </button>
-
-        <div ref={menuRef} className="relative">
-          <button
-            onClick={() => setMenuOpen((open) => !open)}
-            className="focus-ring flex items-center gap-2 rounded-lg p-1.5 hover:bg-[var(--rr-surface-2)]"
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
-            aria-label="Account menu"
-          >
-            <span className="grid size-8 place-items-center rounded-full bg-[var(--rr-accent-fill)] text-sm font-bold text-white">
-              {(user?.displayName ?? '?').slice(0, 1).toUpperCase()}
-            </span>
-            <span className="hidden text-left leading-tight md:block">
-              <span className="block text-[13px] font-semibold">{user?.displayName}</span>
-              <span className="muted block text-xs">{user?.role}</span>
-            </span>
-          </button>
-          {menuOpen && (
-            <div
-              role="menu"
-              className="surface animate-fade absolute right-0 top-[calc(100%+6px)] z-40 w-60 rounded-xl p-1.5"
-            >
-              <div className="border-b border-base px-3 pb-2.5 pt-2">
-                <p className="text-sm font-semibold">{user?.displayName}</p>
-                <p className="muted text-xs">
-                  {user?.role} · {user?.userName}
-                </p>
-              </div>
-              <Link
-                to="/settings"
-                role="menuitem"
-                onClick={() => setMenuOpen(false)}
-                className="focus-ring mt-1 flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm hover:bg-[var(--rr-surface-2)]"
-              >
-                <Gear size={17} /> Settings
-              </Link>
-              <button
-                role="menuitem"
-                onClick={signOut}
-                className="focus-ring flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-sm text-[var(--rr-danger)] hover:bg-[color-mix(in_srgb,var(--rr-danger)_10%,transparent)]"
-              >
-                <SignOut size={17} /> Sign out
-              </button>
-            </div>
-          )}
-        </div>
       </div>
 
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />

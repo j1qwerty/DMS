@@ -103,9 +103,8 @@ export function BulkImportPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        kicker="Administration"
         title="Bulk import"
-        description="Validate a staged batch against the registry before committing. Nothing is written until you confirm, and every refusal carries a reason."
+        description="Validate a staged batch before committing; nothing is written until you confirm."
       />
 
       <div className="grid gap-5 xl:grid-cols-[.9fr_1.1fr]">

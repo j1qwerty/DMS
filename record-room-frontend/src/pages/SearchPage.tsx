@@ -60,9 +60,8 @@ export function SearchPage() {
         Search covers the registry metadata and the OCR text of digitized documents.
       </p>
       <PageHeader
-        kicker="Search & locate"
         title="Find the record, then follow its physical path."
-        description="Structured metadata search first. Semantic and AI-assisted retrieval can be layered on later without changing the physical location model."
+        description="Search the registry by metadata."
         actions={
           <Button
             variant={ai ? 'primary' : 'ghost'}

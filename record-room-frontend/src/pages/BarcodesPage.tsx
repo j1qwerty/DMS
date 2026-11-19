@@ -106,9 +106,8 @@ export function BarcodesPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        kicker="Barcode center"
         title="Generate, print and validate labels"
-        description="Code 128 is the default machine-readable format. The human-readable identifier is always printed next to the symbol."
+        description="Print Code 128 labels and QR stickers."
         actions={
           <Button icon={<Printer size={17} />} onClick={print} disabled={!payload}>
             Print label sheet

@@ -101,9 +101,8 @@ export function ReturnPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        kicker="Physical movement"
         title="Return desk"
-        description="Close all or part of a receipt. Each returned file goes back to Available, the shelf position is retained, and the movement log records the condition."
+        description="Close all or part of a receipt; returned files go back to Available."
       />
 
       <div className="grid gap-5 xl:grid-cols-[.8fr_1.2fr]">

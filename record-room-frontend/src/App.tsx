@@ -47,6 +47,9 @@ const ScanPage = lazy(() => import('./pages/ScanPage').then((m) => ({ default: m
 const DigitizationPage = lazy(() =>
   import('./pages/DigitizationPage').then((m) => ({ default: m.DigitizationPage })),
 );
+const ReviewPage = lazy(() =>
+  import('./pages/ReviewPage').then((m) => ({ default: m.ReviewPage })),
+);
 const ReportsPage = lazy(() =>
   import('./pages/ReportsPage').then((m) => ({ default: m.ReportsPage })),
 );
@@ -153,6 +156,7 @@ export function App() {
             <Route path="/files/:fileId" element={<FileDetailPage />} />
             <Route path="/files/:fileId/details" element={<FileDetailPage />} />
             <Route path="/files/:fileId/scan" element={<FileDetailPage />} />
+            <Route path="/files/:fileId/ocr" element={<FileDetailPage />} />
             <Route path="/files/:fileId/studio" element={guarded(FileDetailPage, 'studio.use')} />
             <Route path="/files/:fileId/map" element={<FileDetailPage />} />
             <Route
@@ -183,6 +187,8 @@ export function App() {
             <Route path="/digitization" element={<DigitizationPage />} />
             {/* The register moved under Digitization as a tab; old links follow. */}
             <Route path="/custody" element={<Navigate to="/digitization?tab=custody" replace />} />
+            {/* Round 5: the scan review queue is its own Review section. */}
+            <Route path="/review" element={<ReviewPage />} />
             <Route path="/reports" element={<ReportsPage />} />
             <Route
               path="/support"

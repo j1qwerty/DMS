@@ -1,57 +1,55 @@
-import { useEffect, useState, type ReactNode } from 'react';
-import {
-  CheckCircle,
-  Eye,
-  FilePdf,
-  MagnifyingGlass,
-  PencilSimple,
-  Plus,
-  Scan,
-  WarningCircle,
-  XCircle,
-} from '@phosphor-icons/react';
+import { useEffect, useState } from 'react';
+import { ArrowRight, MagnifyingGlass, Plus, Scan, Stack } from '@phosphor-icons/react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
 import { Modal } from '../components/ui/Modal';
-import { Field, TextArea, TextInput } from '../components/ui/Field';
+import { TextInput } from '../components/ui/Field';
 import { EmptyState } from '../components/ui/EmptyState';
 import { RowSkeleton } from '../components/ui/Skeletons';
-import { DocumentViewer } from '../components/files/DocumentViewer';
-import { useFlash, useQuery, useService, useSession } from '../hooks/useService';
-import type { DocumentDerivative, FileScan, RecordFile } from '../types';
+import { StatusBadge } from '../components/ui/Flash';
+import { useQuery, useService, useSession } from '../hooks/useService';
+import type { AuditEntry, CustodyEvent, DocumentDerivative, RecordFile } from '../types';
+import type { FileDigitizationProgress, Page } from '../services/contracts';
 import { CustodyRegister } from './CustodyPage';
 
+const EMPTY_PROGRESS: FileDigitizationProgress[] = [];
+const EMPTY_CUSTODY: Page<CustodyEvent> = { items: [], total: 0, page: 1, pageSize: 200 };
+const EMPTY_AUDIT: AuditEntry[] = [];
+
 /**
- * The Digitization section, one page in tabs (round 3): the pending-review
- * queue and the custody register are the two halves of the scan pipeline, so
- * they sit behind one menu entry. The tab lives in the URL (?tab=custody), so
- * a link can open either half directly.
+ * The Digitization section (round 5): the operator's home. The worklist tab
+ * tracks every file on the desk — pages scanned, reviewed, rejected, builds
+ * pending — and the batches tab is the custody register (the intake and return
+ * handovers the departments' physical files travel in). Scanning itself
+ * happens in the studio, one file at a time, opened from either tab.
  *
- * Round 4: no page header — the tabs are the top element — and the queue rows
- * preview their scan. "New digitization…" is the workbench entry: pick a
- * registered file or register a new one, then scan, compose and build the PDF
- * in the studio.
+ * The pending-review queue that used to live here is its own Review section.
  */
 export function DigitizationPage() {
   const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
   const { allowed } = useSession();
   const rawTab = params.get('tab');
-  const tab: 'queue' | 'custody' | 'studio' =
-    rawTab === 'custody' ? 'custody' : rawTab === 'studio' ? 'studio' : 'queue';
-  const [workbench, setWorkbench] = useState(false);
+  const tab: 'worklist' | 'custody' = rawTab === 'custody' ? 'custody' : 'worklist';
+  const [workbench, setWorkbench] = useState(rawTab === 'studio');
 
-  const setTab = (next: 'queue' | 'custody' | 'studio') => {
+  // Old links: the queue tab became the Review section; the studio tab opened
+  // the same picker the button opens.
+  useEffect(() => {
+    if (rawTab === 'queue') navigate('/review', { replace: true });
+  }, [rawTab, navigate]);
+
+  const setTab = (next: 'worklist' | 'custody') => {
     const search = new URLSearchParams(params);
-    if (next === 'custody' || next === 'studio') search.set('tab', next);
+    if (next === 'custody') search.set('tab', next);
     else search.delete('tab');
     setParams(search, { replace: true });
   };
 
   return (
-    <div className="space-y-7">
+    <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div
           role="tablist"
@@ -60,9 +58,8 @@ export function DigitizationPage() {
         >
           {(
             [
-              ['queue', 'Scan review queue'],
-              ['custody', 'Custody register'],
-              ...(allowed('studio.use') ? ([['studio', 'Edit in studio']] as const) : []),
+              ['worklist', 'Worklist'],
+              ['custody', 'Batches'],
             ] as const
           ).map(([key, label]) => (
             <button
@@ -70,13 +67,7 @@ export function DigitizationPage() {
               type="button"
               role="tab"
               aria-selected={tab === key}
-              onClick={() => {
-                setTab(key);
-                // The studio tab is the operator entry to the workbench: it
-                // opens the "new digitization" picker, whose "Open studio"
-                // leads into the scan studio (scan pages, reorder, build PDF).
-                if (key === 'studio') setWorkbench(true);
-              }}
+              onClick={() => setTab(key)}
               className={`focus-ring min-h-10 flex-1 rounded-lg px-4 text-sm font-semibold transition sm:flex-none ${
                 tab === key
                   ? 'bg-[var(--rr-accent-fill)] text-white'
@@ -99,13 +90,17 @@ export function DigitizationPage() {
         )}
       </div>
 
-      {tab === 'queue' ? <ScanReviewQueue /> : tab === 'custody' ? <CustodyRegister /> : null}
+      {tab === 'worklist' ? (
+        <Worklist onOpenStudio={() => setWorkbench(true)} />
+      ) : (
+        <CustodyRegister />
+      )}
 
       <Modal
         open={workbench}
         onClose={() => setWorkbench(false)}
         title="New digitization"
-        description="Pick the registered file to digitize, or register a new one — the studio opens next, where you scan or upload the pages, compose them and build the deliverable PDF."
+        description="Pick the file to digitize — the studio opens next."
       >
         <WorkbenchPicker
           onOpenFile={(fileId) => {
@@ -183,7 +178,7 @@ function WorkbenchPicker({ onOpenFile }: { onOpenFile: (fileId: string) => void 
                 icon={<Scan size={15} />}
                 onClick={() => onOpenFile(file.id)}
               >
-                Edit in studio
+                Open studio
               </Button>
             </li>
           ))}
@@ -200,496 +195,253 @@ function WorkbenchPicker({ onOpenFile }: { onOpenFile: (fileId: string) => void 
   );
 }
 
-/**
- * File-centric digitization (2026-10-28 decision): the Digitization section is
- * the pending-review queue across files. Pages are added from the file page or
- * the studio; here a supervisor reviews them — approve, or reject with a reason.
- */
-function ScanReviewQueue() {
-  const service = useService();
-  const navigate = useNavigate();
-  const { allowed } = useSession();
-
-  const [search, setSearch] = useState('');
-  const [subQueue, setSubQueue] = useState<'deliverables' | 'pages'>('deliverables');
-  const [busyId, setBusyId] = useState('');
-  const [rejectingScan, setRejectingScan] = useState<FileScan | null>(null);
-  const [previewingScan, setPreviewingScan] = useState<FileScan | null>(null);
-  const [rejectingPdf, setRejectingPdf] = useState<DocumentDerivative | null>(null);
-  const [previewingPdf, setPreviewingPdf] = useState<DocumentDerivative | null>(null);
-  const { success, danger } = useFlash();
-
-  const {
-    data: queue,
-    loading: loadingPages,
-    reload: reloadPages,
-  } = useQuery(() => service.digitization.pending({ search }), [search], [] as FileScan[], [
-    'digitization',
-  ]);
-
-  const {
-    data: pendingPdfs,
-    loading: loadingPdfs,
-    reload: reloadPdfs,
-  } = useQuery(
-    () => service.digitization.pendingPdfs({ search }),
-    [search],
-    [] as DocumentDerivative[],
-    ['digitization'],
-  );
-
-  const reloadAll = () => {
-    reloadPages();
-    reloadPdfs();
-  };
-
-  const reviewScan = async (scan: FileScan, decision: 'Approved' | 'Rejected', note = '') => {
-    setBusyId(scan.id);
-    try {
-      const result = await service.digitization.review(scan.id, decision, note);
-      if (!result.ok) {
-        danger(result.error);
-        return;
-      }
-      success(`${scan.filename} ${decision.toLowerCase()}.`);
-      reloadAll();
-    } finally {
-      setBusyId('');
-    }
-  };
-
-  const reviewPdf = async (
-    pdf: DocumentDerivative,
-    decision: 'Approved' | 'Rejected',
-    note = '',
-  ) => {
-    setBusyId(pdf.id);
-    try {
-      const result = await service.digitization.reviewPdf(pdf.id, decision, note, pdf.fileId);
-      if (!result.ok) {
-        danger(result.error);
-        return;
-      }
-      success(`${pdf.filename} ${decision.toLowerCase()}.`);
-      reloadAll();
-    } finally {
-      setBusyId('');
-    }
-  };
-
+/** One compact figure; the strip answers "what is on my desk" at a glance. */
+function StatFigure({ value, label }: { value: string; label: string }) {
   return (
-    <div className="space-y-6">
-      <div className="grid gap-4 md:grid-cols-3">
-        <Metric
-          icon={<FilePdf />}
-          label="Generated Documents"
-          value={String(pendingPdfs.length)}
-          tone={pendingPdfs.length > 0 ? 'warning' : 'neutral'}
-          hint="Compiled deliverable PDFs awaiting approval"
-        />
-        <Metric
-          icon={<Scan />}
-          label="Scan Pages"
-          value={String(queue.length)}
-          hint="Individual pages awaiting review"
-        />
-        <Metric
-          icon={<WarningCircle />}
-          label="Reviewer"
-          value={allowed('digitization.review') ? 'Supervisor+ only' : 'Read-only for you'}
-          tone="warning"
-          hint="Approve, or reject with a reason."
-        />
-      </div>
-
-      <Card padding={false} className="overflow-hidden">
-        <div className="border-b border-base p-4">
-          <TextInput
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="File barcode, file number or document name…"
-            aria-label="Search the review queue"
-          />
-        </div>
-
-        {/* Sub-Queue Selector: Generated Documents vs Scan Pages */}
-        <div className="flex flex-wrap items-center gap-2 border-b border-base bg-[var(--rr-surface)] px-4 py-2.5">
-          <button
-            type="button"
-            onClick={() => setSubQueue('deliverables')}
-            className={`focus-ring inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-              subQueue === 'deliverables'
-                ? 'bg-[var(--rr-accent-fill)] text-white'
-                : 'muted hover:bg-[var(--rr-surface-2)] hover:text-[var(--rr-text)]'
-            }`}
-          >
-            <FilePdf size={15} />
-            Generated Documents
-            {pendingPdfs.length > 0 && (
-              <span
-                className={`ml-1 rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
-                  subQueue === 'deliverables'
-                    ? 'bg-white text-[var(--rr-accent-fill)]'
-                    : 'bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200'
-                }`}
-              >
-                {pendingPdfs.length}
-              </span>
-            )}
-          </button>
-          <button
-            type="button"
-            onClick={() => setSubQueue('pages')}
-            className={`focus-ring inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-              subQueue === 'pages'
-                ? 'bg-[var(--rr-accent-fill)] text-white'
-                : 'muted hover:bg-[var(--rr-surface-2)] hover:text-[var(--rr-text)]'
-            }`}
-          >
-            <Scan size={15} />
-            Scan Pages
-            {queue.length > 0 && (
-              <span
-                className={`ml-1 rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
-                  subQueue === 'pages'
-                    ? 'bg-white text-[var(--rr-accent-fill)]'
-                    : 'bg-[var(--rr-surface-2)]'
-                }`}
-              >
-                {queue.length}
-              </span>
-            )}
-          </button>
-        </div>
-
-        {/* TAB A: Deliverable PDF Documents */}
-        {subQueue === 'deliverables' && (
-          <>
-            {loadingPdfs && pendingPdfs.length === 0 ? (
-              <RowSkeleton rows={4} />
-            ) : pendingPdfs.length === 0 ? (
-              <div className="p-6">
-                <EmptyState
-                  title="No generated documents awaiting review"
-                  description="When a deliverable PDF is built in the studio, it appears here for supervisor sign-off."
-                  action={
-                    <button
-                      type="button"
-                      onClick={() => setSubQueue('pages')}
-                      className="focus-ring text-xs font-semibold text-accent underline"
-                    >
-                      View scan pages queue ({queue.length})
-                    </button>
-                  }
-                />
-              </div>
-            ) : (
-              <ul className="divide-y divide-[var(--rr-border)]">
-                {pendingPdfs.map((pdf) => (
-                  <li key={pdf.id} className="p-5">
-                    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <FilePdf size={18} className="text-accent" />
-                          <p className="break-all font-semibold">{pdf.filename}</p>
-                          <Badge tone="warning">Pending approval</Badge>
-                        </div>
-                        <p className="muted mt-1 text-[11px]">
-                          File{' '}
-                          <Link
-                            to={`/files/${pdf.fileId}`}
-                            className="focus-ring font-mono font-semibold text-accent"
-                          >
-                            {pdf.fileNumber || pdf.fileBarcode}
-                          </Link>{' '}
-                          · {pdf.pageCount} page(s)
-                          {pdf.sizeBytes
-                            ? ` · ${Math.max(1, Math.round(pdf.sizeBytes / 1024))} KB`
-                            : ''}{' '}
-                          · Built {new Date(pdf.createdAt).toLocaleString()} by {pdf.createdBy}
-                        </p>
-                        {pdf.reviewNote && (
-                          <p className="mt-1.5 rounded-md bg-[var(--rr-bg)] p-2 text-[11px] text-[var(--rr-warning)]">
-                            Remarks: {pdf.reviewNote}
-                          </p>
-                        )}
-                      </div>
-                      <div className="flex shrink-0 flex-wrap items-center gap-2">
-                        <Button
-                          variant="ghost"
-                          icon={<Eye size={16} />}
-                          onClick={() => setPreviewingPdf(pdf)}
-                        >
-                          Preview
-                        </Button>
-                        <Button
-                          variant="secondary"
-                          icon={<PencilSimple size={15} />}
-                          onClick={() => navigate(`/files/${pdf.fileId}/studio`)}
-                          title="Open studio composition for this file"
-                        >
-                          Edit in studio
-                        </Button>
-                        {allowed('digitization.review') && (
-                          <>
-                            <Button
-                              icon={<CheckCircle size={16} />}
-                              disabled={busyId === pdf.id}
-                              onClick={() => void reviewPdf(pdf, 'Approved')}
-                            >
-                              Approve
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              icon={<XCircle size={16} />}
-                              disabled={busyId === pdf.id}
-                              onClick={() => setRejectingPdf(pdf)}
-                            >
-                              Reject…
-                            </Button>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </>
-        )}
-
-        {/* TAB B: Individual Scan Pages */}
-        {subQueue === 'pages' && (
-          <>
-            {loadingPages && queue.length === 0 ? (
-              <RowSkeleton rows={6} />
-            ) : queue.length === 0 ? (
-              <div className="p-6">
-                <EmptyState
-                  title="No scan pages awaiting review"
-                  description="Add page scans from a file page or the studio; they appear here for review."
-                  action={
-                    <button
-                      type="button"
-                      onClick={() => setSubQueue('deliverables')}
-                      className="focus-ring text-xs font-semibold text-accent underline"
-                    >
-                      View generated documents ({pendingPdfs.length})
-                    </button>
-                  }
-                />
-              </div>
-            ) : (
-              <ul className="divide-y divide-[var(--rr-border)]">
-                {queue.map((scan) => (
-                  <li key={scan.id} className="p-5">
-                    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                      <div className="min-w-0">
-                        <p className="break-all font-semibold">{scan.filename}</p>
-                        <p className="muted mt-1 text-[11px]">
-                          Page {scan.pageNo} · v{scan.version} · {scan.documentSize} · uploaded{' '}
-                          {scan.uploadedAt} by {scan.uploadedBy}
-                        </p>
-                        <p className="muted mt-1 text-[11px]">
-                          File{' '}
-                          <Link
-                            to={`/files/${scan.fileId}`}
-                            className="focus-ring font-mono text-accent"
-                          >
-                            {scan.fileNumber || scan.fileBarcode}
-                          </Link>{' '}
-                          · {scan.fileBarcode}
-                        </p>
-                        {scan.note && <p className="muted mt-1 text-[11px]">{scan.note}</p>}
-                      </div>
-                      <div className="flex shrink-0 flex-wrap gap-2">
-                        <Button
-                          variant="ghost"
-                          icon={<Eye size={16} />}
-                          disabled={!scan.hasDocument}
-                          onClick={() => setPreviewingScan(scan)}
-                        >
-                          Preview
-                        </Button>
-                        {allowed('digitization.review') && (
-                          <>
-                            <Button
-                              icon={<CheckCircle size={16} />}
-                              disabled={busyId === scan.id}
-                              onClick={() => void reviewScan(scan, 'Approved')}
-                            >
-                              Approve
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              icon={<XCircle size={16} />}
-                              disabled={busyId === scan.id}
-                              onClick={() => setRejectingScan(scan)}
-                            >
-                              Reject…
-                            </Button>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </>
-        )}
-      </Card>
-
-      {/* Preview Page Modal */}
-      <Modal
-        open={previewingScan !== null}
-        onClose={() => setPreviewingScan(null)}
-        title={`Scan preview — ${previewingScan?.filename ?? ''}`}
-        description={
-          previewingScan
-            ? `Page ${previewingScan.pageNo} · v${previewingScan.version} of ${previewingScan.fileBarcode}`
-            : undefined
-        }
-      >
-        {previewingScan && (
-          <DocumentViewer
-            docKey={previewingScan.id}
-            load={() => service.digitization.scanBlob(previewingScan.id)}
-            filename={previewingScan.filename}
-            contentType={previewingScan.contentType}
-            pageIndex={previewingScan.pageIndex}
-            fill
-          />
-        )}
-      </Modal>
-
-      {/* Preview Deliverable PDF Modal */}
-      <Modal
-        open={previewingPdf !== null}
-        onClose={() => setPreviewingPdf(null)}
-        title={`Deliverable preview — ${previewingPdf?.filename ?? ''}`}
-        description={
-          previewingPdf
-            ? `Built from ${previewingPdf.pageCount} page(s) · Status: ${previewingPdf.status}`
-            : undefined
-        }
-      >
-        {previewingPdf && (
-          <DocumentViewer
-            docKey={previewingPdf.id}
-            load={() => service.digitization.pdfBlob(previewingPdf.id, previewingPdf.fileId)}
-            filename={previewingPdf.filename}
-            contentType="application/pdf"
-            fill
-          />
-        )}
-      </Modal>
-
-      {/* Reject Page Modal */}
-      <Modal
-        open={rejectingScan !== null}
-        onClose={() => setRejectingScan(null)}
-        title={`Reject ${rejectingScan?.filename ?? ''}`}
-      >
-        {rejectingScan && (
-          <RejectForm
-            title="Reject page"
-            onSubmit={async (note) => {
-              await reviewScan(rejectingScan, 'Rejected', note);
-              setRejectingScan(null);
-            }}
-          />
-        )}
-      </Modal>
-
-      {/* Reject Deliverable PDF Modal */}
-      <Modal
-        open={rejectingPdf !== null}
-        onClose={() => setRejectingPdf(null)}
-        title={`Reject deliverable — ${rejectingPdf?.filename ?? ''}`}
-        description="The build stays in history with your rejection reason; the operator can fix composition in studio and rebuild."
-      >
-        {rejectingPdf && (
-          <RejectForm
-            title="Reject deliverable PDF"
-            placeholder="Wrong page order, missing signature on page 3…"
-            onSubmit={async (note) => {
-              await reviewPdf(rejectingPdf, 'Rejected', note);
-              setRejectingPdf(null);
-            }}
-          />
-        )}
-      </Modal>
+    <div className="min-w-0">
+      <p className="text-xl font-bold tabular-nums">{value}</p>
+      <p className="muted text-xs">{label}</p>
     </div>
   );
 }
 
-function Metric({
-  icon,
-  label,
-  value,
-  hint,
-  tone = 'neutral',
-}: {
-  icon: ReactNode;
-  label: string;
-  value: string;
-  hint?: string;
-  tone?: 'neutral' | 'warning';
-}) {
+/**
+ * The worklist: one row per file under digitization, with its progress. The
+ * numbers come from the service's `progress()` aggregation, so both adapters
+ * can answer it; pending counts double as the reviewer backlog.
+ */
+function Worklist({ onOpenStudio }: { onOpenStudio: () => void }) {
+  const service = useService();
+  const { allowed } = useSession();
+  const [search, setSearch] = useState('');
+
+  const { data: rows, loading } = useQuery(
+    () => service.digitization.progress({ search }),
+    [search],
+    EMPTY_PROGRESS,
+    ['digitization'],
+  );
+
+  const { data: pendingReviews } = useQuery(
+    () => service.digitization.pendingReviewCount(),
+    [],
+    0,
+    ['digitization'],
+  );
+
+  const { data: pendingPdfs } = useQuery(
+    () => service.digitization.pendingPdfs({}),
+    [],
+    [] as DocumentDerivative[],
+    ['digitization'],
+  );
+
+  const { data: custody } = useQuery(
+    () => service.custody.list({ direction: 'Intake', pageSize: 200 }),
+    [],
+    EMPTY_CUSTODY,
+    // Custody writes land on the digitization channel from every desk.
+    ['digitization'],
+  );
+
+  const { data: recent } = useQuery(
+    () => service.audit.list({ group: 'digitization', limit: 6 }),
+    [],
+    EMPTY_AUDIT,
+    ['audit'],
+  );
+
+  const openBatches = custody.items.filter((event) => !event.signedOffAt).length;
+  const totalPages = rows.reduce((sum, row) => sum + row.pagesTotal, 0);
+  const approvedPages = rows.reduce((sum, row) => sum + row.pagesApproved, 0);
+
   return (
-    <Card>
-      <div className="flex items-center gap-3">
-        <div
-          className={`rounded-lg p-2 ${tone === 'warning' ? 'text-[var(--rr-warning)]' : 'text-accent'}`}
-          style={
-            tone === 'warning'
-              ? { background: 'color-mix(in srgb, var(--rr-warning) 12%, transparent)' }
-              : undefined
-          }
-        >
-          {icon}
-        </div>
-        <div className="min-w-0">
-          <p className="muted text-[10px] uppercase tracking-wider">{label}</p>
-          <p className="mt-1 text-xl font-semibold">{value}</p>
-          {hint && <p className="muted mt-0.5 text-[10px]">{hint}</p>}
+    <div className="space-y-5">
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+        <Card>
+          <StatFigure value={String(rows.length)} label="Files on the desk" />
+        </Card>
+        <Card>
+          <StatFigure value={`${approvedPages}/${totalPages}`} label="Pages approved" />
+        </Card>
+        <Card>
+          <StatFigure value={String(pendingReviews)} label="Pages awaiting review" />
+        </Card>
+        <Card>
+          <StatFigure value={String(pendingPdfs.length)} label="Builds awaiting approval" />
+        </Card>
+      </div>
+
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <Card padding={false} className="overflow-hidden">
+          <div className="border-b border-base p-4">
+            <TextInput
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="File number, barcode, subject or department…"
+              aria-label="Search the worklist"
+            />
+          </div>
+
+          {loading && rows.length === 0 ? (
+            <div className="p-4">
+              <RowSkeleton rows={5} />
+            </div>
+          ) : rows.length === 0 ? (
+            <div className="p-6">
+              <EmptyState
+                title={search ? 'No file matches this search' : 'No files under digitization'}
+                description={
+                  search
+                    ? 'Try another term, or clear the search.'
+                    : 'Files appear here once a department sends a batch (Batches tab) or a page is scanned in the studio.'
+                }
+                action={
+                  !search &&
+                  allowed('studio.use') && (
+                    <Button size="sm" icon={<Scan size={15} />} onClick={onOpenStudio}>
+                      Start a digitization
+                    </Button>
+                  )
+                }
+              />
+            </div>
+          ) : (
+            <ul className="divide-y divide-[var(--rr-border)]">
+              {rows.map((row) => {
+                const approvedPct =
+                  row.pagesTotal > 0 ? Math.round((row.pagesApproved / row.pagesTotal) * 100) : 0;
+                return (
+                  <li key={row.fileId} className="p-4 sm:p-5">
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                      <div className="min-w-0 lg:w-72">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Link
+                            to={`/files/${row.fileId}`}
+                            className="focus-ring font-mono text-[13px] font-semibold text-accent"
+                          >
+                            {row.fileNumber || row.fileBarcode}
+                          </Link>
+                          <StatusBadge status={row.status ?? 'Available'} />
+                        </div>
+                        <p className="mt-0.5 truncate text-sm font-medium">{row.subject}</p>
+                        {row.department && (
+                          <p className="muted mt-0.5 truncate text-xs">{row.department}</p>
+                        )}
+                      </div>
+
+                      <div className="min-w-0 flex-1">
+                        {row.pagesTotal === 0 ? (
+                          <p className="muted text-xs">No pages scanned yet</p>
+                        ) : (
+                          <>
+                            <div className="flex items-center justify-between gap-3 text-xs">
+                              <span className="font-semibold">
+                                {row.pagesApproved}/{row.pagesTotal} pages approved
+                              </span>
+                              <span className="muted">
+                                {row.pagesPending} pending · {row.pagesRejected} rejected
+                              </span>
+                            </div>
+                            <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-[var(--rr-surface-2)]">
+                              <div
+                                className="h-full rounded-full bg-[var(--rr-accent)] transition-all"
+                                style={{ width: `${approvedPct}%` }}
+                              />
+                            </div>
+                          </>
+                        )}
+                        {row.deliverables > 0 && (
+                          <p className="mt-1.5 text-xs">
+                            <span className="font-semibold">{row.deliverables}</span>{' '}
+                            <span className="muted">deliverable build(s)</span>
+                            {row.deliverablesPending > 0 && (
+                              <Badge tone="warning">{row.deliverablesPending} pending</Badge>
+                            )}
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="flex shrink-0 flex-col items-start gap-1 lg:items-end">
+                        {row.lastActivityAt && (
+                          <span className="muted text-[11px]">
+                            {new Date(row.lastActivityAt).toLocaleString()}
+                          </span>
+                        )}
+                        <div className="flex gap-2">
+                          <Link
+                            to={`/files/${row.fileId}`}
+                            className="focus-ring inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-base px-3 text-xs font-semibold hover:bg-[var(--rr-surface-2)]"
+                          >
+                            View
+                          </Link>
+                          {allowed('studio.use') && (
+                            <Link
+                              to={`/files/${row.fileId}/studio`}
+                              className="focus-ring inline-flex min-h-9 items-center gap-1.5 rounded-lg bg-[var(--rr-accent-fill)] px-3 text-xs font-semibold text-white hover:opacity-90"
+                            >
+                              <Scan size={14} /> Open studio
+                            </Link>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </Card>
+
+        <div className="space-y-5">
+          <Card>
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-semibold">Open batches</p>
+              <Link
+                to="/digitization?tab=custody"
+                className="focus-ring inline-flex items-center gap-1 text-xs font-semibold text-accent"
+              >
+                Batches <ArrowRight size={12} />
+              </Link>
+            </div>
+            <p className="mt-3 text-2xl font-bold tabular-nums">{openBatches}</p>
+            <p className="muted text-xs">intake batches still out with digitization</p>
+          </Card>
+
+          <Card padding={false} className="overflow-hidden">
+            <div className="border-b border-base p-4">
+              <p className="text-sm font-semibold">Recent activity</p>
+            </div>
+            {recent.length === 0 ? (
+              <p className="muted p-4 text-xs">No digitization activity recorded yet.</p>
+            ) : (
+              <ul className="divide-y divide-[var(--rr-border)]">
+                {recent.map((entry) => (
+                  <li key={entry.id} className="px-4 py-3">
+                    <p className="text-xs font-medium leading-5">{entry.summary}</p>
+                    <p className="muted mt-0.5 text-[11px]">
+                      {entry.actor} · {new Date(entry.at).toLocaleString()}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+
+          <Card>
+            <div className="flex items-center gap-2">
+              <Stack size={18} className="text-accent" />
+              <p className="text-sm font-semibold">How the desk works</p>
+            </div>
+            <ol className="muted mt-3 space-y-2 text-xs leading-5">
+              <li>1. Record the department's intake under Batches and count the files.</li>
+              <li>2. Open a file in the studio, scan or upload its pages, fill the metadata.</li>
+              <li>3. Build the deliverable PDF; it waits for approval in Review.</li>
+              <li>4. Return the batch when the department takes its files back.</li>
+            </ol>
+          </Card>
         </div>
       </div>
-    </Card>
-  );
-}
-
-function RejectForm({
-  onSubmit,
-  title = 'Reject',
-  placeholder = 'Skew beyond tolerance, missing half the page…',
-}: {
-  onSubmit: (note: string) => void;
-  title?: string;
-  placeholder?: string;
-}) {
-  const [note, setNote] = useState('');
-
-  return (
-    <form
-      className="space-y-4"
-      onSubmit={(event) => {
-        event.preventDefault();
-        onSubmit(note);
-      }}
-    >
-      <Field label="Rejection reason" htmlFor="reject-note" required>
-        <TextArea
-          id="reject-note"
-          value={note}
-          onChange={(event) => setNote(event.target.value)}
-          placeholder={placeholder}
-        />
-      </Field>
-      <Button type="submit" disabled={!note.trim()}>
-        {title}
-      </Button>
-    </form>
+    </div>
   );
 }

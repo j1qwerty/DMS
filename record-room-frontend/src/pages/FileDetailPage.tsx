@@ -8,7 +8,7 @@ import {
   useSearchParams,
 } from 'react-router-dom';
 import {
-  ArrowLeft,
+  ArrowsDownUp,
   ArrowsLeftRight,
   CheckCircle,
   ClockCounterClockwise,
@@ -19,6 +19,7 @@ import {
   MapTrifold,
   PencilSimple,
   Printer,
+  TextAa as TextAaIcon,
   Trash,
   UploadSimple,
   UserCircle,
@@ -32,6 +33,8 @@ import { StatusBadge } from '../components/ui/Flash';
 import { BarcodeSymbol } from '../components/BarcodeSymbol';
 import { ShelfView } from '../components/ShelfView';
 import { DocumentViewer } from '../components/files/DocumentViewer';
+import { OcrPanel } from '../components/files/OcrPanel';
+import { CompressModal } from '../components/files/CompressModal';
 import {
   MoveFileModal,
   UploadFileModal,
@@ -54,7 +57,7 @@ import type {
   RecordFileDocument,
   Room,
 } from '../types';
-import type { Page } from '../services/contracts';
+import type { CompressionTarget, Page } from '../services/contracts';
 
 const EMPTY_ROOMS: Room[] = [];
 const EMPTY_MOVEMENTS: MovementEvent[] = [];
@@ -63,7 +66,7 @@ const EMPTY_MAPS: MapUpload[] = [];
 const EMPTY_ISSUE_PAGE: Page<IssueRecord> = { items: [], total: 0, page: 1, pageSize: 500 };
 
 type Dialog = 'upload' | 'mapUpload' | 'move' | null;
-type TabKey = 'scan' | 'details' | 'studio' | 'map';
+type TabKey = 'scan' | 'details' | 'ocr' | 'studio' | 'map';
 
 export function FileDetailPage() {
   const { fileId = '' } = useParams();
@@ -81,11 +84,14 @@ export function FileDetailPage() {
       ? 'map'
       : pathname.endsWith('/details')
         ? 'details'
-        : 'scan';
+        : pathname.endsWith('/ocr')
+          ? 'ocr'
+          : 'scan';
 
   const canEdit = allowed('files.edit');
   const canStudio = allowed('studio.use');
   const canUploadMap = canEdit || allowed('digitization.upload');
+  const canCompress = allowed('digitization.upload');
   const canDeleteScan = user?.role === 'Admin';
 
   const [dialog, setDialog] = useState<Dialog>(null);
@@ -94,6 +100,7 @@ export function FileDetailPage() {
   const [reason, setReason] = useState('');
   const [eOfficeDraft, setEOfficeDraft] = useState<string | null>(null);
   const [savingEOffice, setSavingEOffice] = useState(false);
+  const [compressing, setCompressing] = useState<CompressionTarget | null>(null);
 
   const {
     data: file,
@@ -113,6 +120,13 @@ export function FileDetailPage() {
     () => (fileId ? service.digitization.listPdfs(fileId) : Promise.resolve([])),
     [fileId],
     [] as DocumentDerivative[],
+  );
+
+  const { data: scanPages } = useQuery(
+    () => (fileId ? service.digitization.list(fileId) : Promise.resolve([])),
+    [fileId],
+    [] as Awaited<ReturnType<typeof service.digitization.list>>,
+    ['digitization'],
   );
 
   const fileBarcode = file?.fileBarcode ?? '';
@@ -315,16 +329,10 @@ export function FileDetailPage() {
 
   return (
     <div className="space-y-5">
-      {/* Identity Bar */}
+      {/* Identity Bar — back lives on the top bar (round 5). */}
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div className="min-w-0">
-          <Link
-            to="/files"
-            className="focus-ring muted inline-flex min-h-9 items-center gap-1.5 rounded-lg text-[13px] font-semibold hover:text-[var(--rr-text)]"
-          >
-            <ArrowLeft size={15} /> Documents
-          </Link>
-          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <h1 className="mono text-xl font-bold tracking-tight md:text-2xl">{file.fileNumber}</h1>
             <StatusBadge status={file.status} />
           </div>
@@ -364,12 +372,13 @@ export function FileDetailPage() {
       <div className="no-scrollbar flex gap-1 overflow-x-auto border-b border-base">
         {tabLink(
           `/files/${file.id}/scan`,
-          'Document Preview',
+          'Document',
           docs.length + deliverables.length,
           FileText,
           tab === 'scan',
         )}
         {tabLink(`/files/${file.id}/details`, 'Details', undefined, InfoIcon, tab === 'details')}
+        {tabLink(`/files/${file.id}/ocr`, 'OCR', scanPages.length, TextAaIcon, tab === 'ocr')}
         {canStudio &&
           tabLink(
             `/files/${file.id}/studio`,
@@ -559,6 +568,14 @@ export function FileDetailPage() {
                                 ? ` · ${describePageCount(version.pageCount)}`
                                 : ''}
                             </p>
+                            {version.rawDeriv?.compressedFrom && (
+                              <p className="mt-0.5 text-[11px] text-accent">
+                                Compressed copy of {version.rawDeriv.compressedFrom}
+                                {version.rawDeriv.savedPercent !== undefined
+                                  ? ` · −${version.rawDeriv.savedPercent}%`
+                                  : ''}
+                              </p>
+                            )}
                             {version.reviewNote && (
                               <p className="mt-1 text-[11px] text-[var(--rr-warning)]">
                                 Note: {version.reviewNote}
@@ -566,6 +583,23 @@ export function FileDetailPage() {
                             )}
                           </button>
                           <div className="flex items-center gap-1">
+                            {canCompress && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setCompressing({
+                                    fileId: file.id,
+                                    source: version.source,
+                                    id: version.id,
+                                  })
+                                }
+                                className="focus-ring rounded p-1 text-[var(--rr-muted)] hover:text-accent"
+                                title="Compress a copy of this version"
+                                aria-label="Compress a copy of this version"
+                              >
+                                <ArrowsDownUp size={14} />
+                              </button>
+                            )}
                             {canStudio && (
                               <Button
                                 size="sm"
@@ -864,14 +898,17 @@ export function FileDetailPage() {
         </div>
       )}
 
-      {/* TAB 3: Edit in studio */}
+      {/* TAB 3: OCR text of the scanned pages */}
+      {tab === 'ocr' && <OcrPanel fileId={file.id} />}
+
+      {/* TAB 4: Edit in studio */}
       {tab === 'studio' && (
         <div>
-          <ScanStudioPage embedded />
+          <ScanStudioPage />
         </div>
       )}
 
-      {/* TAB 4: Map (Large format / A0 optimized) */}
+      {/* TAB 5: Map (Large format / A0 optimized) */}
       {tab === 'map' && (
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
           {/* Main Map Viewer */}
@@ -998,6 +1035,19 @@ export function FileDetailPage() {
           file={file}
           onClose={() => setDialog(null)}
           onDone={(msg) => doneAction(msg)}
+        />
+      )}
+      {compressing && (
+        <CompressModal
+          target={compressing}
+          filename={
+            allVersions.find((version) => version.id === compressing.id)?.filename ?? 'document.pdf'
+          }
+          onClose={() => setCompressing(null)}
+          onDone={() => {
+            reloadDeliverables();
+            reloadDocs();
+          }}
         />
       )}
     </div>

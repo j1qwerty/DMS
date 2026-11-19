@@ -1,14 +1,7 @@
 import { useFeatures } from '../lib/features';
 import { useState } from 'react';
-import {
-  ArrowLeft,
-  Buildings,
-  CheckCircle,
-  Cube,
-  MagnifyingGlass,
-  Stack,
-} from '@phosphor-icons/react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Buildings, CheckCircle, Cube, MagnifyingGlass, Stack } from '@phosphor-icons/react';
+import { useParams } from 'react-router-dom';
 import { RoomMap } from '../components/RoomMap';
 import { ShelfView } from '../components/ShelfView';
 import { Card } from '../components/ui/Card';
@@ -27,7 +20,6 @@ const EMPTY_PAGE: Page<RecordFile> = { items: [], total: 0, page: 1, pageSize: 2
 export function RoomDetailPage() {
   const { barcode } = useFeatures();
   const { roomId = '' } = useParams();
-  const navigate = useNavigate();
   const service = useService();
   const [sectionId, setSectionId] = useState('');
   const [unitId, setUnitId] = useState('');
@@ -71,15 +63,7 @@ export function RoomDetailPage() {
 
   return (
     <div className="space-y-7">
-      <button
-        onClick={() => navigate('/rooms')}
-        className="focus-ring inline-flex items-center gap-2 text-xs font-semibold muted hover:text-[var(--rr-text)]"
-      >
-        <ArrowLeft size={15} /> All rooms
-      </button>
-
       <PageHeader
-        kicker={`${room.code} · ${room.building} · ${room.floor}`}
         title={room.name}
         description="Room → section → almirah → shelf. Select a section, then an almirah, to see shelf-level occupancy."
         actions={

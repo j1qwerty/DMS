@@ -101,7 +101,7 @@ const DEFAULT_QUERY: FileQuery = {
 export function FilesPage() {
   const service = useService();
   const { allowed } = useSession();
-  const { success, danger } = useFlash();
+  const { success } = useFlash();
   const { barcode } = useFeatures();
 
   // Dashboard shortcuts link here with ?status=Missing or ?q=...
@@ -826,6 +826,7 @@ export function FilesPage() {
 
       {dialogs}
       <EOfficeModal
+        key={editingEOfficeFile?.id ?? 'none'}
         file={editingEOfficeFile}
         onClose={() => setEditingEOfficeFile(null)}
         onSaved={reload}
@@ -855,15 +856,12 @@ function EOfficeModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [draft, setDraft] = useState('');
+  // The call site keys this modal by file id, so the state initializer runs
+  // per file and no syncing effect is needed.
+  const [draft, setDraft] = useState(file?.eOfficeReference ?? '');
   const [saving, setSaving] = useState(false);
-  const { success, danger } = useToast();
-
-  useEffect(() => {
-    if (file) {
-      setDraft(file.eOfficeReference ?? '');
-    }
-  }, [file]);
+  const service = useService();
+  const { success, danger } = useFlash();
 
   if (!file) return null;
 

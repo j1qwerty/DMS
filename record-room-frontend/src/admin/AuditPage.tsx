@@ -142,9 +142,8 @@ export function AuditPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        kicker="Administration"
         title="Audit trail"
-        description="Every change is written in the same transaction as the change itself, so the trail cannot drift from the data it describes. Grouped by what the work touches; the file-view tab answers to its own permission."
+        description="Every change, recorded in the same transaction as the change itself."
         actions={
           <Button
             variant="ghost"

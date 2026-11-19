@@ -199,7 +199,7 @@ export function CustodyRegister() {
     <div className="space-y-6">
       <SectionHeader
         title="Custody register"
-        description="What each department handed over and what was actually counted, plus the return handover sign-off. Rows are never edited — a correction is a new row."
+        description="Intake and return handovers — what was declared, counted and signed off."
         action={
           mayWrite ? (
             <Button icon={<Plus size={17} />} onClick={() => setRecording(true)}>

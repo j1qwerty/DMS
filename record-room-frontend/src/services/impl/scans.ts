@@ -10,7 +10,7 @@
  * `Duplicate`.
  */
 
-import { err, ok, type ScanApi } from '../contracts';
+import { err, ok, type ScanApi, type CompressionTarget } from '../contracts';
 import { newId, store, timestamp } from '../store';
 import type { FileScan } from '../../types';
 import { log } from './audit';
@@ -24,6 +24,8 @@ import {
 } from './document-storage';
 import type { DocumentDerivative } from '../../types';
 import { validateDocumentFile } from '../../lib/document';
+import { groupPendingByFile } from '../../lib/reviewGroup';
+import { buildLevelEstimates, COMPRESSION_LEVELS } from '../../lib/compression-levels';
 
 const DOCUMENT_SIZES = ['A0', 'A1', 'A2', 'A3', 'A4', 'Other'];
 
@@ -298,6 +300,254 @@ export const scansService: ScanApi = {
         return haystack.includes(search);
       })
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  },
+
+  // ------------------------------------------------ review grouping (round 5)
+  //
+  // The Review section shows one row per file: the pending pages and pending
+  // deliverable builds fold into a single group, so a five-page rescan is one
+  // reviewable unit. The grouping itself is pure (`lib/reviewGroup.ts`) so the
+  // HTTP adapter derives the same shape from its two pending endpoints.
+
+  async pendingByFile(query = {}) {
+    const [pages, pdfs] = await Promise.all([
+      scansService.pending(query),
+      scansService.pendingPdfs(query),
+    ]);
+    return groupPendingByFile(pages, pdfs, store.getState().files);
+  },
+
+  async reviewScans(scanIds, decision, note = '') {
+    if (scanIds.length === 0) return err('Select at least one page.', 'scanIds');
+    if (decision === 'Rejected' && !note.trim()) {
+      return err('A rejection reason is required.', 'note');
+    }
+    const trimmed = note.trim();
+    const rows = store.getState().scanPages.filter((row) => scanIds.includes(row.id));
+    if (rows.length !== scanIds.length) {
+      return err('Some of the selected pages are no longer in the queue.', 'scanIds');
+    }
+    const status = decision === 'Approved' ? 'Approved' : 'Rejected';
+    store.update((draft) => {
+      for (const row of draft.scanPages) {
+        if (!scanIds.includes(row.id)) continue;
+        row.status = status;
+        if (trimmed) row.note = trimmed;
+      }
+      log(draft, {
+        action: decision === 'Approved' ? 'Approve' : 'Reject',
+        entity: 'FileScanPage',
+        entityId: rows[0].fileBarcode,
+        before: 'pending review',
+        after: `${status.toLowerCase()}=${rows.length}`,
+        summary: `${rows[0].fileBarcode}: ${rows.length} page(s) ${status.toLowerCase()}`,
+      });
+    });
+    return ok(rows.length);
+  },
+
+  async saveOcrText(scanId, text) {
+    const row = store.getState().scanPages.find((item) => item.id === scanId);
+    if (!row) return err('Scan page not found.', 'scanId');
+    const before = row.ocrText?.length ?? 0;
+    const updated: FileScan = {
+      ...row,
+      ocrText: text,
+      ocrEditedBy: session.actorName(),
+      ocrEditedAt: timestamp(),
+    };
+    store.update((draft) => {
+      const index = draft.scanPages.findIndex((item) => item.id === scanId);
+      if (index >= 0) draft.scanPages[index] = updated;
+      log(draft, {
+        action: 'Update',
+        entity: 'FileScanPage',
+        entityId: scanId,
+        before: `${before} characters`,
+        after: `${text.length} characters`,
+        summary: `OCR text corrected by hand for page ${row.pageNo} of ${row.fileBarcode}`,
+      });
+    });
+    return ok(updated);
+  },
+
+  // ------------------------------------------------- pdf compression (round 5)
+  //
+  // Local mode runs the whole pipeline in the browser: probe the first pages
+  // per level for measured estimates, then rasterize + JPEG-encode every page
+  // into a new deliverable that waits for reviewer sign-off like any build.
+
+  async compressionEstimate(target: CompressionTarget) {
+    const { probeCompression } = await import('../../lib/pdf-compress');
+    const blob = await compressionSourceBlob(target);
+    if (!blob) return err('That version has no stored bytes to compress.', 'id');
+    const currentBytes = blob.size;
+    const perLevel = {
+      light: 0,
+      balanced: 0,
+      strong: 0,
+    } as Record<'light' | 'balanced' | 'strong', number>;
+    let pageCount = 0;
+    for (const def of COMPRESSION_LEVELS) {
+      try {
+        const probe = await probeCompression(blob, def.key);
+        pageCount = probe.pageCount;
+        perLevel[def.key] = Math.round(probe.bytesPerPage * probe.pageCount + 1024);
+      } catch {
+        perLevel[def.key] = 0;
+      }
+    }
+    if (pageCount === 0) return err('The PDF could not be read for compression.', 'id');
+    const levels = buildLevelEstimates(currentBytes, pageCount, perLevel);
+    const best = Math.min(...levels.map((level) => level.estimatedBytes));
+    return ok({
+      currentBytes,
+      pageCount,
+      bytesPerPage: currentBytes / pageCount,
+      levels,
+      notWorthIt: best >= currentBytes * 0.95,
+    });
+  },
+
+  async applyCompression(target: CompressionTarget, level, remarks) {
+    const { compressPdfBlob } = await import('../../lib/pdf-compress');
+    const file = await filesService.get(target.fileId);
+    if (!file) return err('File not found.', 'fileId');
+    const blob = await compressionSourceBlob(target);
+    if (!blob) return err('That version has no stored bytes to compress.', 'id');
+
+    let result;
+    try {
+      result = await compressPdfBlob(blob, level);
+    } catch {
+      return err('The PDF could not be compressed.', 'id');
+    }
+    if (result.bytes.byteLength >= blob.size) {
+      return err('Compression would not shrink this file; nothing was saved.', 'level');
+    }
+
+    const sourceName = compressionSourceName(target);
+    const savedPercent = Math.round((1 - result.bytes.byteLength / blob.size) * 100);
+    const derivative: DocumentDerivative = {
+      id: newId('derivative'),
+      fileId: file.id,
+      fileBarcode: file.fileBarcode,
+      fileNumber: file.fileNumber,
+      kind: 'Compressed PDF',
+      filename: uniqueCompressionName(sourceName, store.getState().derivatives),
+      sizeBytes: result.bytes.byteLength,
+      sha256: '',
+      pageCount: result.pageCount,
+      sourceVersions: `compressed ${target.source} ${target.id} (${level})`,
+      includesOcrText: false,
+      createdAt: timestamp(),
+      createdBy: session.actorName(),
+      status: 'Pending approval',
+      reviewNote: remarks?.trim() || undefined,
+      compressedFrom: sourceName,
+      compressionLevel: level,
+      savedPercent,
+    };
+    await saveLocalDerivativeBytes(derivative.id, result.bytes);
+    store.update((draft) => {
+      draft.derivatives.unshift(derivative);
+      log(draft, {
+        action: 'Create',
+        entity: 'DocumentDerivative',
+        entityId: derivative.id,
+        before: `${sourceName}; ${blob.size} bytes`,
+        after: `${derivative.filename}; ${result.bytes.byteLength} bytes; −${savedPercent}%`,
+        summary: `Compressed copy of ${sourceName} built (−${savedPercent}%)`,
+      });
+    });
+    return ok(derivative);
+  },
+
+  // ------------------------------------------------- operator worklist (round 5)
+  //
+  // One row per file the operator is responsible for: every file with scan
+  // pages plus every file still marked "Under Digitization", with its pages
+  // and deliverable counts so the worklist answers "what is left on my desk".
+
+  async progress(query = {}) {
+    const search = query.search?.trim().toLowerCase() ?? '';
+    const state = store.getState();
+    const byBarcode = new Map(state.files.map((file) => [file.fileBarcode, file]));
+
+    type Accumulator = {
+      pagesTotal: number;
+      pagesApproved: number;
+      pagesPending: number;
+      pagesRejected: number;
+      lastActivityAt: string | null;
+    };
+    const pagesByBarcode = new Map<string, Accumulator>();
+    for (const row of state.scanPages) {
+      const acc =
+        pagesByBarcode.get(row.fileBarcode) ??
+        ({
+          pagesTotal: 0,
+          pagesApproved: 0,
+          pagesPending: 0,
+          pagesRejected: 0,
+          lastActivityAt: null,
+        } as Accumulator);
+      acc.pagesTotal += 1;
+      if (row.status === 'Approved') acc.pagesApproved += 1;
+      else if (row.status === 'Pending review') acc.pagesPending += 1;
+      else if (row.status === 'Rejected') acc.pagesRejected += 1;
+      if (!acc.lastActivityAt || row.uploadedAt > acc.lastActivityAt) {
+        acc.lastActivityAt = row.uploadedAt;
+      }
+      pagesByBarcode.set(row.fileBarcode, acc);
+    }
+    const deliverablesByBarcode = new Map<string, { total: number; pending: number }>();
+    for (const row of state.derivatives) {
+      const acc = deliverablesByBarcode.get(row.fileBarcode) ?? { total: 0, pending: 0 };
+      acc.total += 1;
+      if (row.status === 'Pending approval') acc.pending += 1;
+      deliverablesByBarcode.set(row.fileBarcode, acc);
+    }
+
+    const barcodes = new Set<string>([
+      ...pagesByBarcode.keys(),
+      ...state.files
+        .filter((file) => file.status === 'Under Digitization')
+        .map((f) => f.fileBarcode),
+    ]);
+
+    const rows = [...barcodes]
+      .map((barcode) => {
+        const file = byBarcode.get(barcode);
+        if (!file) return null;
+        const pages = pagesByBarcode.get(barcode);
+        const deliverables = deliverablesByBarcode.get(barcode);
+        return {
+          fileId: file.id,
+          fileBarcode: barcode,
+          fileNumber: file.fileNumber,
+          subject: file.subject,
+          department: file.department,
+          status: file.status,
+          pagesTotal: pages?.pagesTotal ?? 0,
+          pagesApproved: pages?.pagesApproved ?? 0,
+          pagesPending: pages?.pagesPending ?? 0,
+          pagesRejected: pages?.pagesRejected ?? 0,
+          deliverables: deliverables?.total ?? 0,
+          deliverablesPending: deliverables?.pending ?? 0,
+          lastActivityAt: pages?.lastActivityAt ?? null,
+        };
+      })
+      .filter((row): row is NonNullable<typeof row> => row !== null)
+      .filter((row) => {
+        if (!search) return true;
+        const haystack =
+          `${row.fileBarcode} ${row.fileNumber ?? ''} ${row.subject} ${row.department ?? ''}`.toLowerCase();
+        return haystack.includes(search);
+      })
+      .sort((a, b) => (b.lastActivityAt ?? '').localeCompare(a.lastActivityAt ?? ''));
+
+    return rows;
   },
 
   // -------------------------------------------------- scan studio (§3.4, §3.2)
@@ -604,6 +854,36 @@ export const scansService: ScanApi = {
     return blob ?? new Blob([], { type: 'application/pdf' });
   },
 };
+
+/** The stored bytes a compression target refers to, from either store. */
+async function compressionSourceBlob(target: CompressionTarget): Promise<Blob | null> {
+  if (target.source === 'document') {
+    return filesService.documentBlob(target.fileId, target.id);
+  }
+  return localDerivativeBlob(target.id);
+}
+
+/** The display name of the version being compressed. */
+function compressionSourceName(target: CompressionTarget): string {
+  if (target.source === 'derivative') {
+    const row = store.getState().derivatives.find((item) => item.id === target.id);
+    if (row) return row.filename;
+  }
+  return 'document.pdf';
+}
+
+/** `Report_v2.pdf` → `Report_v2_compressed.pdf`, `-2` on a name clash. */
+function uniqueCompressionName(sourceName: string, existing: DocumentDerivative[]): string {
+  const base = sourceName.replace(/\.pdf$/i, '').replace(/_compressed(-\d+)?$/i, '');
+  let candidate = `${base}_compressed.pdf`;
+  let counter = 2;
+  const taken = new Set(existing.map((row) => row.filename.toLowerCase()));
+  while (taken.has(candidate.toLowerCase())) {
+    candidate = `${base}_compressed-${counter}.pdf`;
+    counter += 1;
+  }
+  return candidate;
+}
 
 /** A small, valid, text-only PDF: one page per sheet, with header lines. */
 function composeLocalPdf(pages: Array<{ label: string; text: string }>): Uint8Array {

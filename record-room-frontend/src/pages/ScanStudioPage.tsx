@@ -11,11 +11,10 @@
  * in the history for tracking.
  */
 import { useCallback, useEffect, useRef, useState, lazy, Suspense, type ChangeEvent } from 'react';
-import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import {
   ArrowClockwise,
   ArrowCounterClockwise,
-  ArrowLeft,
   ArrowsInLineHorizontal,
   CheckCircle,
   Copy,
@@ -29,10 +28,8 @@ import {
   TextAa,
   Trash,
   ArrowUUpLeft,
-  UploadSimple,
   XCircle,
 } from '@phosphor-icons/react';
-import { PageHeader } from '../components/ui/PageHeader';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
@@ -61,10 +58,8 @@ import {
   computeNextVersionName,
 } from '../lib/studioDraft';
 
-export function ScanStudioPage({ embedded = false }: { embedded?: boolean }) {
+export function ScanStudioPage() {
   const { fileId } = useParams<{ fileId: string }>();
-  const location = useLocation();
-  const navigate = useNavigate();
   const { allowed } = useSession();
   const canUploadPages = allowed('digitization.upload');
   const canReview = allowed('digitization.review');
@@ -389,11 +384,7 @@ export function ScanStudioPage({ embedded = false }: { embedded?: boolean }) {
     setBusy(true);
     setError('');
     try {
-      const result = await service.digitization.buildPdf(
-        fileId,
-        name.trim(),
-        remarks.trim(),
-      );
+      const result = await service.digitization.buildPdf(fileId, name.trim(), remarks.trim());
       if (result.ok) {
         setBuildingPdf(false);
         setStudioDraft(fileId, null);
@@ -498,44 +489,8 @@ export function ScanStudioPage({ embedded = false }: { embedded?: boolean }) {
         disabled={uploading}
       />
 
-      {!embedded && (
-        <>
-          <button
-            onClick={() =>
-              (location.state as { from?: string } | null)?.from
-                ? navigate((location.state as { from?: string }).from as string)
-                : navigate(`/files/${fileId}`)
-            }
-            className="focus-ring inline-flex items-center gap-2 text-xs font-semibold muted hover:text-[var(--rr-text)]"
-          >
-            <ArrowLeft size={15} /> Back
-          </button>
-
-          <PageHeader
-            kicker={`File ${fileNumber}`}
-            title="Edit in studio"
-            description="Preview and edit existing PDFs or scan pages. Rearrange pages by drag-and-drop, add new scanned sheets, and build the deliverable PDF with full version history."
-            actions={
-              <>
-                {canUploadPages && (
-                  <Button
-                    size="sm"
-                    icon={<UploadSimple size={17} className="text-accent" />}
-                    onClick={() => uploadRef.current?.click()}
-                    disabled={uploading}
-                  >
-                    {uploading ? 'Adding…' : 'Scan / add pages'}
-                  </Button>
-                )}
-                <Link className="text-xs underline" to={`/files/${fileId}`}>
-                  Back to file
-                </Link>
-              </>
-            }
-          />
-        </>
-      )}
-
+      {/* The studio renders inside the file page (round 5); the top bar owns
+          the back button, so the grid starts right below the file's tabs. */}
       {message && (
         <div className="rounded-xl border border-[var(--rr-success)]/30 bg-[var(--rr-success)]/10 p-3 text-xs font-medium text-[var(--rr-success)]">
           {message}
@@ -1235,12 +1190,7 @@ function BuildDeliverablePdfForm({
       </Field>
 
       <div className="flex items-center justify-end gap-2 pt-2">
-        <Button
-          type="button"
-          variant="secondary"
-          onClick={onCancel}
-          disabled={busy}
-        >
+        <Button type="button" variant="secondary" onClick={onCancel} disabled={busy}>
           Cancel
         </Button>
         <Button type="submit" icon={<FilePdf size={16} />} disabled={busy || !name.trim()}>

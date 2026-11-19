@@ -1,162 +1,87 @@
 # Command Palette / Global Search
 
-Global fuzzy search + navigation dialog. Built on `cmdk@^1.1.1` (`package.json`).
+Fuzzy search + navigation dialog for the record room. Custom-built on the
+shared `Modal` (focus trap, Escape, body scroll lock) — no `cmdk` dependency.
 
 ## Entry points
 
-### 1. Search button (`src/app/AppShell.tsx` — `Topbar()`)
+### 1. Top-bar trigger — visible on every page (round 5)
+
+`src/layouts/Topbar.tsx` renders a button styled like a search field between
+the back button and the status controls. It is always mounted, on every
+route (the old inline topbar search, which hid itself on `/files`, is gone).
 
 ```tsx
-<Button
-  variant="outline" size="sm"
-  className="gap-2 text-muted-foreground max-sm:size-8 max-sm:p-0"
+<button
+  type="button"
   onClick={() => setPaletteOpen(true)}
+  aria-label="Open search and commands"
+  className="focus-ring flex h-11 min-w-0 flex-1 items-center gap-2.5 rounded-lg border border-base bg-[var(--rr-bg)] pl-3.5 pr-3 text-left md:max-w-xl"
 >
-  <Search className="size-3.5" />
-  <span className="hidden sm:inline">Search everything</span>
-  <kbd className="hidden rounded border border-border bg-muted px-1.5 font-mono text-[10px] sm:inline">Ctrl K</kbd>
-</Button>
+  <MagnifyingGlass size={17} className="muted shrink-0" />
+  <span className="muted min-w-0 flex-1 truncate text-sm">Search or jump to…</span>
+  <kbd className="muted hidden shrink-0 rounded border border-base px-1.5 text-[11px] sm:inline">
+    Ctrl K
+  </kbd>
+</button>
 ```
 
-Icon-only on mobile (`max-sm:size-8`), label + `Ctrl K` hint on `sm+`.
-State comes from zustand: `const { setSidebarOpen, setPaletteOpen } = useAppStore()`.
+The palette mounts next to it: `<CommandPalette open={paletteOpen} onClose={…} />`.
 
-### 2. Global state (`src/lib/store.ts`)
+### 2. Keyboard shortcuts (window listener in `Topbar.tsx`)
 
-```ts
-paletteOpen: boolean
-setPaletteOpen: (open: boolean) => void
-// ...
-paletteOpen: false,
-setPaletteOpen: (open) => set({ paletteOpen: open }),
-```
+| Shortcut | Effect |
+|---|---|
+| `Ctrl+K` / `Cmd+K` | Opens the palette from anywhere (`preventDefault`, even inside inputs) |
+| `/` | Opens the palette when the focus is not in an input/textarea/select |
+| `Esc` | Closes (handled by `Modal`) |
+| Type / ↑↓ / Enter | Filter, move the highlight, run the highlighted item |
 
-### 3. Mount (`src/app/AppShell.tsx`)
+## How the palette is built (`src/components/CommandPalette.tsx`)
 
-```tsx
-<CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
-```
+- `Modal` shell with title "Find a file, a search or a page".
+- One input (autofocus), a single flat list, arrow-key highlight state.
+- File results come from the same service search the registry uses:
+  `service.files.list({ search, pageSize: 8 })`, debounced 220 ms, gated on
+  the palette being open.
+- Each file row shows which metadata field matched (`matchContext`:
+  barcode / file number / subject / location / e-office / department).
+- Recent searches (`lib/recent.ts`) replay into the registry; recent files
+  jump straight to `/files/:id`.
+- Empty result with a typed term → Enter still searches the full registry.
+- Footer hint: `↑↓ to move · Enter to open · Esc to close`.
 
-Rendered once at the `AppShell` root, outside `<main>`.
+## Command list
 
-## Keyboard shortcuts
+`COMMANDS` in the same file — destinations filtered by role (`permission`) and
+feature (`barcode`). Labels and routes (round 5):
 
-| Shortcut | Where | Effect |
+| Label | `to` | Gate |
 |---|---|---|
-| `Ctrl+K` / `Cmd+K` | `AppShell.tsx` window `keydown` listener, `e.preventDefault()` + `setPaletteOpen(true)` | Opens palette from anywhere |
-| `ESC` | explicit `Escape` listener + cmdk `onOpenChange`; `<kbd>ESC</kbd>` hint in dialog header | Closes palette |
-| Type / ↑↓ / Enter | cmdk `Command` built-in (`shouldFilter`) | Fuzzy-filter, move selection, run `onSelect` |
+| Registry | `/files` | — |
+| Search the registry | `/search` | — |
+| Overview dashboard | `/overview` | — |
+| Issue desk | `/issue` | — |
+| Return desk | `/return` | — |
+| Movement log | `/movement` | — |
+| Digitization worklist | `/digitization` | — |
+| Review queue | `/review` | `digitization.view` |
+| Reports | `/reports` | — |
+| Locations | `/rooms` | — |
+| Barcodes | `/barcodes` | `barcode` feature |
+| Scan desk | `/scan` | `barcode` feature |
+| Maps | `/maps` | `files.view` |
+| Employees | `/admin/employees` | `employees.view` |
+| Locations designer | `/admin/locations` | `locations.view` |
+| Logins | `/admin/users` | `users.view` |
+| Audit trail | `/admin/audit` | `audit.view` |
+| Settings | `/settings` | — |
+| Support | `/support` | — |
 
-```tsx
-// AppShell.tsx
-useEffect(() => {
-  const handler = (e: KeyboardEvent) => {
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-      e.preventDefault()
-      setPaletteOpen(true)
-    }
-  }
-  window.addEventListener('keydown', handler)
-  return () => window.removeEventListener('keydown', handler)
-}, [setPaletteOpen])
-```
+The sidebar shows the same destinations; the palette is the keyboard shortcut
+to them.
 
-## How the palette is built (`src/app/CommandPalette.tsx`)
+## Product note
 
-Stack: `react` + `cmdk` (`Command.Dialog/Input/List/Empty/Group/Item`) +
-`react-router` `useNavigate` + `lucide-react` `Search` + `ALL_NAV_ITEMS` (`./nav`)
-+ `useAuth`/`can` (capability gating) + `useList` (entity data).
-
-Shell:
-
-```tsx
-<Command.Dialog
-  open={open}
-  onOpenChange={onOpenChange}
-  label="Global command palette"
-  className="fixed left-1/2 top-[15vh] z-50 w-[calc(100vw-2rem)] max-w-xl -translate-x-1/2 overflow-hidden rounded-xl border border-border bg-popover shadow-lg"
-  overlayClassName="fixed inset-0 z-40 bg-black/45"
-  shouldFilter
->
-  <div className="flex items-center gap-2 border-b border-border px-4">
-    <Search className="size-4 text-muted-foreground" />
-    <Command.Input autoFocus placeholder="Search pages, students, staff..." className="h-11 w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground" />
-    <kbd className="rounded border border-border bg-muted px-1.5 font-mono text-[10px] text-muted-foreground">ESC</kbd>
-  </div>
-  <Command.List className="max-h-80 overflow-y-auto p-2">
-    <Command.Empty className="py-8 text-center text-sm text-muted-foreground">
-      Nothing found. Try a page name or a student's name.
-    </Command.Empty>
-    {/* groups below */}
-  </Command.List>
-</Command.Dialog>
-```
-
-Navigation helper closes then routes:
-
-```tsx
-const go = (to: string) => {
-  onOpenChange(false)
-  navigate(to)
-}
-```
-
-Nav items are pre-filtered by capability:
-
-```tsx
-const navItems = useMemo(() => ALL_NAV_ITEMS.filter((i) => can(user?.role, i.capability)), [user?.role])
-```
-
-## Full command list (`src/app/nav.ts` — `NAV` / `ALL_NAV_ITEMS`)
-
-What you see is `ALL_NAV_ITEMS` (`NAV.flatMap(s => s.items)`) filtered by
-`can(role, capability)`. The value searched by cmdk is `` `page ${label} ${keywords}` ``.
-
-| Label | `to` | keywords |
-|---|---|---|
-| Dashboard | `/dashboard` | home stats charts |
-| My Portal | `/portal` | parent student child |
-| Sessions | `/sessions` | year promotion academic |
-| Classes & Subjects | `/classes` | sections subjects teacher assignment |
-| Timetable | `/timetable` | periods weekly schedule |
-| Attendance | `/attendance` | register present absent |
-| Calendar | `/calendar` | holidays events |
-| Students | `/people?tab=students` | admission roll no csv bulk import |
-| People | `/people` | students teachers staff parents |
-| User Accounts | `/users` | approve roles suspend |
-| Leaves | `/leaves` | apply approve sick casual |
-| Fees | `/fees` | invoices payments receipts defaulters |
-| Notices | `/notices` | announcements pinned |
-| PTM | `/ptm` | parent teacher meeting slots |
-| Messages | `/messages` | chat threads |
-| Exams & Results | `/exams` | marks report cards publish |
-| Certificates | `/certificates` | tc bonafide character |
-| Templates | `/templates` | id card receipt designer |
-| Bulk Contacts | `/tools/contacts` | sms whatsapp email list |
-| Trash | `/trash` | restore deleted |
-| School Settings | `/settings` | profile grading theme |
-
-The sidebar shows the same matrix; the palette is the keyboard shortcut
-to the same destinations.
-
-## How entity search works
-
-Gated on the `people.read` capability (roles: `admin`, `teacher`,
-`accountant`, `staff` — `src/lib/permissions.ts`).
-
-```tsx
-const { data: students } = useList<StudentDoc>('students', undefined, { enabled: open && can(user?.role, 'people.read') })
-const { data: staff } = useList<StaffDoc>('staff', undefined, { enabled: open && can(user?.role, 'people.read') })
-```
-
-- Lazy: `enabled: open && ...` means no Firestore/TanStack fetch until the
-  dialog opens (`useList` is a thin `useQuery` over `dataProvider.list` —
-  `src/lib/data/hooks.ts`).
-- Students group (first 30): value is `` `student ${name} ${admissionNo}` ``,
-  label shows `name` + right-aligned `admissionNo · Class …`;
-  `onSelect` → `/people/${id}?tab=profile`.
-- Staff group (first 20): value is `` `staff ${name} ${designation ?? ''}` ``,
-  right-aligned `designation`; `onSelect` → `/people/${id}?kind=staff`.
-- Groups render only when `can(...)` and the list is non-empty. Only the
-  `students` + `staff` collections are searchable today — teachers appear
-  via the Staff group (teachers are staff docs).
+This app deliberately uses **no `?` info tags / InfoTip** anywhere — the
+palette's placeholder and row labels carry the explanation instead.

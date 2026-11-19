@@ -82,7 +82,6 @@ export function EmployeesPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        kicker="Administration"
         title="Employees"
         description="The employee master that issue receipts and walk-in borrower codes all reference."
         actions={

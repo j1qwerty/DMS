@@ -101,9 +101,8 @@ export function UsersPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        kicker="Administration"
         title="Users & roles"
-        description="Logins, roles and the permission each role grants. Roles come from the legacy drm_employee.role codes: 1 Supervisor, 2 Operator, 3 Employee, plus Admin."
+        description="Logins, roles and their permissions."
         actions={
           allowed('users.edit') && (
             <Button icon={<Plus size={17} />} onClick={() => setCreating(true)}>

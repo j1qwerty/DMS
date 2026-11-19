@@ -49,9 +49,8 @@ export function DepartmentsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        kicker="Administration"
         title="Departments"
-        description="The departments every form picks from. A rename follows the employees filed under it; a department still in use cannot be deleted."
+        description="The departments every form picks from."
         actions={
           canEdit && (
             <Button icon={<Plus size={17} />} onClick={() => setEditing('new')}>

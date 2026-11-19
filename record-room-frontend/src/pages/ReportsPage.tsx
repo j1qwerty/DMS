@@ -89,9 +89,8 @@ export function ReportsPage() {
   return (
     <div className="space-y-7">
       <PageHeader
-        kicker="Reporting"
         title="Reports & dashboards"
-        description="Every report is built from the same collections the desks write to, so a preview can never disagree with the registry."
+        description="Reports build live from the same data the desks write."
         actions={
           allowed('reports.export') && (
             <Button icon={<DownloadSimple size={17} />} onClick={runExport}>

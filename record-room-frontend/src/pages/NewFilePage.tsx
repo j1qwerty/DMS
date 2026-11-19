@@ -1,14 +1,7 @@
 import { useFeatures } from '../lib/features';
 import { useMemo, useState, type FormEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import {
-  ArrowLeft,
-  Barcode,
-  CheckCircle,
-  MapPin,
-  Sparkle,
-  WarningCircle,
-} from '@phosphor-icons/react';
+import { Barcode, CheckCircle, MapPin, Sparkle, WarningCircle } from '@phosphor-icons/react';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -402,12 +395,11 @@ export function NewFilePage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        kicker="Registry"
         title="Create physical file"
         description={
           barcode
-            ? 'Identity is validated the way the legacy registry validated it: unique barcode, known area. Placement is optional — shelve it now or later.'
-            : 'Identity is validated: unique file number, known area. Placement is optional — shelve it now or later.'
+            ? 'Unique barcode and known area; placement is optional.'
+            : 'Unique file number and known area; placement is optional.'
         }
       />
 
@@ -442,13 +434,6 @@ export function NewFilePage() {
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button
-                variant="ghost"
-                icon={<ArrowLeft size={17} />}
-                onClick={() => navigate('/files')}
-              >
-                Back to files
-              </Button>
               <Button
                 variant="ghost"
                 onClick={() => navigate(`/files/${createdId}`, { state: { from: '/files' } })}

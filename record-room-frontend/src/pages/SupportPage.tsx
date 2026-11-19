@@ -46,9 +46,8 @@ export function SupportPage() {
         <img src="/decorative/geo-04.svg" alt="" className="w-full" />
       </div>
       <PageHeader
-        kicker="Support & inquiry"
         title="Send an implementation inquiry"
-        description="Small operational inquiries are captured in the browser for now. Production persistence belongs to the .NET 10 API."
+        description="Inquiries are captured in this browser for now."
       />
 
       <div className="grid gap-5 xl:grid-cols-[1fr_.7fr]">
