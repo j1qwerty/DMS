@@ -2,179 +2,31 @@ import { useFeatures, applyFeatures, FEATURE_GROUPS, type FeatureKey } from '../
 import { service, dataSource } from '../services';
 import { CheckCircle, Circle, Sliders } from '@phosphor-icons/react';
 import { useEffect, useState, type ReactNode } from 'react';
-
-import { Bell, Globe, Moon, ShieldCheck } from '@phosphor-icons/react';
+import { Bell, Moon } from '@phosphor-icons/react';
 import { PageHeader } from '../components/ui/PageHeader';
 import { SectionHeader } from '../components/ui/SectionHeader';
 import { Card } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
 import { useSession } from '../hooks/useService';
-import { ROLE_DESCRIPTIONS, permissionsFor } from '../services/permissions';
-import { ROLES } from '../types';
 
 /**
- * Settings, grouped the way it is read (round 4): connection and data first —
- * which data layer is live is the one setting that changes what the whole app
- * does — then appearance, feature visibility, the signed-in session, and the
- * deployment facts. Previously the cards were scattered across two grids with
- * no order.
+ * Settings, kept intentionally small: the two personal preferences that live
+ * in the browser, and the admin-controlled feature visibility groups.
  *
- * Removed from a previous build: the Firebase connection card. Firebase is not
- * part of this project (`AGENTS.md`), so the surface no longer advertises a
- * backend that does not exist.
+ * The connection/data, session and deployment sections were removed — they
+ * belong in docs, not on a settings surface users toggle.
  */
 export function SettingsPage() {
-  const features = useFeatures();
-  const { user } = useSession();
   const [notifications, setNotifications] = useState(true);
   const [dark, setDark] = useState(localStorage.getItem('rr-dark') === '1');
 
   return (
     <div className="space-y-10">
-      <PageHeader
-        // kicker="System settings"
-        title="Settings"
-        // description="Grouped by what they affect: the connection and its data, how the app looks, which feature areas are visible, your session, and the deployment facts."
-      />
+      <PageHeader title="Settings" />
 
-      {/* ------------------------------------------------- connection + data */}
-      {/* <section aria-label="Connection and data">
-        <SectionHeader
-          eyebrow="Where your data lives"
-          title="Connection & data"
-          description={
-            demo
-              ? 'The app is running on the in-browser demo dataset: fast to try, but nothing is stored on a server and a cleared browser loses it.'
-              : 'The app is connected to the .NET API: every change is written to SQL Server through the API, with server-enforced rules, OCR and durable file storage.'
-          }
-        />
-        <div className="grid gap-5 xl:grid-cols-2">
-          <Card>
-            <div className="flex items-center gap-3">
-              <div className="rounded-lg bg-accent-soft p-2 text-accent">
-                <Database size={18} />
-              </div>
-              <div className="min-w-0">
-                <p className="text-sm font-semibold">Data source</p>
-                <div className="mt-1.5 flex items-center gap-2">
-                  <span className="relative flex size-2">
-                    {demo && (
-                      <span className="absolute inline-flex size-2 animate-ping rounded-full bg-[var(--rr-danger)] opacity-60" />
-                    )}
-                    <span
-                      className={`relative inline-flex size-2 rounded-full ${
-                        demo ? 'bg-[var(--rr-danger)]' : 'bg-[var(--rr-success)]'
-                      }`}
-                    />
-                  </span>
-                  <span
-                    className={`text-xs font-bold ${
-                      demo ? 'text-[var(--rr-danger)]' : 'text-[var(--rr-success)]'
-                    }`}
-                  >
-                    {demo ? 'Demo data (this browser only)' : 'Live API'}
-                  </span>
-                </div>
-              </div>
-            </div>
-            <div className="mt-5 space-y-3 text-xs leading-6">
-              {demo ? (
-                <>
-                  <p className="muted">
-                    Demo mode keeps rows in <span className="font-mono">localStorage</span> and
-                    document bytes in <span className="font-mono">IndexedDB</span> — they survive a
-                    refresh, but not a cleared browser, and no other machine sees them.
-                  </p>
-                  <p className="muted">
-                    To work against the real database: start the API (
-                    <span className="font-mono">
-                      cd ../dotnet-api/src/RecordRoom.Api && dotnet run --urls http://localhost:5199
-                    </span>
-                    ), then set <span className="font-mono">VITE_API_MODE=http</span> in{' '}
-                    <span className="font-mono">record-room-frontend/.env.local</span> (the shipped
-                    file already says so) and restart <span className="font-mono">pnpm dev</span>.
-                    The red dot in the top bar turns green when the API is live.
-                  </p>
-                </>
-              ) : (
-                <>
-                  <p className="muted">
-                    Every page reads and writes through the API: registrations, custody, issues,
-                    scans and audit all land in SQL Server, and uploaded files are stored on the
-                    API's private document store.
-                  </p>
-                  <p className="muted">
-                    The top bar shows a green <strong>Live API</strong> dot in this mode. Switching
-                    back to the demo dataset means removing{' '}
-                    <span className="font-mono">.env.local</span> (or setting{' '}
-                    <span className="font-mono">VITE_API_MODE=local</span>) and restarting the dev
-                    server.
-                  </p>
-                </>
-              )}
-            </div>
-          </Card>
-
-          {demo ? (
-            <Card>
-              <div className="flex items-center gap-3">
-                <div className="rounded-lg bg-accent-soft p-2 text-accent">
-                  <ArrowCounterClockwise size={18} />
-                </div>
-                <div>
-                  <p className="text-sm font-semibold">Local dataset</p>
-                  <p className="muted text-xs">Everything you changed in this browser.</p>
-                </div>
-              </div>
-              <dl className="mt-5 grid grid-cols-2 gap-3 text-xs">
-                <Count label="Registry rows" value={db.files.length} />
-                <Count label="Receipts" value={db.issues.length} />
-                <Count label="Movement events" value={db.movements.length} />
-                <Count label="Audit entries" value={db.audit.length} />
-                <Count label="Employees" value={db.employees.length} />
-                <Count label="Digitization pages" value={db.scanPages.length} />
-              </dl>
-              <Button
-                className="mt-5 w-full"
-                variant="danger"
-                icon={<Trash size={17} />}
-                onClick={() => void resetDataset()}
-              >
-                Reset to seed data
-              </Button>
-              <p className="muted mt-3 text-[11px] leading-5">
-                Clears the local store and the stored demo documents, then reloads. In Live API mode
-                the data is owned by the server — this card only exists in demo mode.
-              </p>
-            </Card>
-          ) : (
-            <Card>
-              <div className="flex items-center gap-3">
-                <div className="rounded-lg bg-accent-soft p-2 text-accent">
-                  <HardDrives size={18} />
-                </div>
-                <div>
-                  <p className="text-sm font-semibold">Server-owned data</p>
-                  <p className="muted text-xs">Counts live in the API's database.</p>
-                </div>
-              </div>
-              <p className="muted mt-5 text-xs leading-6">
-                Registry rows, custody events, issues, movements, scan pages, audit entries and
-                document bytes all belong to the API in this mode. Use the Reports section and the
-                administration pages for server-side figures; nothing is reset from the browser.
-              </p>
-            </Card>
-          )}
-        </div>
-      </section> */}
-
-      {/* ------------------------------------------------------ the interface */}
+      {/* ------------------------------------------------------ interface */}
       <section aria-label="Interface">
-        {/* <SectionHeader
-          eyebrow="How the app looks and pings you"
-          title="Interface"
-          description="Personal, browser-local preferences. Nothing here changes what anyone else sees."
-        /> */}
+        <SectionHeader title="Interface" />
         <Card>
           <div className="grid gap-3 md:grid-cols-2">
             <Toggle
@@ -194,120 +46,14 @@ export function SettingsPage() {
               setValue={setNotifications}
             />
           </div>
-          {/* <div className="mt-5 rounded-xl bg-accent-soft p-4">
-            <Badge tone="info">Frontend only</Badge>
-            <p className="muted mt-2 text-xs leading-6">
-              Role, audit, retention, storage and search policies are backend-enforced. Hiding a
-              control in this UI is not authorization.
-            </p>
-          </div> */}
         </Card>
       </section>
 
-      {/* --------------------------------------------------- feature visibility */}
+      {/* ----------------------------------------------- feature visibility */}
       <section aria-label="Feature visibility">
-        <SectionHeader
-          // eyebrow="What is visible to users"
-          title="Feature visibility"
-          // description="Grouped switches that hide whole capability areas without removing them. Admin-only writes; everyone sees the current state."
-        />
+        <SectionHeader title="Feature visibility" />
         <FeatureVisibilityCard />
       </section>
-
-      {/* ----------------------------------------------------------- session */}
-      <section aria-label="Your session">
-        <SectionHeader
-          eyebrow={`Signed in as ${user?.displayName ?? user?.userName ?? '—'}`}
-          title="Your session"
-          description={`Permissions granted to ${user?.role ?? 'no role'}, and how the roles differ.`}
-        />
-        <Card>
-          <ul className="grid gap-1.5">
-            {permissionsFor(user?.role ?? 'Employee')
-              .filter((permission) => features.barcode || permission !== 'barcodes.print')
-              .map((permission) => (
-                <li key={permission} className="flex items-center gap-2 text-xs">
-                  <span className="size-1.5 rounded-full bg-[var(--rr-success)]" />
-                  <span className="font-mono">{permission}</span>
-                </li>
-              ))}
-          </ul>
-
-          <div className="mt-5 border-t border-base pt-5">
-            <p className="text-xs font-bold uppercase tracking-[0.12em] muted">Role summary</p>
-            <div className="mt-3 grid gap-2 sm:grid-cols-2">
-              {ROLES.map((role) => (
-                <div
-                  key={role}
-                  className={`rounded-xl p-3 text-xs ${
-                    role === user?.role ? 'bg-accent-soft' : 'bg-[var(--rr-bg)]'
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-semibold">{role}</span>
-                    {role === user?.role && <Badge tone="info">You</Badge>}
-                  </div>
-                  <p className="muted mt-1 leading-5">{ROLE_DESCRIPTIONS[role]}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </Card>
-      </section>
-
-      {/* --------------------------------------------------------- deployment */}
-      <section aria-label="Deployment facts">
-        <SectionHeader
-          eyebrow="Read-only facts"
-          title="Deployment"
-          description="Static build facts; nothing here is a runtime switch."
-        />
-        <Card>
-          <Setting
-            icon={<Globe />}
-            title="Web app"
-            label="Base URL"
-            value="/"
-            note="Vite and Netlify are configured for root deployment with SPA fallback."
-          />
-          <Setting
-            icon={<ShieldCheck />}
-            title="Secrets"
-            label="Client credentials"
-            value="None"
-            note="No API key, service account or admin credential is committed. Authentication and authorization belong server-side — see docs/SECURITY.md."
-          />
-        </Card>
-      </section>
-    </div>
-  );
-}
-
-function Setting({
-  icon,
-  title,
-  label,
-  value,
-  note,
-}: {
-  icon: ReactNode;
-  title: string;
-  label: string;
-  value: string;
-  note: string;
-}) {
-  return (
-    <div className="border-b border-base py-4 first:pt-0 last:border-b-0">
-      <div className="flex gap-3">
-        <div className="rounded-lg bg-accent-soft p-2 text-accent">{icon}</div>
-        <div className="min-w-0">
-          <p className="text-sm font-semibold">{title}</p>
-          <p className="mt-1 text-xs">
-            {label}: <span className="font-semibold">{value}</span>
-          </p>
-          <p className="muted mt-1 text-[10px] leading-5">{note}</p>
-        </div>
-      </div>
     </div>
   );
 }
@@ -334,10 +80,14 @@ function Toggle({
         <span className="text-sm font-semibold">{label}</span>
       </span>
       <span
-        className={`h-6 w-11 rounded-full p-1 transition ${value ? 'bg-[var(--rr-accent-fill)]' : 'bg-[var(--rr-surface-2)]'}`}
+        className={`h-6 w-11 rounded-full p-1 transition ${
+          value ? 'bg-[var(--rr-accent-fill)]' : 'bg-[var(--rr-surface-2)]'
+        }`}
       >
         <span
-          className={`block size-4 rounded-full bg-white transition ${value ? 'translate-x-5' : ''}`}
+          className={`block size-4 rounded-full bg-white transition ${
+            value ? 'translate-x-5' : ''
+          }`}
         />
       </span>
     </button>
@@ -349,6 +99,11 @@ function Toggle({
  * capability areas without removing them. Admin-only writes; everyone sees the
  * current state. Local mode persists to localStorage; http mode writes the
  * API's FeatureSettings rows (audit-logged server-side).
+ *
+ * The card keeps its own `local` mirror of the feature flags and drives the
+ * UI from that mirror — the external feature store does not always notify this
+ * component on change, so relying on `useFeatures()` alone would leave the
+ * switches stale until a full refresh.
  */
 function FeatureVisibilityCard() {
   const features = useFeatures();
@@ -356,27 +111,50 @@ function FeatureVisibilityCard() {
   const isAdmin = user?.role === 'Admin';
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [local, setLocal] = useState<Record<FeatureKey, boolean>>(features);
 
   useEffect(() => {
     if (dataSource !== 'api') return;
-    // Refresh from the server so another admin's change shows up on navigation.
     void service.config
       .features()
-      .then((next) => applyFeatures(next))
+      .then((next) => {
+        applyFeatures(next);
+        setLocal((cur) => ({ ...cur, ...next }));
+      })
       .catch(() => undefined);
   }, []);
 
   const toggle = async (key: FeatureKey) => {
     if (!isAdmin || busy) return;
+
+    const previous = local;
+    const nextValue = !local[key];
+
     setBusy(true);
     setError('');
-    const result = await service.config.updateFeatures({ [key]: !features[key] });
-    if (result.ok) {
-      applyFeatures(result.value, dataSource === 'local');
-    } else {
-      setError(result.error ?? 'The feature groups could not be updated.');
+    setLocal((cur) => ({ ...cur, [key]: nextValue })); // optimistic flip
+
+    try {
+      const result = await service.config.updateFeatures({ [key]: nextValue });
+
+      if (result.ok) {
+        setLocal((cur) => ({ ...cur, ...result.value }));
+        try {
+          applyFeatures(result.value, dataSource === 'local');
+        } catch {
+          // Store sync is best-effort; the card already reflects the change
+          // and will resync from the server on the next mount.
+        }
+      } else {
+        setLocal(previous);
+        setError(result.error ?? 'The feature groups could not be updated.');
+      }
+    } catch (err) {
+      setLocal(previous);
+      setError(err instanceof Error ? err.message : 'The feature groups could not be updated.');
+    } finally {
+      setBusy(false); // ← always runs, even on throw / reject
     }
-    setBusy(false);
   };
 
   return (
@@ -388,24 +166,24 @@ function FeatureVisibilityCard() {
         <div>
           <p className="text-sm font-semibold">Feature groups</p>
           <p className="muted text-xs">
-            Enabling a group enables every related surface. Hidden groups stay built and tested;
-            they come back without a redeploy.
+            Enabling a group enables every related surface. Hidden groups stay built and tested.
             {isAdmin ? '' : ' Only an admin can change these.'}
           </p>
         </div>
       </div>
+
       <div className="mt-5 space-y-3">
         {FEATURE_GROUPS.map((group) => (
           <button
             key={group.key}
             onClick={() => toggle(group.key)}
             disabled={!isAdmin || busy}
-            aria-pressed={features[group.key]}
+            aria-pressed={local[group.key]}
             className="focus-ring flex w-full items-start justify-between gap-4 rounded-xl bg-[var(--rr-bg)] p-3 text-left disabled:cursor-default"
           >
             <span className="min-w-0">
               <span className="flex items-center gap-2 text-sm font-semibold">
-                {features[group.key] ? (
+                {local[group.key] ? (
                   <CheckCircle size={16} weight="fill" className="text-[var(--rr-success)]" />
                 ) : (
                   <Circle size={16} className="muted" />
@@ -423,18 +201,19 @@ function FeatureVisibilityCard() {
             </span>
             <span
               className={`mt-1 h-6 w-11 shrink-0 rounded-full p-1 transition ${
-                features[group.key] ? 'bg-[var(--rr-accent-fill)]' : 'bg-[var(--rr-surface-2)]'
+                local[group.key] ? 'bg-[var(--rr-accent-fill)]' : 'bg-[var(--rr-surface-2)]'
               }`}
             >
               <span
                 className={`block size-4 rounded-full bg-white transition ${
-                  features[group.key] ? 'translate-x-5' : ''
+                  local[group.key] ? 'translate-x-5' : ''
                 }`}
               />
             </span>
           </button>
         ))}
       </div>
+
       {error && <p className="mt-3 text-xs text-[var(--rr-danger)]">{error}</p>}
     </Card>
   );

@@ -91,7 +91,7 @@ function PdfViewerInner({
   const [numPages, setNumPages] = useState(0);
   const [pageNumber, setPageNumber] = useState(initialPage);
   const [scale, setScale] = useState(1);
-  const [fitWidth, setFitWidth] = useState(true);
+  const [fitMode, setFitMode] = useState<'page' | 'width' | 'manual'>('page');
   const [rotation, setRotation] = useState(0);
   const [query, setQuery] = useState('');
   const [searching, setSearching] = useState(false);
@@ -99,7 +99,16 @@ function PdfViewerInner({
   const [pageSizeName, setPageSizeName] = useState<string>('A4');
   const [isLargeFormat, setIsLargeFormat] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [containerWidth, setContainerWidth] = useState(0);
+  const [containerWidth, setContainerWidth] = useState(() =>
+    typeof window !== 'undefined' ? Math.max(window.innerWidth - 420, 600) : 800,
+  );
+  const [containerHeight, setContainerHeight] = useState(() =>
+    typeof window !== 'undefined' ? Math.max(window.innerHeight - 240, 600) : 800,
+  );
+  const [pageDim, setPageDim] = useState<{ width: number; height: number }>({
+    width: 595,
+    height: 842,
+  });
 
   useEffect(() => {
     if (!pdf || pageNumber < 1 || pageNumber > numPages) return;
@@ -111,6 +120,7 @@ function PdfViewerInner({
         const vp = page.getViewport({ scale: 1 });
         const w = Math.round(vp.width);
         const h = Math.round(vp.height);
+        setPageDim({ width: w, height: h });
         const maxDim = Math.max(w, h);
         const minDim = Math.min(w, h);
 
@@ -146,10 +156,17 @@ function PdfViewerInner({
 
   useEffect(() => {
     const element = containerRef.current;
-    if (!element || typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(() => {
-      const width = element.clientWidth;
-      if (width > 0) setContainerWidth(width);
+    if (!element) return;
+    if (element.clientWidth > 0) setContainerWidth(element.clientWidth);
+    if (element.clientHeight > 0) setContainerHeight(element.clientHeight);
+
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        if (width > 0) setContainerWidth(width);
+        if (height > 0) setContainerHeight(height);
+      }
     });
     observer.observe(element);
     return () => observer.disconnect();
@@ -192,12 +209,27 @@ function PdfViewerInner({
     [query],
   );
 
-  const width = fitWidth ? Math.max(containerWidth - 16, 0) || undefined : undefined;
-  const shownWidth = width ? width * scale : undefined;
+  let shownWidth: number | undefined;
+  if (containerWidth > 0 && pageDim.width > 0) {
+    const availW = Math.max(containerWidth - 32, 100);
+    const availH = Math.max(containerHeight - 32, 100);
+
+    if (fitMode === 'page') {
+      const scaleX = availW / pageDim.width;
+      const scaleY = containerHeight > 100 ? availH / pageDim.height : scaleX;
+      const autoFitScale = Math.min(scaleX, scaleY);
+      shownWidth = Math.round(pageDim.width * autoFitScale * scale);
+    } else if (fitMode === 'width') {
+      const widthScale = availW / pageDim.width;
+      shownWidth = Math.round(pageDim.width * widthScale * scale);
+    } else {
+      shownWidth = Math.round(pageDim.width * scale);
+    }
+  }
 
   return (
-    <div className={heightClassName}>
-      <div className="flex flex-wrap items-center gap-2 border-b border-base px-3 py-2">
+    <div className={`flex flex-col ${heightClassName}`}>
+      <div className="flex-shrink-0 flex flex-wrap items-center gap-2 border-b border-base px-3 py-2 bg-[var(--rr-surface)]">
         <div className="flex items-center rounded-lg border border-base bg-[var(--rr-surface)]">
           <button
             type="button"
@@ -234,7 +266,7 @@ function PdfViewerInner({
           <button
             type="button"
             onClick={() => {
-              setFitWidth(false);
+              setFitMode('manual');
               setScale((value) => Math.max(MIN_SCALE, Math.round((value - 0.25) * 100) / 100));
             }}
             className="focus-ring grid size-9 place-items-center rounded-l-lg hover:bg-[var(--rr-surface-2)]"
@@ -245,20 +277,35 @@ function PdfViewerInner({
           </button>
           <button
             type="button"
-            onClick={() => setFitWidth(true)}
-            className={`focus-ring min-w-11 border-x border-base px-2 py-1.5 text-center text-xs font-semibold hover:bg-[var(--rr-surface-2)] ${fitWidth ? 'text-accent' : ''}`}
-            aria-label="Fit width"
-            title="Fit to page width"
+            onClick={() => {
+              setFitMode('page');
+              setScale(1);
+            }}
+            className={`focus-ring min-w-11 border-x border-base px-2 py-1.5 text-center text-xs font-semibold hover:bg-[var(--rr-surface-2)] ${fitMode === 'page' && scale === 1 ? 'text-accent font-bold bg-accent-soft/30' : ''}`}
+            aria-label="Fit page"
+            title="Fit whole page in view"
           >
             Fit
           </button>
           <button
             type="button"
             onClick={() => {
-              setFitWidth(false);
+              setFitMode('width');
               setScale(1);
             }}
-            className={`focus-ring min-w-12 border-r border-base px-2 py-1.5 text-center text-xs font-semibold hover:bg-[var(--rr-surface-2)] ${!fitWidth && scale === 1 ? 'text-accent font-bold' : ''}`}
+            className={`focus-ring min-w-12 border-r border-base px-2 py-1.5 text-center text-xs font-semibold hover:bg-[var(--rr-surface-2)] ${fitMode === 'width' && scale === 1 ? 'text-accent font-bold bg-accent-soft/30' : ''}`}
+            aria-label="Fit width"
+            title="Fit page width"
+          >
+            Width
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setFitMode('manual');
+              setScale(1);
+            }}
+            className={`focus-ring min-w-12 border-r border-base px-2 py-1.5 text-center text-xs font-semibold hover:bg-[var(--rr-surface-2)] ${fitMode === 'manual' && scale === 1 ? 'text-accent font-bold bg-accent-soft/30' : ''}`}
             aria-label="Set to 100% actual size"
             title="100% actual size (1-click)"
           >
@@ -267,7 +314,7 @@ function PdfViewerInner({
           <button
             type="button"
             onClick={() => {
-              setFitWidth(false);
+              setFitMode('manual');
               setScale((value) => Math.min(MAX_SCALE, Math.round((value + 0.25) * 100) / 100));
             }}
             className="focus-ring grid size-9 place-items-center rounded-r-lg hover:bg-[var(--rr-surface-2)]"
@@ -277,7 +324,7 @@ function PdfViewerInner({
             <MagnifyingGlassPlus size={16} />
           </button>
         </div>
-        {!fitWidth && scale !== 1 && (
+        {scale !== 1 && (
           <span className="muted text-xs font-semibold">{Math.round(scale * 100)}%</span>
         )}
         <span
@@ -339,7 +386,10 @@ function PdfViewerInner({
         </div>
       </div>
 
-      <div ref={containerRef} className="h-[calc(100%-3.25rem)] overflow-auto bg-surface-muted p-2">
+      <div
+        ref={containerRef}
+        className="flex-1 min-h-0 overflow-auto bg-surface-muted p-4 flex flex-col items-center justify-start"
+      >
         <Document
           file={file}
           options={PDF_OPTIONS}
@@ -359,15 +409,16 @@ function PdfViewerInner({
               <span className="muted text-sm">Loading {filename}…</span>
             </div>
           }
-          className="mx-auto w-fit"
+          className="mx-auto w-fit flex flex-col items-center"
         >
           <Page
             key={`${pageNumber}-${rotation}-${shownWidth ?? 'auto'}`}
             pageNumber={Math.min(Math.max(pageNumber, 1), Math.max(numPages, 1))}
             rotate={rotation}
             width={shownWidth}
-            scale={fitWidth ? 1 : scale}
+            scale={1}
             customTextRenderer={textRenderer}
+            className="shadow-md rounded bg-white overflow-hidden"
             loading={
               <div className="grid h-40 place-items-center">
                 <span className="muted text-sm">Rendering page {pageNumber}…</span>

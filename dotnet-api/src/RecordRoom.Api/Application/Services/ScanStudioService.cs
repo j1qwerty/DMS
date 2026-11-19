@@ -314,10 +314,9 @@ public sealed class ScanStudioService(
         var file = await db.Files.AsNoTracking().FirstOrDefaultAsync(f => f.Id == fileId, ct);
         if (file is null) return Result<DocumentDerivativeDto>.Fail("File not found.", "fileId");
 
-        // The deliverable is built from quality-verified pages only (§1.2:
-        // legible, aligned, cropped output). Pending or rejected pages wait.
-        var pages = await db.ScanPages.AsNoTracking()
-            .Where(p => p.Barcode == file.Barcode && p.Status == PageStatus.Approved)
+        // The deliverable is built from studio composition pages (excluding rejected pages).
+        var pages = await db.ScanPages
+            .Where(p => p.Barcode == file.Barcode && p.Status != PageStatus.Rejected)
             .OrderBy(p => p.OrderIndex).ThenBy(p => p.PageNo).ThenBy(p => p.Version)
             .ToListAsync(ct);
         pages = [.. pages.GroupBy(p => p.PageNo).Select(g => g.OrderByDescending(p => p.Version).First())];
@@ -328,7 +327,18 @@ public sealed class ScanStudioService(
                 withContent.Add(page);
         if (withContent.Count == 0)
             return Result<DocumentDerivativeDto>.Fail(
-                "No approved scan pages to build from: approve pages in the review queue first.", "fileId");
+                "No scan pages to build from: add or scan pages in the studio first.", "fileId");
+
+        // Any pending pages included in the approved composition become Approved
+        foreach (var p in withContent)
+        {
+            if (p.Status == PageStatus.PendingReview)
+            {
+                p.Status = PageStatus.Approved;
+                if (!string.IsNullOrWhiteSpace(input.Remarks))
+                    p.Note = input.Remarks.Trim();
+            }
+        }
 
         var sheets = new List<(byte[] Bytes, string? Text, string Size)>();
         foreach (var page in withContent)
@@ -368,9 +378,37 @@ public sealed class ScanStudioService(
             return Result<DocumentDerivativeDto>.Fail("The deliverable PDF could not be composed.", "fileId");
         }
 
-        var fileName = !string.IsNullOrWhiteSpace(input.FileName)
-            ? input.FileName.Trim()
-            : $"{file.FileNumber}-deliverable-{DateTime.UtcNow:yyyyMMdd-HHmm}.pdf";
+        string fileName;
+        if (!string.IsNullOrWhiteSpace(input.FileName))
+        {
+            fileName = input.FileName.Trim();
+        }
+        else
+        {
+            var latestDoc = await db.FileDocuments.AsNoTracking()
+                .Where(d => d.RecordFileId == file.Id)
+                .OrderByDescending(d => d.UploadedAt)
+                .Select(d => d.OriginalFileName)
+                .FirstOrDefaultAsync(ct);
+            var latestDeriv = await db.Derivatives.AsNoTracking()
+                .Where(d => d.Barcode == file.Barcode)
+                .OrderByDescending(d => d.CreatedAt)
+                .Select(d => d.FileName)
+                .FirstOrDefaultAsync(ct);
+
+            var baseOriginal = latestDoc ?? latestDeriv;
+            if (!string.IsNullOrWhiteSpace(baseOriginal))
+            {
+                var clean = Path.GetFileNameWithoutExtension(baseOriginal);
+                clean = System.Text.RegularExpressions.Regex.Replace(clean, @"[_-]v\d+$", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                var existingCount = await db.Derivatives.CountAsync(d => d.Barcode == file.Barcode, ct);
+                fileName = $"{clean}_v{existingCount + 2}.pdf";
+            }
+            else
+            {
+                fileName = $"{file.FileNumber}_v1.pdf";
+            }
+        }
         if (!fileName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase)) fileName += ".pdf";
 
         var stored = await documentStore.SaveBytesAsync(pdf, fileName, "application/pdf", ct);
@@ -393,6 +431,7 @@ public sealed class ScanStudioService(
             // Round 4: a fresh build waits for reviewer sign-off on the final
             // composition before it counts as the file's deliverable.
             Status = "Pending approval",
+            ReviewNote = string.IsNullOrWhiteSpace(input.Remarks) ? null : input.Remarks.Trim(),
         };
         db.Derivatives.Add(derivative);
         await audit.LogAsync(db, AuditAction.Create, "DocumentDerivative", "pending", "-",

@@ -488,15 +488,15 @@ export const scansService: ScanApi = {
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
   },
 
-  async buildPdf(fileId, filename) {
+  async buildPdf(fileId, filename, remarks) {
     const file = await filesService.get(fileId);
     if (!file) return err('File not found.', 'fileId');
     const pages = (await scansService.list(fileId)).filter(
-      (row) => row.status === 'Approved' && row.hasDocument,
+      (row) => row.status !== 'Rejected' && row.hasDocument,
     );
     if (pages.length === 0) {
       return err(
-        'No approved scan pages to build from: approve pages in the review queue first.',
+        'No approved scan pages to build from: add or approve pages in the studio first.',
         'fileId',
       );
     }
@@ -506,15 +506,27 @@ export const scansService: ScanApi = {
         row.ocrText?.trim() || `Page ${row.pageNo} of ${file.fileNumber} (${row.documentSize}).`,
     }));
     const bytes = composeLocalPdf(texts);
+    const existingDerivs = store.getState().derivatives.filter((d) => d.fileId === file.id);
+    const existingDocs = await filesService.listDocuments(file.id);
+    const latestOriginal = existingDocs[0]?.filename ?? existingDerivs[0]?.filename;
+    let computedName = filename?.trim();
+    if (!computedName) {
+      if (latestOriginal) {
+        const clean = latestOriginal.replace(/\.pdf$/i, '').replace(/[_-]v\d+$/i, '');
+        computedName = `${clean}_v${existingDerivs.length + 2}.pdf`;
+      } else {
+        computedName = `${file.fileNumber}_v1.pdf`;
+      }
+    }
+    if (!computedName.toLowerCase().endsWith('.pdf')) computedName += '.pdf';
+
     const derivative: DocumentDerivative = {
       id: newId('derivative'),
       fileId: file.id,
       fileBarcode: file.fileBarcode,
       fileNumber: file.fileNumber,
       kind: 'Pdf',
-      filename:
-        (filename?.trim() ||
-          `${file.fileNumber}-deliverable-${new Date().toISOString().slice(0, 10)}`) + '.pdf',
+      filename: computedName,
       sizeBytes: bytes.byteLength,
       sha256: '',
       pageCount: pages.length,
@@ -524,6 +536,7 @@ export const scansService: ScanApi = {
       createdBy: session.actorName(),
       // A fresh build waits for reviewer sign-off before it is the deliverable.
       status: 'Pending approval',
+      reviewNote: remarks?.trim() || undefined,
     };
     await saveLocalDerivativeBytes(derivative.id, bytes);
     store.update((draft) => {

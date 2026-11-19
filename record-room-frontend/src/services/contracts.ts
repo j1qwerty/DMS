@@ -363,7 +363,11 @@ export interface ScanApi {
   /** Generated PDF deliverables of one file, newest first. */
   listPdfs(fileId: string): Promise<DocumentDerivative[]>;
   /** Builds the PDF from the file's approved pages, in composition order. */
-  buildPdf(fileId: string, filename?: string): Promise<Result<DocumentDerivative>>;
+  buildPdf(
+    fileId: string,
+    filename?: string,
+    remarks?: string,
+  ): Promise<Result<DocumentDerivative>>;
   /**
    * Round 4: a freshly built PDF is "Pending approval"; a reviewer signs off
    * the final composition here (approve or reject with a reason). The row —

@@ -96,9 +96,7 @@ export function DocumentViewer({
   const isPdf = state.type === 'application/pdf';
   const isImage = state.type.startsWith('image/');
   const src = state.url ? `${state.url}${isPdf ? pdfPageFragment(pageIndex) : ''}` : null;
-  const height = fill
-    ? 'h-[calc(100dvh-17rem)] min-h-[420px] lg:h-[calc(100dvh-14rem)]'
-    : 'h-[58dvh]';
+  const height = fill ? 'h-[calc(100dvh-11rem)] min-h-[700px] lg:min-h-[880px]' : 'h-[58dvh]';
 
   const download = () => {
     if (!state.url) return;
@@ -217,7 +215,11 @@ export function DocumentViewer({
           <div className="ml-auto flex flex-wrap items-center gap-2">{actions}</div>
         </div>
       )}
-      <div className="overflow-hidden rounded-xl border border-base bg-[var(--rr-bg)]">{body}</div>
+      <div
+        className={`overflow-hidden rounded-xl border border-base bg-[var(--rr-bg)] ${fill ? 'flex flex-col' : ''}`}
+      >
+        {body}
+      </div>
       {!fill && !loading && src && <div className="mt-3 flex flex-wrap gap-2">{actions}</div>}
     </div>
   );

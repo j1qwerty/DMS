@@ -37,7 +37,7 @@ import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { Modal } from '../components/ui/Modal';
-import { Field, TextArea } from '../components/ui/Field';
+import { Field, TextArea, TextInput } from '../components/ui/Field';
 import { StatusBadge } from '../components/ui/Flash';
 import { service } from '../services';
 import { useSession } from '../hooks/useService';
@@ -53,20 +53,13 @@ const PdfDocumentViewer = lazy(() =>
 
 const ENHANCEMENTS = ['deskew', 'despeckle', 'binarize', 'crop', 'contrast'] as const;
 
-export interface UnifiedDocumentVersion {
-  id: string;
-  source: 'document' | 'derivative';
-  filename: string;
-  versionLabel: string;
-  updatedAt: string;
-  pageCount?: number;
-  sizeBytes?: number;
-  status: 'Approved' | 'Pending approval' | 'Rejected';
-  reviewNote?: string;
-  reviewedBy?: string;
-  rawDoc?: RecordFileDocument;
-  rawDeriv?: DocumentDerivative;
-}
+import {
+  type StudioDraftState,
+  type UnifiedDocumentVersion,
+  getStudioDraft,
+  setStudioDraft,
+  computeNextVersionName,
+} from '../lib/studioDraft';
 
 export function ScanStudioPage({ embedded = false }: { embedded?: boolean }) {
   const { fileId } = useParams<{ fileId: string }>();
@@ -91,6 +84,12 @@ export function ScanStudioPage({ embedded = false }: { embedded?: boolean }) {
   const [rejectingPdf, setRejectingPdf] = useState<DocumentDerivative | null>(null);
   const [previewingVersion, setPreviewingVersion] = useState<UnifiedDocumentVersion | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [draft, setDraft] = useState<StudioDraftState | null>(() =>
+    fileId ? getStudioDraft(fileId) : null,
+  );
+  const [buildingPdf, setBuildingPdf] = useState(false);
+  const [buildName, setBuildName] = useState('');
+  const [buildRemarks, setBuildRemarks] = useState('');
 
   const dragId = useRef<string | null>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
@@ -262,6 +261,22 @@ export function ScanStudioPage({ embedded = false }: { embedded?: boolean }) {
       await reload();
       if (failures.length > 0) setError(failures.join(' · '));
       if (totalPagesAdded > 0) {
+        const baseSource =
+          draft?.sourceFilename ||
+          documents[0]?.filename ||
+          derivatives[0]?.filename ||
+          `${fileNumber || fileId}.pdf`;
+        const nextName = computeNextVersionName(baseSource, derivatives, documents);
+        const updatedDraft: StudioDraftState = {
+          sourceVersionId: draft?.sourceVersionId,
+          sourceFilename: baseSource,
+          draftFilename: nextName,
+          pageCount: scans.length + totalPagesAdded,
+          updatedAt: new Date().toISOString(),
+        };
+        setDraft(updatedDraft);
+        setStudioDraft(fileId, updatedDraft);
+
         setMessage(
           `${totalPagesAdded} page(s) added to the studio. Drag to rearrange or click "Build deliverable PDF" when ready.`,
         );
@@ -282,9 +297,33 @@ export function ScanStudioPage({ embedded = false }: { embedded?: boolean }) {
    */
   const unpackVersionIntoStudio = async (version: UnifiedDocumentVersion) => {
     if (!fileId) return;
-    setBusy(true);
-    setError('');
-    setMessage(`Loading pages from ${version.filename} into the studio…`);
+
+    if (draft?.sourceVersionId === version.id && scans.length > 0) {
+      setMessage(`Pages from ${version.filename} are already open in the studio grid.`);
+      setPreviewingVersion(null);
+      return;
+    }
+
+    if (scans.length > 0) {
+      const confirmReplace = window.confirm(
+        `Load "${version.filename}" into the studio? This will replace the current workspace pages with the ${version.pageCount ?? ''} pages from this version.`,
+      );
+      if (!confirmReplace) return;
+
+      setBusy(true);
+      setError('');
+      setMessage(`Replacing workspace with pages from ${version.filename}…`);
+
+      // Clear previous working scan pages so duplicate pages are not appended
+      for (const scan of scans) {
+        await service.digitization.remove(scan.id);
+      }
+    } else {
+      setBusy(true);
+      setError('');
+      setMessage(`Loading pages from ${version.filename} into the studio…`);
+    }
+
     try {
       const blob =
         version.source === 'document'
@@ -292,7 +331,7 @@ export function ScanStudioPage({ embedded = false }: { embedded?: boolean }) {
           : await service.digitization.pdfBlob(version.id);
 
       const extracted = await extractPdfPagesToImages(blob, version.filename);
-      let pageNo = scans.reduce((max, row) => Math.max(max, row.pageNo), 0);
+      let pageNo = 0;
       let count = 0;
 
       for (const pageFile of extracted) {
@@ -309,6 +348,18 @@ export function ScanStudioPage({ embedded = false }: { embedded?: boolean }) {
         }
       }
 
+      // Record active draft session with smart version filename
+      const nextName = computeNextVersionName(version.filename, derivatives, documents);
+      const newDraft: StudioDraftState = {
+        sourceVersionId: version.id,
+        sourceFilename: version.filename,
+        draftFilename: nextName,
+        pageCount: count,
+        updatedAt: new Date().toISOString(),
+      };
+      setDraft(newDraft);
+      setStudioDraft(fileId, newDraft);
+
       setMessage(
         `Loaded ${count} page(s) from ${version.filename}. You can now drag to rearrange, add more pages, or build a new version.`,
       );
@@ -318,6 +369,46 @@ export function ScanStudioPage({ embedded = false }: { embedded?: boolean }) {
       setError(
         e instanceof Error ? e.message : 'Could not unpack pages from the selected document.',
       );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const startBuildPdf = () => {
+    const baseSource =
+      draft?.sourceFilename ||
+      documents[0]?.filename ||
+      derivatives[0]?.filename ||
+      `${fileNumber || fileId}.pdf`;
+    const defaultName =
+      draft?.draftFilename || computeNextVersionName(baseSource, derivatives, documents);
+    setBuildName(defaultName);
+    setBuildRemarks('');
+    setBuildingPdf(true);
+  };
+
+  const executeBuildPdf = async () => {
+    if (!fileId) return;
+    setBusy(true);
+    setError('');
+    try {
+      const result = await service.digitization.buildPdf(
+        fileId,
+        buildName.trim(),
+        buildRemarks.trim(),
+      );
+      if (result.ok) {
+        setBuildingPdf(false);
+        setStudioDraft(fileId, null);
+        setDraft(null);
+        setOrderDirty(false);
+        setMessage(
+          `${result.value.filename} built successfully (${result.value.status}) from ${scans.length} page(s).`,
+        );
+        await reload();
+      } else {
+        setError(result.error ?? 'The PDF could not be built.');
+      }
     } finally {
       setBusy(false);
     }
@@ -375,6 +466,24 @@ export function ScanStudioPage({ embedded = false }: { embedded?: boolean }) {
       return next;
     });
     setOrderDirty(true);
+    if (fileId) {
+      const baseSource =
+        draft?.sourceFilename ||
+        documents[0]?.filename ||
+        derivatives[0]?.filename ||
+        `${fileNumber || fileId}.pdf`;
+      const nextName =
+        draft?.draftFilename || computeNextVersionName(baseSource, derivatives, documents);
+      const updatedDraft: StudioDraftState = {
+        sourceVersionId: draft?.sourceVersionId,
+        sourceFilename: baseSource,
+        draftFilename: nextName,
+        pageCount: scans.length,
+        updatedAt: new Date().toISOString(),
+      };
+      setDraft(updatedDraft);
+      setStudioDraft(fileId, updatedDraft);
+    }
   };
 
   const patch = (scanId: string, updater: (page: FileScan) => FileScan) =>
@@ -527,6 +636,25 @@ export function ScanStudioPage({ embedded = false }: { embedded?: boolean }) {
                           setScans(result.value);
                           setOrderDirty(false);
                           setMessage('Page order saved.');
+                          if (fileId) {
+                            const baseSource =
+                              draft?.sourceFilename ||
+                              documents[0]?.filename ||
+                              derivatives[0]?.filename ||
+                              `${fileNumber || fileId}.pdf`;
+                            const nextName =
+                              draft?.draftFilename ||
+                              computeNextVersionName(baseSource, derivatives, documents);
+                            const updatedDraft: StudioDraftState = {
+                              sourceVersionId: draft?.sourceVersionId,
+                              sourceFilename: baseSource,
+                              draftFilename: nextName,
+                              pageCount: result.value.length,
+                              updatedAt: new Date().toISOString(),
+                            };
+                            setDraft(updatedDraft);
+                            setStudioDraft(fileId, updatedDraft);
+                          }
                         } else setError(result.error ?? 'The order could not be saved.');
                       })
                     }
@@ -536,18 +664,9 @@ export function ScanStudioPage({ embedded = false }: { embedded?: boolean }) {
                   <Button
                     size="sm"
                     icon={<FilePdf size={15} />}
-                    disabled={busy}
-                    onClick={() =>
-                      run(async () => {
-                        const result = await service.digitization.buildPdf(fileId ?? '');
-                        if (result.ok) {
-                          setMessage(
-                            `${result.value.filename} built from approved pages — awaiting review approval.`,
-                          );
-                          await reload();
-                        } else setError(result.error ?? 'The PDF could not be built.');
-                      })
-                    }
+                    disabled={busy || scans.length === 0}
+                    onClick={startBuildPdf}
+                    title="Build deliverable PDF from current workspace pages"
                   >
                     Build deliverable PDF
                   </Button>
@@ -827,7 +946,80 @@ export function ScanStudioPage({ embedded = false }: { embedded?: boolean }) {
               <FilePdf size={20} className="text-accent" />
             </div>
 
-            {unifiedVersions.length === 0 ? (
+            {/* Active Studio Draft workspace indicator if pages exist */}
+            {(scans.length > 0 || draft) && (
+              <div className="mb-3 rounded-xl border-2 border-dashed border-amber-400 bg-amber-50/60 p-3 dark:border-amber-600/50 dark:bg-amber-950/20">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="truncate font-semibold text-xs text-amber-900 dark:text-amber-200">
+                        {draft?.draftFilename ||
+                          computeNextVersionName(
+                            draft?.sourceFilename ||
+                              documents[0]?.filename ||
+                              derivatives[0]?.filename ||
+                              `${fileNumber || fileId}.pdf`,
+                            derivatives,
+                            documents,
+                          )}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-[11px] text-amber-800 dark:text-amber-300">
+                      Studio workspace · {scans.length} page(s)
+                      {orderDirty ? ' · Unsaved order' : ''}
+                      {draft?.updatedAt
+                        ? ` · Edited ${new Date(draft.updatedAt).toLocaleTimeString()}`
+                        : ''}
+                    </p>
+                  </div>
+                  <Badge tone="warning">Unsaved draft</Badge>
+                </div>
+
+                <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-amber-200/60 pt-2.5 dark:border-amber-800/60">
+                  <Button
+                    size="sm"
+                    icon={<FilePdf size={13} />}
+                    onClick={startBuildPdf}
+                    disabled={busy || scans.length === 0}
+                    className="!h-7 !px-2 text-[11px]"
+                    title="Build Deliverable PDF from current workspace pages"
+                  >
+                    Build deliverable PDF
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      if (
+                        window.confirm(
+                          'Discard all working pages from studio workspace and reset draft?',
+                        )
+                      ) {
+                        void (async () => {
+                          setBusy(true);
+                          for (const s of scans) {
+                            await service.digitization.remove(s.id);
+                          }
+                          setStudioDraft(fileId ?? '', null);
+                          setDraft(null);
+                          setOrderDirty(false);
+                          await reload();
+                          setBusy(false);
+                          setMessage('Studio workspace reset.');
+                        })();
+                      }
+                    }}
+                    disabled={busy}
+                    className="!h-7 !px-2 text-[11px] text-amber-900 hover:bg-amber-100 dark:text-amber-200 dark:hover:bg-amber-900/50"
+                    title="Clear pages from studio workspace"
+                  >
+                    Discard draft
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {unifiedVersions.length === 0 && scans.length === 0 && !draft ? (
               <p className="muted py-4 text-center text-xs">No PDF versions registered yet.</p>
             ) : (
               <div className="space-y-3">
@@ -954,6 +1146,64 @@ export function ScanStudioPage({ embedded = false }: { embedded?: boolean }) {
           </Card>
         </div>
       </div>
+
+      <Modal
+        open={buildingPdf}
+        onClose={() => setBuildingPdf(false)}
+        title="Save as Deliverable PDF"
+        description={`Compile a deliverable PDF from the ${scans.length} page(s) currently organized in the scan studio.`}
+      >
+        <form
+          className="space-y-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void executeBuildPdf();
+          }}
+        >
+          <Field
+            label="Deliverable File Name"
+            htmlFor="build-pdf-filename"
+            hint="Keeps original base name and appends the next version suffix."
+            required
+          >
+            <TextInput
+              id="build-pdf-filename"
+              value={buildName}
+              onChange={(event) => setBuildName(event.target.value)}
+              placeholder="e.g. Proposal_for_Zila_Panchayat_Mahoba_v3.pdf"
+              required
+            />
+          </Field>
+
+          <Field
+            label="Remarks / Notes"
+            htmlFor="build-pdf-remarks"
+            hint="Optional: describe what changed in this version (e.g. 'Reordered pages, added supplementary sheet')."
+          >
+            <TextArea
+              id="build-pdf-remarks"
+              value={buildRemarks}
+              onChange={(event) => setBuildRemarks(event.target.value)}
+              placeholder="Remarks describing what changed or was added in this document version…"
+              rows={3}
+            />
+          </Field>
+
+          <div className="flex items-center justify-end gap-2 pt-2">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setBuildingPdf(false)}
+              disabled={busy}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" icon={<FilePdf size={16} />} disabled={busy || !buildName.trim()}>
+              {busy ? 'Building PDF…' : 'Save & Build Deliverable PDF'}
+            </Button>
+          </div>
+        </form>
+      </Modal>
 
       <Modal
         open={rejectingPdf !== null}

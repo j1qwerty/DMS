@@ -788,9 +788,10 @@ export const httpDigitizationService: ScanApi = {
     return dtos.map((dto) => toDerivative(dto));
   },
 
-  async buildPdf(fileId, filename) {
+  async buildPdf(fileId, filename, remarks) {
     const result = await attempt<Dto>('POST', `/api/files/${toApiId(fileId, 'file')}/pdf`, {
       fileName: filename ?? '',
+      remarks: remarks ?? '',
     });
     return result.ok ? ok(toDerivative(result.value)) : result;
   },

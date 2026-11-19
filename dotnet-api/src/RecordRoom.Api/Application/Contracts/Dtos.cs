@@ -342,7 +342,7 @@ public sealed record DocumentDerivativeDto(
     string? ReviewNote = null);
 
 /// <summary>Body of POST /api/files/{fileId}/pdf — builds the deliverable from approved pages.</summary>
-public sealed record DeliverablePdfInput(string? FileName = null);
+public sealed record DeliverablePdfInput(string? FileName = null, string? Remarks = null);
 
 /// <summary>
 /// Body of POST /api/files/{fileId}/pdf/{derivativeId}/review — the reviewer's

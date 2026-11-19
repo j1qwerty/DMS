@@ -37,7 +37,8 @@ import {
   UploadFileModal,
   UploadMapModal,
 } from '../components/files/FileActionModals';
-import { ScanStudioPage, type UnifiedDocumentVersion } from './ScanStudioPage';
+import { ScanStudioPage } from './ScanStudioPage';
+import { getStudioDraft, type UnifiedDocumentVersion } from '../lib/studioDraft';
 import { useFlash, useQuery, useService, useSession } from '../hooks/useService';
 import { useFeatures } from '../lib/features';
 import { buildPayload } from '../lib/barcode';
@@ -477,6 +478,41 @@ export function FileDetailPage() {
                   </Button>
                 )}
               </div>
+
+              {/* Active Studio Draft indicator if user edited pages in studio */}
+              {(() => {
+                const draft = getStudioDraft(file.id);
+                if (!draft) return null;
+                return (
+                  <div className="mb-3 rounded-xl border-2 border-dashed border-amber-400 bg-amber-50/60 p-3 dark:border-amber-600/50 dark:bg-amber-950/20">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="truncate text-xs font-semibold text-amber-900 dark:text-amber-200">
+                            {draft.draftFilename}
+                          </span>
+                          <Badge tone="warning">Unsaved draft</Badge>
+                        </div>
+                        <p className="mt-1 text-[11px] text-amber-800 dark:text-amber-300">
+                          Studio draft · {draft.pageCount} page(s) · Last updated{' '}
+                          {new Date(draft.updatedAt).toLocaleTimeString()}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="mt-2.5 flex items-center justify-end border-t border-amber-200/60 pt-2 dark:border-amber-800/60">
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        className="!h-7 !px-2 text-[11px]"
+                        onClick={() => navigate(`/files/${file.id}/studio`)}
+                        icon={<PencilSimple size={13} />}
+                      >
+                        Edit in studio
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {allVersions.length === 0 ? (
                 <p className="muted py-4 text-center text-xs">No scan versions recorded yet.</p>
