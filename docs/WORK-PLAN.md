@@ -6,8 +6,10 @@ digitisation engine and platform hardening).
 
 - Snapshot: **2026-10-28**
 - Feature inventory, verified library versions and licence notes: `Recordroom-features.md`
-- Editable permission design: `V2-EDITABLE-PERMISSIONS.md`
-- Tender-phase scope split and phasing: `PHASED-SCOPE.md`
+- Editable permission design: `docs/FINAL-SCOPE.md` §1 item 3 (the design file
+  itself is in `docs/ignore/V2-EDITABLE-PERMISSIONS.md`)
+- Tender-phase scope split and phasing: `docs/OVERVIEW.md` (Phasing section;
+  the file itself is in `docs/ignore/PHASED-SCOPE.md`)
 - API deployment and operations: `../dotnet-api/README.md`
 - Live checklist for day-to-day work: `TODO.md`
 - The legacy PHP app (`jhs_digitization-og-php-app/`) and the Word tender draft
@@ -46,7 +48,7 @@ Verification short-form used below:
 | PR #3 merged (ui workflow redesign, room creation) | `bdc4921` | shipped (pre-baseline) |
 | PIN sign-in restored + error envelope normalised + test harness fix | `c24b2f3` | shipped (pre-baseline) |
 | Feature inventory and roadmap | `becc7a4` | shipped (pre-baseline) |
-| Tender proposal (Word) — file no longer in repo; content superseded by `PHASED-SCOPE.md` | `4d988d2` | shipped (pre-baseline) |
+| Tender proposal (Word) — file no longer in repo; content superseded by `docs/OVERVIEW.md` (Phasing section; the file itself is in `docs/ignore/PHASED-SCOPE.md`) | `4d988d2` | shipped (pre-baseline) |
 
 Verification state: API checks green (`dotnet test` 112/112, `test-api.ps1`
 149/149), Web checks green except `format:check` (see §2.1 item 5) and one
@@ -94,7 +96,7 @@ Everything here is small and can ship in the current release. Order matters
 | 6 | No in-app PDF reader — preview is a bare `<iframe>` (the browser plugin) | §2.2 | Viewer replaces the iframe everywhere |
 
 (Permission-matrix enforcement is deliberately *not* a v1 defect — the design
-for it exists in `V2-EDITABLE-PERMISSIONS.md` and the work is §3.7.)
+for it is `docs/FINAL-SCOPE.md` §1 item 3, and the work is §3.7.)
 
 ### 2.2 In-app PDF reader
 
@@ -222,9 +224,10 @@ Documented: rasterisation stays on `PDFsharp` 6.5.0 (7.0 is preview) /
 
 ### 3.7 Editable permission matrix
 
-Per `V2-EDITABLE-PERMISSIONS.md`: DB-backed `role_permission` table, permission
-policies replacing `[Authorize(Roles = ...)]` (today the API authorises on role
-name only and never enforces the matrix), Admin row locked against self-lockout
+Per `docs/FINAL-SCOPE.md` §1 item 3 (design file in `docs/ignore/`): DB-backed
+`role_permission` table, permission policies replacing
+`[Authorize(Roles = ...)]` (today the API authorises on role name only and
+never enforces the matrix), Admin row locked against self-lockout
 server-side. **v1 stays read-only** — no editing until the user asks.
 
 ### 3.8 Custody chain — intake register and return sign-off

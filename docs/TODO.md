@@ -110,7 +110,10 @@ and the done-definitions; this file carries the "is it done yet".
 - [ ] **6.7 — PDF generation** — QuestPDF 2026.9.1, ordered page images, invisible OCR text layer, header/footer, page numbers (§3.5) **(P — licence check)**
 - [ ] **6.8 — PDF/A** — generation at 2b via QuestPDF + in-process validation via `VellumPdf.Conformance` 2.3.3, veraPDF as CI ground truth; Ghostscript never for archival; `Codeuctivity.PdfAValidator` is AGPL — never adopt **(P — confirm contract's PDF/A level; QuestPDF cannot emit PDF/A-1)** (§3.6)
 - [ ] **6.9 — Custody chain** — `DigitizationCustodyEvent` both directions (intake count reconciliation + return sign-off) via `IAuditWriter` (§3.8)
-- [ ] **6.10 — Permission matrix** — per `V2-EDITABLE-PERMISSIONS.md`: `role_permission` table, permission policies replacing `[Authorize(Roles=...)]`, admin self-lockout guard; enforcement swap is its own reviewed commit (§3.7)
+- [ ] **6.10 — Permission matrix** — per `docs/FINAL-SCOPE.md` §1 item 3 (design
+  file in `docs/ignore/`): `role_permission` table, permission policies
+  replacing `[Authorize(Roles=...)]`, admin self-lockout guard; enforcement
+  swap is its own reviewed commit (§3.7)
 - [ ] **6.11 — Infra hardening** — Redis persisted cache; Hangfire on SQL Server storage; HTTPS via domain; CI that boots SQL Server and runs `test-api.ps1` + the contract suite; barcode-gun as a CI flow (§3.9)
 - [ ] **6.12 — OpenSearch** — only if 6.6-era relevance demands it; avoid Elasticsearch (SSPL) and `Lucene.Net` (§3.1)
 

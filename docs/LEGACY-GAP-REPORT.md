@@ -97,7 +97,7 @@ carries the behaviour and the screen that exposes it.
 - **Server-side pagination, sorting and filtering.** The browser holds a seed
   snapshot; the labels say so, and the real query belongs to the API.
 - **Camera barcode decoding.** Needs a WASM reader; USB scanner input (type +
-  Enter) is fully handled. See `docs/PHASED-SCOPE.md`.
+  Enter) is fully handled. See `docs/OVERVIEW.md` (Phasing section).
 - **Real Excel and PDF output.** CSV first, by design.
 
 ## TODO order (next)

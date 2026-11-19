@@ -97,7 +97,7 @@ export function ScanPage() {
             <p className="muted mt-2 text-xs leading-6">
               A USB or Bluetooth scanner types into the field above and presses Enter, which is
               already handled. Browser camera decoding needs a WASM barcode reader and is
-              deliberately not shipped — see <span className="font-mono">docs/PHASED-SCOPE.md</span>
+              deliberately not shipped — see <span className="font-mono">docs/OVERVIEW.md</span> (Phasing)
               .
             </p>
           </div>

@@ -12,7 +12,7 @@ import type { InquiryRecord } from '../services/impl/inquiries';
  *
  * Stored in the local snapshot, not in a browser-side database. This project
  * does not use Firebase (`AGENTS.md`), so the inquiry list is a placeholder
- * until `dotnet-api/` exposes a real endpoint — see `docs/PHASED-SCOPE.md`.
+ * until `dotnet-api/` exposes a real endpoint — see `docs/OVERVIEW.md` (Phasing).
  */
 export function SupportPage() {
   const service = useService();

@@ -1,10 +1,15 @@
 # Document Management System (with an additional Record Room section)
 
-The product is a **Document Management System**: a document register with search,
-scan versions, maps, digitization batches, reports and audit. The **Record Room** is
-an *additional section inside the same app* for the physical files behind the
-documents: issue / return / movement, rooms and shelves, and barcodes. It is built
-for ~25 lakh files.
+The product is a **Document Management System**: a document register with search
+(full-text, OCR-backed), scanned-document storage with versioning, reports and
+audit. The **Record Room** is an *additional section inside the same app* for
+the physical files behind the documents: issue / return / movement, rooms and
+shelves, and barcodes. It is built for ~25 lakh files.
+
+v2 (digitization engine, custody chain, permission-matrix hardening) is in
+progress — the single home of the outstanding scope is
+[`docs/FINAL-SCOPE.md`](docs/FINAL-SCOPE.md). Product overview:
+[`docs/OVERVIEW.md`](docs/OVERVIEW.md).
 
 Barcode features belong to the Record Room section only and can be switched off with
 one setting (default on). See `docs/BARCODE-SWITCH.md`. Open work, including the
@@ -17,15 +22,23 @@ API changes still to do, is tracked in `docs/TODO-DMS-RECORDROOM.md`.
 | `record-room-frontend/` | Complete React + TypeScript frontend, API-backed in `http` mode |
 | `jhs_digitization-og-php-app/` | Legacy CodeIgniter PHP app — reference-only, do not edit |
 | `dotnet-api/` | .NET 10 + SQL Server backend implementing the frontend service contract |
-| `docs/` | PRD, scope, architecture, data model, frontend spec, QA, security, gap report |
+| `docs/` | Overview, final scope, PRD, feature inventory, architecture, data model, frontend spec, QA, security, gap report; `docs/docs-og/` and `docs/skills/` kept; superseded docs in `docs/ignore/` |
 
 ## Where to start
 
-1. `docs/PRD.md`, `docs/PROJECT-SCOPE.md`, `docs/CLARIFICATIONS.md`
-2. `docs/ARCHITECTURE.md`, `docs/DATA-MODEL.md`, `docs/FRONTEND-SPEC.md`
-3. `docs/LEGACY-GAP-REPORT.md` — legacy-vs-frontend feature audit and status
-4. `docs/IMPLEMENTATION-TODO.md`, `docs/QA.md`, `docs/SECURITY.md`
-5. Design system: `docs/skills/design.md`; workflow prefs: `docs/skills/react-pnpm-skill (1).md`
+1. `docs/OVERVIEW.md` — product overview: scope, physical hierarchy, identifiers and barcodes
+2. `docs/FINAL-SCOPE.md` — the outstanding v2 scope in one place (sequence, gates, waiting on user)
+3. `docs/PRD.md` — master build spec (records, permissions and handover; implementation plan)
+4. `docs/Recordroom-features.md` — feature inventory + verified v2 library shortlist + sequencing
+5. `docs/ARCHITECTURE.md`, `docs/DATA-MODEL.md`, `docs/FRONTEND-SPEC.md`
+6. `docs/LEGACY-GAP-REPORT.md` — legacy-vs-frontend feature audit and status (all gaps closed)
+7. `docs/TODO.md`, `docs/WORK-PLAN.md` — day-to-day tracker + v1/v2 living plan
+8. `docs/QA.md`, `docs/SECURITY.md`, `docs/scanned-document-storage.md`, `docs/BARCODE-SWITCH.md`
+9. `docs/TODO-DMS-RECORDROOM.md` — DMS/Record Room delivery status (phases 1–2 done)
+10. `docs/TASTE-SKILL-REFERENCE.md` — design taste reference used for the frontend
+
+Stale/superseded docs moved to `docs/ignore/` — review and delete at leisure.
+Design system: `docs/skills/design.md`; workflow prefs: `docs/skills/react-pnpm-skill (1).md`.
 
 ## Frontend (the current build)
 
@@ -87,8 +100,9 @@ only — a bare IP cannot get a normal TLS certificate):
 
 ## Roadmap
 
-1. ~~Freeze `src/services/contracts.ts` as the API contract.~~ Done — `dotnet-api/`
-   implements it and the frontend `http` adapter consumes it.
-2. ~~Scaffold `dotnet-api/`~~ Done — .NET 10 + SQL Server, deployed live (see above).
-   Remaining: harden for scale (persisted Hangfire storage, Redis cache, HTTPS
-   via a domain).
+v1 is the current build — its roadmap items are done (contract, API, deploy).
+**v2 outstanding work is tracked in one file: `docs/FINAL-SCOPE.md`** (sequence,
+gates, waiting on user). Confirmed v2 milestones already landed: scan studio,
+Hindi OCR, custody returns, derivative review. Out of scope unless separately
+approved (`docs/PRD.md` §3.2, §31): replacement of the broader ERP/HRMS systems,
+3D digital twin, uncontrolled public access, AI-generated legal decisions.

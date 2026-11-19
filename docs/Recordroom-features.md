@@ -6,8 +6,9 @@ with the library shortlist behind each v2 item.
 - Verified against the repo working tree at `c24b2f3`.
 - Every version below was read from the **NuGet / npm registry APIs**, not from
   blog posts or vendor marketing pages.
-- Companion documents: `V2-EDITABLE-PERMISSIONS.md` (RBAC design),
-  `PHASED-SCOPE.md` (product phases), `DATA-MODEL.md` (entities).
+- Companion documents: `docs/FINAL-SCOPE.md` §1 item 3 (RBAC design; the design
+  file is in `docs/ignore/`), `docs/OVERVIEW.md` (product phases/scope),
+  `docs/DATA-MODEL.md` (entities).
 
 ## Legend
 
@@ -105,7 +106,7 @@ These are not roadmap items; they are things that are wrong or missing now.
 
 | # | Gap | Impact |
 |---|---|---|
-| 1 | **The API does not enforce the permission matrix.** Authorization is `[Authorize(Roles = ...)]`; `PermissionsForRole` only feeds `/me`. | Revoking a permission changes the UI and nothing else. Design in `V2-EDITABLE-PERMISSIONS.md`. |
+| 1 | **The API does not enforce the permission matrix.** Authorization is `[Authorize(Roles = ...)]`; `PermissionsForRole` only feeds `/me`. | Revoking a permission changes the UI and nothing else. Design in `docs/FINAL-SCOPE.md` §1 item 3 (the design file is in `docs/ignore/`). |
 | 2 | **Search is non-sargable.** `f.Subject.ToLower().Contains(needle)` puts a function on the column, so `IX_Files_*` can never be used. | The registry degrades to a table scan as the collection grows toward ~25 lakh rows. |
 | 3 | **No scan auto-submit.** Zero `onKeyDown` handlers exist; every scan depends on Enter reaching a form's `onSubmit`. | A real barcode gun works only if its trigger suffix is Enter, and there is no auto-advance on the multi-file issue desk. |
 | 4 | **The `/` shortcut is decorative.** The Topbar renders a `<kbd>/</kbd>` hint but no handler exists. | Advertised shortcut does nothing. |
