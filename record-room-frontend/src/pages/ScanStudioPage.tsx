@@ -88,8 +88,6 @@ export function ScanStudioPage({ embedded = false }: { embedded?: boolean }) {
     fileId ? getStudioDraft(fileId) : null,
   );
   const [buildingPdf, setBuildingPdf] = useState(false);
-  const [buildName, setBuildName] = useState('');
-  const [buildRemarks, setBuildRemarks] = useState('');
 
   const dragId = useRef<string | null>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
@@ -374,28 +372,27 @@ export function ScanStudioPage({ embedded = false }: { embedded?: boolean }) {
     }
   };
 
+  const baseSource =
+    draft?.sourceFilename ||
+    documents[0]?.filename ||
+    derivatives[0]?.filename ||
+    `${fileNumber || fileId}.pdf`;
+  const defaultBuildName =
+    draft?.draftFilename || computeNextVersionName(baseSource, derivatives, documents);
+
   const startBuildPdf = () => {
-    const baseSource =
-      draft?.sourceFilename ||
-      documents[0]?.filename ||
-      derivatives[0]?.filename ||
-      `${fileNumber || fileId}.pdf`;
-    const defaultName =
-      draft?.draftFilename || computeNextVersionName(baseSource, derivatives, documents);
-    setBuildName(defaultName);
-    setBuildRemarks('');
     setBuildingPdf(true);
   };
 
-  const executeBuildPdf = async () => {
+  const executeBuildPdf = async (name: string, remarks: string) => {
     if (!fileId) return;
     setBusy(true);
     setError('');
     try {
       const result = await service.digitization.buildPdf(
         fileId,
-        buildName.trim(),
-        buildRemarks.trim(),
+        name.trim(),
+        remarks.trim(),
       );
       if (result.ok) {
         setBuildingPdf(false);
@@ -946,8 +943,8 @@ export function ScanStudioPage({ embedded = false }: { embedded?: boolean }) {
               <FilePdf size={20} className="text-accent" />
             </div>
 
-            {/* Active Studio Draft workspace indicator if pages exist */}
-            {(scans.length > 0 || draft) && (
+            {/* Active Studio Draft workspace indicator if a draft is in progress */}
+            {Boolean(draft) && (
               <div className="mb-3 rounded-xl border-2 border-dashed border-amber-400 bg-amber-50/60 p-3 dark:border-amber-600/50 dark:bg-amber-950/20">
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div className="min-w-0 flex-1">
@@ -1153,56 +1150,16 @@ export function ScanStudioPage({ embedded = false }: { embedded?: boolean }) {
         title="Save as Deliverable PDF"
         description={`Compile a deliverable PDF from the ${scans.length} page(s) currently organized in the scan studio.`}
       >
-        <form
-          className="space-y-4"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void executeBuildPdf();
-          }}
-        >
-          <Field
-            label="Deliverable File Name"
-            htmlFor="build-pdf-filename"
-            hint="Keeps original base name and appends the next version suffix."
-            required
-          >
-            <TextInput
-              id="build-pdf-filename"
-              value={buildName}
-              onChange={(event) => setBuildName(event.target.value)}
-              placeholder="e.g. Proposal_for_Zila_Panchayat_Mahoba_v3.pdf"
-              required
-            />
-          </Field>
-
-          <Field
-            label="Remarks / Notes"
-            htmlFor="build-pdf-remarks"
-            hint="Optional: describe what changed in this version (e.g. 'Reordered pages, added supplementary sheet')."
-          >
-            <TextArea
-              id="build-pdf-remarks"
-              value={buildRemarks}
-              onChange={(event) => setBuildRemarks(event.target.value)}
-              placeholder="Remarks describing what changed or was added in this document version…"
-              rows={3}
-            />
-          </Field>
-
-          <div className="flex items-center justify-end gap-2 pt-2">
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => setBuildingPdf(false)}
-              disabled={busy}
-            >
-              Cancel
-            </Button>
-            <Button type="submit" icon={<FilePdf size={16} />} disabled={busy || !buildName.trim()}>
-              {busy ? 'Building PDF…' : 'Save & Build Deliverable PDF'}
-            </Button>
-          </div>
-        </form>
+        {buildingPdf && (
+          <BuildDeliverablePdfForm
+            defaultName={defaultBuildName}
+            busy={busy}
+            onCancel={() => setBuildingPdf(false)}
+            onSubmit={(name, remarks) => {
+              void executeBuildPdf(name, remarks);
+            }}
+          />
+        )}
       </Modal>
 
       <Modal
@@ -1221,6 +1178,76 @@ export function ScanStudioPage({ embedded = false }: { embedded?: boolean }) {
         )}
       </Modal>
     </div>
+  );
+}
+
+function BuildDeliverablePdfForm({
+  defaultName,
+  busy,
+  onCancel,
+  onSubmit,
+}: {
+  defaultName: string;
+  busy: boolean;
+  onCancel: () => void;
+  onSubmit: (name: string, remarks: string) => void;
+}) {
+  const [name, setName] = useState(defaultName);
+  const [remarks, setRemarks] = useState('');
+
+  return (
+    <form
+      className="space-y-4"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!name.trim()) return;
+        onSubmit(name.trim(), remarks.trim());
+      }}
+    >
+      <Field
+        label="Deliverable File Name"
+        htmlFor="build-pdf-filename"
+        hint="Keeps original base name and appends the next version suffix."
+        required
+      >
+        <TextInput
+          id="build-pdf-filename"
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          placeholder="e.g. Proposal_for_Zila_Panchayat_Mahoba_v3.pdf"
+          required
+          autoFocus
+        />
+      </Field>
+
+      <Field
+        label="Remarks / Notes"
+        htmlFor="build-pdf-remarks"
+        hint="Optional: describe what changed in this version (e.g. 'Reordered pages, added supplementary sheet')."
+      >
+        <TextArea
+          id="build-pdf-remarks"
+          value={remarks}
+          onChange={(event) => setRemarks(event.target.value)}
+          placeholder="Remarks describing what changed or was added in this document version…"
+          rows={3}
+        />
+      </Field>
+
+      <div className="flex items-center justify-end gap-2 pt-2">
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={onCancel}
+          disabled={busy}
+        >
+          Cancel
+        </Button>
+        <Button type="submit" icon={<FilePdf size={16} />} disabled={busy || !name.trim()}>
+          {busy ? 'Building PDF…' : 'Save & Build Deliverable PDF'}
+        </Button>
+      </div>
+    </form>
   );
 }
 

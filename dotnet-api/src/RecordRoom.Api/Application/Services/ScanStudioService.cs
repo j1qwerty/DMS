@@ -392,7 +392,7 @@ public sealed class ScanStudioService(
         byte[] pdf;
         try
         {
-            pdf = Compose(file.Barcode, file.FileNumber, file.Subject, sheets);
+            pdf = Compose(sheets);
         }
         catch (Exception ex) when (ex.Message.Contains("glyph", StringComparison.OrdinalIgnoreCase))
         {
@@ -403,7 +403,7 @@ public sealed class ScanStudioService(
             logger.LogWarning(ex,
                 "OCR text could not be shaped for {Barcode}; building without the text layer.", file.Barcode);
             includesOcr = false;
-            pdf = Compose(file.Barcode, file.FileNumber, file.Subject, sheets, includeText: false);
+            pdf = Compose(sheets, includeText: false);
         }
         catch (Exception ex)
         {
@@ -524,36 +524,24 @@ public sealed class ScanStudioService(
     }
 
     /// <summary>
-    /// QuestPDF composition: one page per sheet. Header names the file, the
-    /// footer numbers pages, and where OCR text exists it is laid down *under*
-    /// the image — fully covered, so the output reads as a scan while the text
-    /// stays selectable and searchable (§3.5's invisible text layer).
-    /// `includeText: false` drops that layer when the available fonts cannot
-    /// shape it (e.g. Hindi OCR text without a Devanagari font); the deliverable
-    /// itself must always build.
+    /// QuestPDF composition: one page per sheet. The scanned sheet image fills the full area
+    /// cleanly without any added headers, footers, or margins.
+    /// Where OCR text exists it is laid down *under* the image — fully covered, so the output reads
+    /// as a scan while the text stays selectable and searchable (§3.5's invisible text layer).
+    /// `includeText: false` drops that layer when the available fonts cannot shape it.
     /// </summary>
     private static byte[] Compose(
-        string barcode, string fileNumber, string subject,
         IReadOnlyList<(byte[] Bytes, string? Text, string Size)> sheets,
         bool includeText = true)
     {
         return Document.Create(container =>
         {
-            foreach (var (sheet, index) in sheets.Select((s, i) => (s, i)))
+            foreach (var (sheet, _) in sheets.Select((s, i) => (s, i)))
             {
                 container.Page(page =>
                 {
                     page.Size(PageSize(sheet.Size));
-                    page.Margin(12);
-                    page.DefaultTextStyle(x => x.FontFamily("Segoe UI").FontSize(9));
-
-                    page.Header().Row(row =>
-                    {
-                        row.RelativeItem().Text($"{fileNumber} — {subject}").FontSize(9).FontColor("#555555");
-                        row.ConstantItem(160).AlignRight()
-                            .Text($"{barcode} · page {index + 1} of {sheets.Count}")
-                            .FontSize(8).FontColor("#888888");
-                    });
+                    page.Margin(0);
 
                     page.Content().Layers(layers =>
                     {
@@ -563,14 +551,6 @@ public sealed class ScanStudioService(
                             layers.Layer().Text(sheet.Text.Trim().ReplaceLineEndings(" ")).FontSize(4);
                         }
                         layers.PrimaryLayer().Image(sheet.Bytes).FitArea();
-                    });
-
-                    page.Footer().AlignCenter().Text(text =>
-                    {
-                        text.Span("Page ").FontSize(8).FontColor("#888888");
-                        text.CurrentPageNumber().FontSize(8).FontColor("#888888");
-                        text.Span(" of ").FontSize(8).FontColor("#888888");
-                        text.TotalPages().FontSize(8).FontColor("#888888");
                     });
                 });
             }

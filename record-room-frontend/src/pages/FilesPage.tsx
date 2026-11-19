@@ -127,8 +127,6 @@ export function FilesPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkMoving, setBulkMoving] = useState(false);
   const [editingEOfficeFile, setEditingEOfficeFile] = useState<RecordFile | null>(null);
-  const [eOfficeDraft, setEOfficeDraft] = useState('');
-  const [savingEOffice, setSavingEOffice] = useState(false);
 
   const toggleOne = (id: string, checked: boolean) =>
     setSelected((current) => {
@@ -687,10 +685,7 @@ export function FilesPage() {
                                   {allowed('files.edit') && (
                                     <button
                                       type="button"
-                                      onClick={() => {
-                                        setEditingEOfficeFile(file);
-                                        setEOfficeDraft(file.eOfficeReference ?? '');
-                                      }}
+                                      onClick={() => setEditingEOfficeFile(file)}
                                       className="focus-ring ml-0.5 text-accent hover:underline"
                                       title="Edit e-office reference"
                                       aria-label="Edit e-office reference"
@@ -703,10 +698,7 @@ export function FilesPage() {
                                 allowed('files.edit') && (
                                   <button
                                     type="button"
-                                    onClick={() => {
-                                      setEditingEOfficeFile(file);
-                                      setEOfficeDraft('');
-                                    }}
+                                    onClick={() => setEditingEOfficeFile(file)}
                                     className="focus-ring inline-flex items-center gap-1 rounded border border-dashed border-base px-1.5 py-0.5 text-[11px] font-medium text-accent hover:bg-accent-soft"
                                     title="Link e-office reference"
                                   >
@@ -833,62 +825,11 @@ export function FilesPage() {
       </Card>
 
       {dialogs}
-      <Modal
-        open={editingEOfficeFile !== null}
+      <EOfficeModal
+        file={editingEOfficeFile}
         onClose={() => setEditingEOfficeFile(null)}
-        title={`E-office Reference — ${editingEOfficeFile?.fileNumber ?? ''}`}
-        description="Enter or update the e-office file name or identifier to link this record."
-      >
-        <form
-          className="space-y-4"
-          onSubmit={async (e) => {
-            e.preventDefault();
-            if (!editingEOfficeFile) return;
-            setSavingEOffice(true);
-            try {
-              const res = await service.files.updateEOfficeReference(
-                editingEOfficeFile.id,
-                eOfficeDraft.trim(),
-              );
-              if (res.ok) {
-                success(
-                  res.value.eOfficeReference
-                    ? 'E-office reference saved.'
-                    : 'E-office reference cleared.',
-                );
-                setEditingEOfficeFile(null);
-                reload();
-              } else {
-                danger(res.error);
-              }
-            } finally {
-              setSavingEOffice(false);
-            }
-          }}
-        >
-          <Field
-            label="E-office file name / ID"
-            htmlFor="eoffice-modal-ref"
-            hint="Clear the field to remove the link."
-          >
-            <TextInput
-              id="eoffice-modal-ref"
-              value={eOfficeDraft}
-              onChange={(e) => setEOfficeDraft(e.target.value)}
-              placeholder="e.g. EOFFICE/REV/2026/00123"
-              autoFocus
-            />
-          </Field>
-          <div className="flex justify-end gap-2 pt-2">
-            <Button variant="ghost" type="button" onClick={() => setEditingEOfficeFile(null)}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={savingEOffice}>
-              {savingEOffice ? 'Saving…' : 'Save reference'}
-            </Button>
-          </div>
-        </form>
-      </Modal>
+        onSaved={reload}
+      />
       {bulkMoving && selectedRows.length > 0 && (
         <BulkMoveModal
           files={selectedRows}
@@ -902,5 +843,82 @@ export function FilesPage() {
         />
       )}
     </div>
+  );
+}
+
+function EOfficeModal({
+  file,
+  onClose,
+  onSaved,
+}: {
+  file: RecordFile | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [draft, setDraft] = useState('');
+  const [saving, setSaving] = useState(false);
+  const { success, danger } = useToast();
+
+  useEffect(() => {
+    if (file) {
+      setDraft(file.eOfficeReference ?? '');
+    }
+  }, [file]);
+
+  if (!file) return null;
+
+  return (
+    <Modal
+      open={true}
+      onClose={onClose}
+      title={`E-office Reference — ${file.fileNumber}`}
+      description="Enter or update the e-office file name or identifier to link this record."
+    >
+      <form
+        className="space-y-4"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          setSaving(true);
+          try {
+            const res = await service.files.updateEOfficeReference(file.id, draft.trim());
+            if (res.ok) {
+              success(
+                res.value.eOfficeReference
+                  ? 'E-office reference saved.'
+                  : 'E-office reference cleared.',
+              );
+              onClose();
+              onSaved();
+            } else {
+              danger(res.error);
+            }
+          } finally {
+            setSaving(false);
+          }
+        }}
+      >
+        <Field
+          label="E-office file name / ID"
+          htmlFor="eoffice-modal-ref"
+          hint="Clear the field to remove the link."
+        >
+          <TextInput
+            id="eoffice-modal-ref"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder="e.g. EOFFICE/REV/2026/00123"
+            autoFocus
+          />
+        </Field>
+        <div className="flex justify-end gap-2 pt-2">
+          <Button variant="ghost" type="button" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={saving}>
+            {saving ? 'Saving…' : 'Save reference'}
+          </Button>
+        </div>
+      </form>
+    </Modal>
   );
 }

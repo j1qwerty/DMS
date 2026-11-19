@@ -37,16 +37,24 @@ export function Modal({
 }) {
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     if (!open) return;
     const dialog = dialogRef.current;
     const previouslyFocused = document.activeElement as HTMLElement | null;
-    dialog?.focus();
+
+    // Focus dialog only if focus is not already inside it (e.g. an autoFocus input)
+    const timer = setTimeout(() => {
+      if (dialog && !dialog.contains(document.activeElement)) {
+        dialog.focus();
+      }
+    }, 0);
 
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (event.key !== 'Tab' || !dialog) return;
@@ -73,12 +81,13 @@ export function Modal({
     const previous = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {
+      clearTimeout(timer);
       window.removeEventListener('keydown', onKey);
       document.body.style.overflow = previous;
       // Give the opener (a row button, a menu item) its focus back.
       previouslyFocused?.focus();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
   return (

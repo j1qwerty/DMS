@@ -622,7 +622,7 @@ function composeLocalPdf(pages: Array<{ label: string; text: string }>): Uint8Ar
     objects.push(
       `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents ${5 + index * 2} 0 R >>`,
     );
-    const lines = [page.label, '', ...(page.text.match(/.{1,90}(?:\s|$)/g)?.slice(0, 40) ?? [])];
+    const lines = [...(page.text.match(/.{1,90}(?:\s|$)/g)?.slice(0, 40) ?? [])];
     const content =
       'BT /F1 10 Tf 40 800 Td 14 TL\n' +
       lines.map((line) => `(${esc(line)}) Tj T*`).join('\n') +
