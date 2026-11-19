@@ -43,7 +43,6 @@ const COMMANDS: Array<{ label: string; to: string; permission?: Permission; feat
     { label: 'Maps', to: '/maps', permission: 'files.view' },
     { label: 'Employees', to: '/admin/employees', permission: 'employees.view' },
     { label: 'Locations designer', to: '/admin/locations', permission: 'locations.view' },
-    { label: 'Bulk import', to: '/admin/bulk-import', permission: 'files.bulkImport' },
     { label: 'Logins', to: '/admin/users', permission: 'users.view' },
     { label: 'Audit trail', to: '/admin/audit', permission: 'audit.view' },
     { label: 'Settings', to: '/settings' },

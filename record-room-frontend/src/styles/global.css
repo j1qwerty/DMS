@@ -1,5 +1,9 @@
 @import 'tailwindcss';
 
+/* The app switches themes with a .dark class on <html>, so `dark:` utilities
+ * must follow the class, not the OS preference. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 /*
  * Record Room design tokens.
  *
@@ -15,6 +19,9 @@
   --rr-accent: #2b4acb;
   --rr-accent-strong: #213aa5;
   --rr-accent-soft: #e4e9fa;
+  /* Solid fills (primary buttons, active tabs, toggles) always carry white
+   * text: #2b4acb on paper is 7.1:1. */
+  --rr-accent-fill: #2b4acb;
   --rr-warning: #9a5a00;
   --rr-danger: #b3312c;
   --rr-success: #1d7448;
@@ -36,8 +43,11 @@
   --rr-muted: #9aa8bd;
   --rr-border: #2b384d;
   --rr-accent: #8da6ff;
-  --rr-accent-strong: #aebfff;
+  --rr-accent-strong: #5d74ec;
   --rr-accent-soft: #1e2a4d;
+  /* #3d5fe8 keeps white text at 5.3:1; text-accent itself stays #8da6ff
+   * (7.9:1 on the dark canvas). */
+  --rr-accent-fill: #3d5fe8;
   --rr-warning: #e0aa5c;
   --rr-danger: #f0908b;
   --rr-success: #6fc99a;

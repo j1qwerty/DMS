@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   Barcode,
   ClipboardText,
+  Sparkle,
   CheckCircle,
   ClockCounterClockwise,
   FileText,
@@ -11,7 +12,7 @@ import {
   Printer,
   UserCircle,
 } from '@phosphor-icons/react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Badge } from '../components/ui/Badge';
 import { Card } from '../components/ui/Card';
 import { Button, LinkButton } from '../components/ui/Button';
@@ -28,6 +29,7 @@ import { pushRecentFile } from '../lib/recent';
 import type { Page, Result } from '../services/contracts';
 import { err } from '../services/contracts';
 import type {
+  DocumentDerivative,
   FileScan,
   IssueRecord,
   MapUpload,
@@ -48,8 +50,23 @@ export function FileDetailPage() {
   const { barcode } = useFeatures();
   const { fileId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const service = useService();
   const { allowed } = useSession();
+
+  /**
+   * Round 4: in-app Back. A direct link (fresh tab) has no in-app history, and
+   * the create-success flow must not send the operator back to the empty form —
+   * both cases go to /files. Anything else pops the real history entry, so
+   * dashboard → file → Back still returns to the dashboard. Pages that want a
+   * specific destination pass `{ from: '/path' }` in navigation state.
+   */
+  const backTarget = (location.state as { from?: string } | null)?.from;
+  const goBack = () => {
+    if (backTarget) navigate(backTarget);
+    else if (location.key === 'default') navigate('/files');
+    else navigate(-1);
+  };
 
   const [shelfId, setShelfId] = useState('');
   const [position, setPosition] = useState(1);
@@ -91,6 +108,13 @@ export function FileDetailPage() {
     () => (fileId ? service.digitization.list(fileId) : Promise.resolve([])),
     [fileId],
     EMPTY_SCANS,
+  );
+  // Deliverable PDFs built in the studio; the newest build and its review
+  // state are part of this section's story now.
+  const { data: deliverables } = useQuery(
+    () => (fileId ? service.digitization.listPdfs(fileId) : Promise.resolve([])),
+    [fileId],
+    [] as DocumentDerivative[],
   );
   const { data: maps, reload: reloadMaps } = useQuery(
     () => service.uploads.maps({ fileBarcode: file?.fileBarcode ?? '' }),
@@ -218,7 +242,7 @@ export function FileDetailPage() {
   return (
     <div className="space-y-7">
       <button
-        onClick={() => navigate(-1)}
+        onClick={goBack}
         className="focus-ring inline-flex items-center gap-2 text-xs font-semibold muted hover:text-[var(--rr-text)]"
       >
         <ArrowLeft size={15} /> Back
@@ -238,6 +262,11 @@ export function FileDetailPage() {
             <LinkButton to="/issue" icon={<ClipboardText size={17} />}>
               Issue / move
             </LinkButton>
+            {allowed('studio.use') && (
+              <LinkButton to={`/files/${file.id}/studio`} icon={<Sparkle size={17} />}>
+                Scan studio
+              </LinkButton>
+            )}
           </>
         }
       />
@@ -336,14 +365,64 @@ export function FileDetailPage() {
                 <FileText className="text-accent" size={19} />
                 <p className="text-sm font-semibold">Scans</p>
               </div>
-              <Badge tone={documents.length + scans.length ? 'success' : 'neutral'}>
-                {documents.length + scans.length} item(s)
-              </Badge>
+              <div className="flex items-center gap-2">
+                <Badge tone={documents.length + scans.length ? 'success' : 'neutral'}>
+                  {documents.length + scans.length} item(s)
+                </Badge>
+                {allowed('studio.use') && (
+                  <LinkButton
+                    to={`/files/${file.id}/studio`}
+                    icon={<Sparkle size={15} />}
+                    className="!min-h-9 !px-3 text-xs"
+                  >
+                    Open studio
+                  </LinkButton>
+                )}
+              </div>
             </div>
             <p className="muted mt-2 text-xs leading-5">
               Add a full-PDF scan for the record, or page-by-page scans with a page number and sheet
               size. Rescans become new versions; page scans await review in the Digitization queue.
+              Composing — reorder, replace, add pages, build the deliverable PDF — happens in the
+              studio, and every built PDF waits for reviewer approval before it counts as the
+              deliverable.
             </p>
+
+            {deliverables.length > 0 && (
+              <div className="mt-4 rounded-xl border border-base bg-accent-soft/40 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold uppercase tracking-wide muted">
+                      Deliverable PDF (latest of {deliverables.length})
+                    </p>
+                    <p className="mt-1 break-all text-xs font-semibold">
+                      {deliverables[0].filename}
+                    </p>
+                    <p className="muted mt-1 text-[11px]">
+                      {deliverables[0].pageCount} page(s) · built {deliverables[0].createdAt} by{' '}
+                      {deliverables[0].createdBy}
+                      {deliverables[0].reviewedBy
+                        ? ` · reviewed by ${deliverables[0].reviewedBy}`
+                        : ''}
+                    </p>
+                    {deliverables[0].reviewNote && (
+                      <p className="muted mt-1 text-[11px]">Note: {deliverables[0].reviewNote}</p>
+                    )}
+                  </div>
+                  <Badge
+                    tone={
+                      deliverables[0].status === 'Approved'
+                        ? 'success'
+                        : deliverables[0].status === 'Rejected'
+                          ? 'danger'
+                          : 'warning'
+                    }
+                  >
+                    {deliverables[0].status}
+                  </Badge>
+                </div>
+              </div>
+            )}
             {allowed('digitization.upload') && (
               <div className="mt-4 rounded-xl border border-base p-4">
                 <div className="flex flex-wrap items-center gap-2">

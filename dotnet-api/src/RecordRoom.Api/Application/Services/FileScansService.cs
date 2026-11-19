@@ -45,7 +45,8 @@ public sealed class FileScansService(
     IPrivateDocumentStore documentStore,
     IFileRefs fileRefs,
     Microsoft.Extensions.Configuration.IConfiguration configuration,
-    ILogger<FileScansService> logger) : IFileScansService
+    ILogger<FileScansService> logger,
+    IOcrService ocr) : IFileScansService
 {
     private static readonly string[] DocumentSizes = ["A0", "A1", "A2", "A3", "A4", "Other"];
 
@@ -129,6 +130,27 @@ public sealed class FileScansService(
         return Result<FileScanPageDto>.Ok((await fileRefs.EnrichAsync(new[] { ToPage(page, fileId) }, ct))[0]);
     }
 
+    /// <summary>
+    /// OCR runs as part of the upload (round 3): the text layer of typed PDFs,
+    /// or a raster+tesseract pass for scans, lands in the searchable OcrText
+    /// column right away. Best effort — an OCR failure must never fail an
+    /// otherwise good upload.
+    /// </summary>
+    private async Task<string> TryOcrAsync(string storageKey, string? contentType, CancellationToken ct)
+    {
+        try
+        {
+            if (!configuration.GetValue("Ocr:Enabled", true)) return "";
+            var extraction = await ocr.ExtractAsync(storageKey, contentType ?? "application/octet-stream", ct);
+            return extraction.Text;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Inline OCR failed for {StorageKey}; run OCR again from the studio.", storageKey);
+            return "";
+        }
+    }
+
     public async Task<Result<FileScanPageDto>> AddDocumentAsync(
         long scanId, Microsoft.AspNetCore.Http.IFormFile? document, CancellationToken ct = default)
     {
@@ -165,6 +187,7 @@ public sealed class FileScansService(
             page.Sha256 = stored.Sha256;
             page.PageCount = stored.PageCount;
             page.Dpi = stored.Dpi;
+            page.OcrText = await TryOcrAsync(stored.StorageKey, stored.ContentType, ct);
             await audit.LogAsync(db, AuditAction.Update, "FileScanPage", page.Id.ToString(),
                 beforeFile,
                 $"{stored.OriginalFileName}; bytes={stored.SizeBytes}; sha256={stored.Sha256}",
@@ -197,7 +220,8 @@ public sealed class FileScansService(
             Note = $"Uploaded document version {version} for page {page.PageNo}.",
             UploadedAt = DateTime.UtcNow, UploadedBy = current.UserName,
             StorageKey = stored.StorageKey, ContentType = stored.ContentType, SizeBytes = stored.SizeBytes, Sha256 = stored.Sha256,
-            PageCount = stored.PageCount, Dpi = stored.Dpi
+            PageCount = stored.PageCount, Dpi = stored.Dpi,
+            OcrText = await TryOcrAsync(stored.StorageKey, stored.ContentType, ct)
         };
         db.ScanPages.Add(rescan);
         await audit.LogAsync(db, AuditAction.Create, "FileScanPage", "pending",

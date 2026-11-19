@@ -20,6 +20,8 @@ public sealed record PrivateDocumentContent(string FileName, string ContentType,
 public interface IPrivateDocumentStore
 {
     long MaxUploadBytes { get; }
+    /// <summary>The resolved directory all document bytes live under (logged at startup).</summary>
+    string RootPath { get; }
     Task<Result<StoredDocument>> SaveAsync(IFormFile? upload, CancellationToken ct = default);
     /// <summary>Stores bytes the API itself produced (generated deliverables), under the same rules as uploads.</summary>
     Task<Result<StoredDocument>> SaveBytesAsync(byte[] bytes, string fileName, string contentType, CancellationToken ct = default);
@@ -38,6 +40,13 @@ public sealed class PrivateDocumentStore : IPrivateDocumentStore
     public const long DefaultMaxUploadBytes = 48L * 1024 * 1024;
     private readonly string _rootPath;
     public long MaxUploadBytes { get; }
+
+    /// <summary>
+    /// The resolved directory every document byte is written under. Logged at
+    /// startup so the effective location (default, appsettings or
+    /// <c>FileStorage__RootPath</c> override) is always visible in the console.
+    /// </summary>
+    public string RootPath => _rootPath;
 
     public PrivateDocumentStore(IConfiguration configuration, IHostEnvironment environment)
     {

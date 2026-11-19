@@ -45,6 +45,21 @@ public class Employee
     public List<AppUser> Users { get; set; } = [];
 }
 
+/// <summary>
+/// The managed department list (round 3): one place to keep names and codes so
+/// employee, custody and file forms pick from it instead of free text. The
+/// code is what external systems exchange; the name is what people read.
+/// </summary>
+public class Department
+{
+    public int Id { get; set; }
+    public required string Name { get; set; }
+    public required string Code { get; set; }
+    public string Remarks { get; set; } = string.Empty;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime ModifiedAt { get; set; } = DateTime.UtcNow;
+}
+
 public class LoginHistoryEntry
 {
     public long Id { get; set; }

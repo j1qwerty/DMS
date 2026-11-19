@@ -38,7 +38,19 @@ export const custodyService: CustodyApi = {
 
     const page = Math.max(query?.page ?? 1, 1);
     const pageSize = Math.min(Math.max(query?.pageSize ?? PAGE_DEFAULT, 1), 100);
-    const items = rows.slice((page - 1) * pageSize, page * pageSize);
+    const items = rows.slice((page - 1) * pageSize, page * pageSize).map((row) =>
+      row.direction === 'Intake'
+        ? {
+            ...row,
+            returnedCount: store
+              .getState()
+              .custodyEvents.filter(
+                (other) => other.sourceCustodyId === row.id && other.direction === 'Return',
+              )
+              .reduce((sum, other) => sum + other.fileCount, 0),
+          }
+        : { ...row, returnedCount: 0 },
+    );
     const result: Page<CustodyEvent> = {
       items,
       total: rows.length,
@@ -66,6 +78,8 @@ export const custodyService: CustodyApi = {
       department,
       vendor: input.vendor?.trim() ?? '',
       fileCount: input.fileCount,
+      returnedCount: 0,
+      sourceCustodyId: null,
       recordedBy: session.actorName(),
       recordedAt: timestamp(),
       signedOffBy: null,
@@ -105,6 +119,8 @@ export const custodyService: CustodyApi = {
       const event = draft.custodyEvents.find((item) => item.id === id);
       if (!event) return;
       event.reconciledCount = reconciledCount;
+      event.reconciledBy = session.actorName();
+      event.reconciledAt = timestamp();
       if (remarks?.trim()) event.remarks = remarks.trim();
       log(draft, {
         action: 'Update',
@@ -117,6 +133,76 @@ export const custodyService: CustodyApi = {
     });
     const updated = store.getState().custodyEvents.find((event) => event.id === id);
     return updated ? ok(updated) : err('Custody event not found.');
+  },
+
+  async returnAgainst(id, input) {
+    const rows = store.getState().custodyEvents;
+    const intake = rows.find((event) => event.id === id);
+    if (!intake) return err('Intake event not found.');
+    if (intake.direction !== 'Intake') {
+      return err('Returns are recorded against an intake batch.', 'sourceCustodyId');
+    }
+    if (!Number.isFinite(input.fileCount) || input.fileCount < 1) {
+      return err('Returned count must be at least 1.', 'fileCount');
+    }
+
+    const expected = intake.reconciledCount ?? intake.fileCount;
+    const already = rows
+      .filter((row) => row.sourceCustodyId === id && row.direction === 'Return')
+      .reduce((sum, row) => sum + row.fileCount, 0);
+    const remaining = expected - already;
+
+    if (remaining < 1) {
+      return err(
+        `All ${expected} file(s) of this batch are already recorded as returned.`,
+        'fileCount',
+      );
+    }
+    if (input.fileCount > remaining) {
+      return err(
+        `Only ${remaining} of ${expected} file(s) are still out; the return cannot exceed them.`,
+        'fileCount',
+      );
+    }
+
+    const handover: CustodyEvent = {
+      id: newId('custody'),
+      direction: 'Return',
+      sourceCustodyId: id,
+      batchRef: intake.batchRef,
+      department: intake.department,
+      vendor: '',
+      fileCount: input.fileCount,
+      returnedCount: 0,
+      recordedBy: session.actorName(),
+      recordedAt: timestamp(),
+      signedOffBy: null,
+      signedOffAt: null,
+      remarks: input.remarks?.trim() ?? '',
+    };
+    store.update((draft) => {
+      draft.custodyEvents.push(handover);
+      log(draft, {
+        action: 'Create',
+        entity: 'CustodyEvent',
+        entityId: handover.id,
+        before: '—',
+        after: `return · ${intake.department} · ${input.fileCount} of ${remaining} out`,
+        summary: `Return of ${input.fileCount} file(s) against the ${intake.department} intake (${input.fileCount + already} of ${expected} back)`,
+      });
+    });
+    return ok(handover);
+  },
+
+  async returnsFor(id) {
+    // Newest first; ties (same-minute returns) break by insertion order, the
+    // same "later rows win" rule the API gets from its identity column.
+    return store
+      .getState()
+      .custodyEvents.filter((row) => row.sourceCustodyId === id)
+      .map((row, index) => ({ row, index }))
+      .sort((a, b) => b.row.recordedAt.localeCompare(a.row.recordedAt) || b.index - a.index)
+      .map((entry) => entry.row);
   },
 
   async signOff(id, signedOffBy) {

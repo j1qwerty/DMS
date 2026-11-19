@@ -194,12 +194,12 @@ export function UsersPage() {
           <p className="text-sm font-semibold">Permission matrix</p>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] text-left text-xs">
+          <table className="w-full min-w-[720px] table-fixed text-left text-xs">
             <thead className="text-[10px] uppercase tracking-wider muted">
-              <tr>
-                <th className="py-2 pr-4">Capability</th>
+              <tr className="border-b border-base">
+                <th className="w-[40%] py-2.5 pr-4">Capability</th>
                 {roles.map((role) => (
-                  <th key={role} className="px-3 py-2 text-center">
+                  <th key={role} className="w-[15%] px-3 py-2.5 text-center">
                     {role}
                   </th>
                 ))}
@@ -208,9 +208,9 @@ export function UsersPage() {
             <tbody className="divide-y divide-[var(--rr-border)]">
               {PERMISSIONS.map((permission) => (
                 <tr key={permission}>
-                  <td className="py-2 pr-4 font-mono">{permission}</td>
+                  <td className="py-2.5 pr-4 font-mono whitespace-nowrap">{permission}</td>
                   {roles.map((role) => (
-                    <td key={role} className="px-3 py-2 text-center">
+                    <td key={role} className="px-3 py-2.5 text-center">
                       <MatrixCell
                         role={role as Role}
                         permission={permission}

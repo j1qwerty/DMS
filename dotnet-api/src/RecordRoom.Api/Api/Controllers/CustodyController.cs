@@ -47,4 +47,18 @@ public class CustodyController(ICustodyService custody) : ControllerBase
     [HttpPost("{id:long}/sign-off")]
     public async Task<IResult> SignOff(long id, CustodySignOffInput input, CancellationToken ct) =>
         ApiResults.FromResult(await custody.SignOffAsync(id, input, ct));
+
+    /// <summary>
+    /// Records a return against a recorded intake: the department's own batch
+    /// comes back, all at once or partially (6 of 10, then 4 of 10).
+    /// </summary>
+    [Authorize(Policy = "perm:digitization.review")]
+    [HttpPost("{id:long}/return")]
+    public async Task<IResult> ReturnAgainst(long id, CustodyReturnAgainstInput input, CancellationToken ct) =>
+        ApiResults.FromResult(await custody.ReturnAgainstAsync(id, input, ct));
+
+    /// <summary>The return events recorded against one intake batch.</summary>
+    [HttpGet("{id:long}/returns")]
+    public async Task<IResult> ReturnsFor(long id, CancellationToken ct) =>
+        Results.Ok(ApiResponse<CustodyEventDto[]>.Ok(await custody.ReturnsForAsync(id, ct)));
 }

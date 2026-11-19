@@ -9,6 +9,7 @@ import {
   Eye,
   MapPinPlus,
   MapTrifold,
+  Sparkle,
   Stack,
   UploadSimple,
 } from '@phosphor-icons/react';
@@ -168,21 +169,26 @@ function MoreMenu({ file, trigger }: { file: RecordFile; trigger?: boolean }) {
 }
 
 /**
- * The action set for one file: view / upload its scan, view / upload its map,
- * move it, and an overflow menu. Buttons the signed-in role cannot use are
- * hidden rather than disabled, so a reader is not shown things they cannot do.
+ * The action set for one file: view / upload its scan, edit it in the studio
+ * (round 4 — parse, reorder, replace pages, build the deliverable PDF), view /
+ * upload its map, move it, and an overflow menu. Buttons the signed-in role
+ * cannot use are hidden rather than disabled, so a reader is not shown things
+ * they cannot do.
  */
 export function FileRowActions({ file, onAction, variant }: Props) {
   const { allowed } = useSession();
   const canEdit = allowed('files.edit');
   const canUploadMap = canEdit || allowed('digitization.upload');
+  const canStudio = allowed('studio.use');
   const scanPath = `/files/${file.id}/scan`;
   const mapPath = `/files/${file.id}/map`;
+  const studioPath = `/files/${file.id}/studio`;
 
   if (variant === 'labeled') {
     return (
       <div className="grid grid-cols-2 gap-2">
         <LabeledAction icon={Eye} label="View file" to={scanPath} />
+        {canStudio && <LabeledAction icon={Sparkle} label="Edit in studio" to={studioPath} />}
         {canEdit && (
           <LabeledAction
             icon={UploadSimple}
@@ -214,6 +220,7 @@ export function FileRowActions({ file, onAction, variant }: Props) {
     <div className="flex items-center gap-1.5">
       <Segment label="File">
         <IconAction icon={Eye} label="View file scan" to={scanPath} />
+        {canStudio && <IconAction icon={Sparkle} label="Edit in scan studio" to={studioPath} />}
         {canEdit && (
           <IconAction
             icon={UploadSimple}

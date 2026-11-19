@@ -15,7 +15,18 @@ service layer instead of hardcoded mock arrays.
 React 19 · TypeScript · Vite 7 · Tailwind CSS v4 · Motion ·
 `@chenglou/pretext` · TanStack Query (reserved for the API) · Phosphor icons.
 
-No backend dependency. No Firebase — see `AGENTS.md`.
+No Firebase — see `AGENTS.md`.
+
+## Running
+
+- **Against the .NET API (default):** `.env.local` ships with
+  `VITE_API_MODE=http` / `VITE_API_BASE_URL=http://localhost:5199`. Start the
+  API first (`cd ../dotnet-api/src/RecordRoom.Api && dotnet run --urls
+  http://localhost:5199`), then `pnpm dev`. The top bar shows a green **Live
+  API** dot; everything you create lands in the API's SQL Server database.
+- **Offline demo:** set `VITE_API_MODE=local` in `.env.local` (or delete the
+  file), then `pnpm dev`. The top bar shows a pulsing red **Demo data** dot —
+  rows live in localStorage and documents in IndexedDB, in this browser only.
 
 ## Architecture
 

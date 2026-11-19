@@ -174,6 +174,10 @@ builder.Services.AddScoped<IUploadsService, UploadsService>();
 builder.Services.AddScoped<IBulkService, BulkService>();
 builder.Services.AddScoped<IBarcodeService, BarcodeService>();
 builder.Services.AddScoped<IReadService, ReadService>();
+builder.Services.AddScoped<IDepartmentsService, DepartmentsService>();
+builder.Services.AddSingleton<RecordRoom.Api.Infrastructure.Ocr.IOcrEngine, RecordRoom.Api.Infrastructure.Ocr.TesseractOcrEngine>();
+builder.Services.AddSingleton<RecordRoom.Api.Infrastructure.Ocr.OcrTextExtractor>();
+builder.Services.AddScoped<IOcrService, OcrService>();
 builder.Services.AddScoped<IReportsService, ReportsService>();
 builder.Services.AddScoped<RecordRoomJobs>();
 builder.Services.AddSingleton<IRealtimePublisher, RealtimePublisher>();
@@ -248,6 +252,15 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+
+    // Where every uploaded scan, map and built deliverable PDF lives on disk.
+    // The database stores only generated storage keys — never paths — so moving
+    // this directory (set FileStorage__RootPath here or as an environment
+    // variable) never touches the data.
+    var documentStore = scope.ServiceProvider.GetRequiredService<IPrivateDocumentStore>();
+    logger.LogInformation(
+        "Document storage root: {Root} (override with FileStorage__RootPath; default App_Data/documents)",
+        documentStore.RootPath);
 
     if (app.Configuration.GetValue("Database:MigrateOnStartup", true))
     {

@@ -1,6 +1,6 @@
 import type { Role } from '../types';
 
-/** The compile-time permission catalogue — same 19 keys as the API's PermissionService.Catalogue. */
+/** The compile-time permission catalogue — same 21 keys as the API's PermissionService.Catalogue. */
 export const PERMISSIONS = [
   'files.view',
   'files.create',
@@ -13,11 +13,13 @@ export const PERMISSIONS = [
   'digitization.view',
   'digitization.upload',
   'digitization.review',
+  'studio.use',
   'employees.view',
   'employees.edit',
   'users.view',
   'users.edit',
   'audit.view',
+  'audit.fileViews',
   'reports.view',
   'reports.export',
   'barcodes.print',
@@ -42,6 +44,7 @@ export const MATRIX_V1: RolePermissionMatrix = {
     'digitization.view',
     'digitization.upload',
     'digitization.review',
+    'studio.use',
     'employees.view',
     'employees.edit',
     'users.view',
@@ -58,9 +61,10 @@ export const MATRIX_V1: RolePermissionMatrix = {
     'locations.view',
     'digitization.view',
     'digitization.upload',
+    'studio.use',
     'employees.view',
     'reports.view',
     'barcodes.print',
   ],
-  Employee: ['files.view', 'digitization.view', 'reports.view'],
+  Employee: ['files.view', 'digitization.view', 'studio.use', 'reports.view'],
 };

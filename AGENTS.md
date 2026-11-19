@@ -25,14 +25,18 @@ If an admin panel for contact/inquiry-type data was not explicitly requested, **
 - Requires Node.js 22+, pnpm 10.15.0: `corepack enable && corepack prepare pnpm@10.15.0 --activate`
 - `pnpm install`, `pnpm dev` (port 5173, `strictPort: true`)
 - All commands run from `record-room-frontend/`. pnpm is mandatory — no npm fallback locally.
-- Defaults to the in-memory adapter. To run against the API, copy `.env.example` to `.env.local` and set `VITE_API_MODE=http`.
+- `pnpm dev` talks to the real API: `.env.local` ships with `VITE_API_MODE=http` and
+  `VITE_API_BASE_URL=http://localhost:5199` (start the API first — see below). Delete the file or
+  set `local` there for the offline in-memory demo; the top bar shows which one is live (red dot =
+  demo, green dot = API). `pnpm test` pins `VITE_API_MODE=local` in `vitest.config.ts`, so the
+  suites never depend on a running backend.
 
 ## API setup (`dotnet-api/`)
 
 - Requires .NET 10 SDK and a reachable SQL Server. See `dotnet-api/README.md`.
 - `cd src/RecordRoom.Api && dotnet run --urls http://localhost:5199`
 - Applies EF migrations and seeds the demo dataset if the registry is empty.
-- Tests: `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test-api.ps1` (142 assertions, no browser). Plus `dotnet test` for the pure-logic unit tests.
+- Tests: `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test-api.ps1` (HTTP harness against SQL Server, no browser). Plus `dotnet test` for the unit tests **and the round-4 flow tests** (SQLite in-memory + a real document store directory — no SQL Server needed).
 
 ## Verify
 

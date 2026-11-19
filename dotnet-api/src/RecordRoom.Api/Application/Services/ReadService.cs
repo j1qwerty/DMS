@@ -17,7 +17,9 @@ public interface IReadService
 {
     Task<MovementDto[]> MovementsAsync(string? kind, string? search, int limit, CancellationToken ct = default);
     Task<MovementDto[]> FileMovementsAsync(int fileId, CancellationToken ct = default);
-    Task<AuditEntry[]> AuditAsync(string? action, string? actor, string? entity, string? search, int limit, CancellationToken ct = default);
+    Task<AuditEntry[]> AuditAsync(string? action, string? actor, string? entity, string? group, string? search, int limit, CancellationToken ct = default);
+    /// <summary>The "who opened which file" trail (§ round 3); gated by audit.fileViews.</summary>
+    Task<AuditEntry[]> FileViewsAsync(string? search, int limit, CancellationToken ct = default);
     Task<LoginHistoryEntry[]> LoginHistoryAsync(string? outcome, string? search, CancellationToken ct = default);
     Task<string[]> AuditActorsAsync(CancellationToken ct = default);
     Task<DashboardStatsDto> DashboardStatsAsync(CancellationToken ct = default);
@@ -71,10 +73,31 @@ public sealed class ReadService(AppDbContext db, ICacheService cache, IFileRefs 
         return await fileRefs.EnrichAsync(rows.Select(ToMovement).ToArray(), ct);
     }
 
+    /// <summary>
+    /// The audit groups; the entity names are the ones the services actually
+    /// write, so the grouping follows the trail instead of a parallel taxonomy.
+    /// Round 4 splits the round-3 "logins-issues" group so the admin page has
+    /// separate Logins and Issues tabs (the combined key keeps resolving for
+    /// older links).
+    /// </summary>
+    private static readonly Dictionary<string, string[]> AuditGroups = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["documents"] = ["RecordFile", "MapUpload", "BulkImportJob", "BarcodeJob", "Department"],
+        ["digitization"] = ["FileScanPage", "CustodyEvent", "DocumentDerivative"],
+        ["logins-issues"] = ["Session", "IssueRecord", "MovementEvent"],
+        ["logins"] = ["Session"],
+        ["issues"] = ["IssueRecord", "MovementEvent"],
+    };
+
     public async Task<AuditEntry[]> AuditAsync(
-        string? action, string? actor, string? entity, string? search, int limit, CancellationToken ct)
+        string? action, string? actor, string? entity, string? group, string? search, int limit, CancellationToken ct)
     {
         var query = db.Audit.AsNoTracking().AsQueryable();
+        if (!string.IsNullOrWhiteSpace(group) && AuditGroups.TryGetValue(group.Trim(), out var entities))
+        {
+            var targets = entities;
+            query = query.Where(e => targets.Contains(e.Entity));
+        }
         if (!string.IsNullOrWhiteSpace(action) && action != "All")
         {
             var parsed = Enum.TryParse<AuditAction>(action, true, out var a) ? a : (AuditAction?)null;
@@ -97,6 +120,22 @@ public sealed class ReadService(AppDbContext db, ICacheService cache, IFileRefs 
                 || e.Ip.ToLower().Contains(needle));
         }
 
+        return (await query.OrderByDescending(e => e.At)
+            .Take(Math.Clamp(limit, 1, 1000)).ToListAsync(ct)).ToArray();
+    }
+
+    public async Task<AuditEntry[]> FileViewsAsync(string? search, int limit, CancellationToken ct)
+    {
+        var query = db.Audit.AsNoTracking()
+            .Where(e => e.Action == AuditAction.View && e.Entity == "RecordFile");
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var needle = search.Trim().ToLower();
+            query = query.Where(e =>
+                e.Summary.ToLower().Contains(needle)
+                || e.Actor.ToLower().Contains(needle)
+                || e.EntityId.ToLower().Contains(needle));
+        }
         return (await query.OrderByDescending(e => e.At)
             .Take(Math.Clamp(limit, 1, 1000)).ToListAsync(ct)).ToArray();
     }

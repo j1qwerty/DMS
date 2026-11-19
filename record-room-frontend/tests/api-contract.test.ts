@@ -348,6 +348,45 @@ describeIfLive('role enforcement against the API', () => {
   });
 });
 
+describeIfLive('round-4 contract: split audit groups and deliverable review', () => {
+  it('serves the logins and issues audit groups separately', async () => {
+    const headers = { Authorization: `Bearer ${getToken()}` };
+
+    const logins = await fetch(`${apiBase()}/api/audit?group=logins&limit=50`, { headers });
+    expect(logins.status).toBe(200);
+    const loginRows = ((await logins.json()) as { data: { entity: string }[] }).data;
+    expect(loginRows.length).toBeGreaterThan(0);
+    expect(loginRows.every((row) => row.entity === 'Session')).toBe(true);
+
+    const issues = await fetch(`${apiBase()}/api/audit?group=issues&limit=50`, { headers });
+    expect(issues.status).toBe(200);
+    const issueRows = ((await issues.json()) as { data: { entity: string }[] }).data;
+    expect(issueRows.length).toBeGreaterThan(0);
+    expect(
+      issueRows.every((row) => row.entity === 'IssueRecord' || row.entity === 'MovementEvent'),
+    ).toBe(true);
+  });
+
+  it('maps the deliverable status fields through the adapter', async () => {
+    const files = await httpFilesService.list({ pageSize: 1 });
+    expect(files.items.length).toBeGreaterThan(0);
+
+    const pdfs = await httpDigitizationService.listPdfs(files.items[0].id);
+    expect(Array.isArray(pdfs)).toBe(true);
+    for (const pdf of pdfs) {
+      // The status spelling is the contract the studio's badges rely on.
+      expect(['Pending approval', 'Approved', 'Rejected']).toContain(pdf.status);
+      if (pdf.status === 'Pending approval') expect(pdf.reviewedBy).toBeUndefined();
+      else expect(pdf.reviewedBy).toBeTruthy();
+    }
+  });
+
+  it('refuses to review a deliverable from another file', async () => {
+    const result = await httpDigitizationService.reviewPdf('derivative-999999999', 'Approved');
+    expect(result.ok).toBe(false);
+  });
+});
+
 async function firstActiveShelf() {
   const rooms = await httpLocationsService.listRooms();
   for (const room of rooms) {

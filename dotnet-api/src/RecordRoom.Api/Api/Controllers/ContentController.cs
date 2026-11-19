@@ -37,7 +37,7 @@ public class FileScansController(IFileScansService scans, IScanStudioService stu
     public async Task<IResult> List(int fileId, CancellationToken ct) =>
         Results.Ok(ApiResponse<FileScanPageDto[]>.Ok(await scans.ListByFileAsync(fileId, ct)));
 
-    [Authorize(Policy = "perm:digitization.upload")]
+    [Authorize(Policy = "perm:studio.use")]
     [HttpPost]
     public async Task<IResult> Add(int fileId, ScanAddInput input, CancellationToken ct) =>
         ApiResults.FromResult(await scans.AddAsync(fileId, input, ct));
@@ -48,7 +48,7 @@ public class FileScansController(IFileScansService scans, IScanStudioService stu
         ApiResults.FromResult(await scans.ReviewAllAsync(fileId, input, ct));
 
     /// <summary>Scan studio (§3.4): persists the composition order of the file's pages.</summary>
-    [Authorize(Policy = "perm:digitization.upload")]
+    [Authorize(Policy = "perm:studio.use")]
     [HttpPut("order")]
     public async Task<IResult> Order(int fileId, ScanOrderInput input, CancellationToken ct) =>
         ApiResults.FromResult(await studio.ReorderAsync(fileId, input, ct));
@@ -59,9 +59,9 @@ public class FileScansController(IFileScansService scans, IScanStudioService stu
 [Authorize]
 [Produces("application/json")]
 [Tags("Digitization")]
-public class ScansController(IFileScansService scans, IScanStudioService studio) : ControllerBase
+public class ScansController(IFileScansService scans, IScanStudioService studio, IOcrService ocr) : ControllerBase
 {
-    [Authorize(Policy = "perm:digitization.upload")]
+    [Authorize(Policy = "perm:studio.use")]
     [HttpPost("{scanId:long}/document")]
     [Consumes("multipart/form-data")]
     [RequestSizeLimit(50331648)]
@@ -96,28 +96,38 @@ public class ScansController(IFileScansService scans, IScanStudioService studio)
     // ------------------------------------------------------------ scan studio
 
     /// <summary>Writes a rotated processed copy; the original blob is never touched.</summary>
-    [Authorize(Policy = "perm:digitization.upload")]
+    [Authorize(Policy = "perm:studio.use")]
     [HttpPost("{scanId:long}/rotate")]
     public async Task<IResult> Rotate(long scanId, ScanRotateInput input, CancellationToken ct) =>
         ApiResults.FromResult(await studio.RotateAsync(scanId, input, ct));
 
     /// <summary>Applies deskew / despeckle / binarize / crop / contrast as the processed copy.</summary>
-    [Authorize(Policy = "perm:digitization.upload")]
+    [Authorize(Policy = "perm:studio.use")]
     [HttpPost("{scanId:long}/enhance")]
     public async Task<IResult> Enhance(long scanId, ScanEnhanceInput input, CancellationToken ct) =>
         ApiResults.FromResult(await studio.EnhanceAsync(scanId, input, ct));
 
     /// <summary>Drops the processed copy and serves the original again.</summary>
-    [Authorize(Policy = "perm:digitization.upload")]
+    [Authorize(Policy = "perm:studio.use")]
     [HttpDelete("{scanId:long}/enhancement")]
     public async Task<IResult> Revert(long scanId, CancellationToken ct) =>
         ApiResults.FromResult(await studio.RevertAsync(scanId, ct));
 
     /// <summary>Duplicates a page as its next version (insert-after semantics).</summary>
-    [Authorize(Policy = "perm:digitization.upload")]
+    [Authorize(Policy = "perm:studio.use")]
     [HttpPost("{scanId:long}/duplicate")]
     public async Task<IResult> Duplicate(long scanId, CancellationToken ct) =>
         ApiResults.FromResult(await studio.DuplicateAsync(scanId, ct));
+
+    /// <summary>
+    /// Re-runs OCR for one page — the PDF text layer for typed documents, a
+    /// raster + tesseract pass (hin+eng) for scans. Runs automatically on
+    /// upload; this is the explicit, audited re-run.
+    /// </summary>
+    [Authorize(Policy = "perm:studio.use")]
+    [HttpPost("{scanId:long}/ocr")]
+    public async Task<IResult> RunOcr(long scanId, CancellationToken ct) =>
+        ApiResults.FromResult(await ocr.RunAsync(scanId, ct));
 }
 
 internal static class DocumentHttpHeaders

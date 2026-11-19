@@ -276,7 +276,39 @@ public sealed class FilesService(
     public async Task<FileDto?> GetAsync(int id, CancellationToken ct = default)
     {
         var file = await db.Files.AsNoTracking().FirstOrDefaultAsync(f => f.Id == id, ct);
-        return file is null ? null : await ProjectAsync(file, ct);
+        if (file is null) return null;
+        await RecordViewAsync(file, ct);
+        return await ProjectAsync(file, ct);
+    }
+
+    /// <summary>
+    /// The "who accessed" half of the audit scope (§1.1): opening a file's
+    /// detail page leaves a View row. The same person re-opening the same file
+    /// within five minutes counts once — registry refreshes must not flood the
+    /// trail. Best effort: a logging failure never breaks the read.
+    /// </summary>
+    private async Task RecordViewAsync(RecordFile file, CancellationToken ct)
+    {
+        try
+        {
+            var actor = current.UserName;
+            if (string.IsNullOrEmpty(actor)) return;
+
+            var since = DateTime.UtcNow.AddMinutes(-5);
+            var recent = await db.Audit.AsNoTracking().AnyAsync(e =>
+                e.Action == AuditAction.View && e.Entity == "RecordFile"
+                && e.EntityId == file.Id.ToString() && e.Actor == actor && e.At >= since, ct);
+            if (recent) return;
+
+            await audit.LogAsync(
+                db, AuditAction.View, "RecordFile", file.Id.ToString(), "-", "-",
+                $"{actor} opened {file.Barcode} — {file.Subject}.", ct);
+            await db.SaveChangesAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not record the file view for {FileId}.", file.Id);
+        }
     }
 
     public async Task<FileDto?> ByBarcodeAsync(string barcode, CancellationToken ct = default)

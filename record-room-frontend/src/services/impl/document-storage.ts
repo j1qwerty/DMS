@@ -4,9 +4,25 @@ import { validateDocumentFile } from '../../lib/document';
 import { newId, timestamp } from '../store';
 import { session } from './session';
 
-/** Local/demo-mode document bytes only live for this browser session. Use the .NET API for durable storage. */
+/**
+ * Local/demo-mode document storage.
+ *
+ * Round 4: rows and bytes now persist in IndexedDB (`rr-documents`), so a page
+ * refresh keeps every uploaded scan, map and built PDF. Before this, the lists
+ * lived in memory for the session only — the scan rows survived (the store
+ * persists) but their files vanished, and full-PDF record documents disappeared
+ * entirely. The .NET API remains the durable store for real deployments; this
+ * is the honest demo.
+ *
+ * The in-memory Maps stay the read path (the accessors are synchronous by
+ * contract); IndexedDB is a write-through cache hydrated once at boot by
+ * `initLocalDocumentStorage()`. Where IndexedDB is unavailable (vitest's node
+ * environment, private modes) every operation degrades to the previous
+ * session-only behaviour instead of throwing.
+ */
 const blobs = new Map<string, Blob>();
 const recordDocuments = new Map<string, RecordFileDocument[]>();
+const derivativeBytes = new Map<string, Blob>();
 
 export interface LocalDocumentInfo {
   contentType: string;
@@ -23,6 +39,121 @@ const mimeByExtension: Record<string, string> = {
   png: 'image/png',
   gif: 'image/gif',
 };
+
+const IDB_NAME = 'rr-documents';
+const IDB_STORE = 'docs';
+const IDB_VERSION = 1;
+
+interface StoredDoc {
+  key: string;
+  blob: Blob;
+  /** Present for the 'record' scope: the versioned full-PDF row. */
+  row?: RecordFileDocument;
+}
+
+let idb: IDBDatabase | null | undefined;
+
+function openIdb(): Promise<IDBDatabase | null> {
+  if (idb !== undefined) return Promise.resolve(idb);
+  if (typeof indexedDB === 'undefined') {
+    idb = null;
+    return Promise.resolve(null);
+  }
+  return new Promise((resolve) => {
+    const request = indexedDB.open(IDB_NAME, IDB_VERSION);
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains(IDB_STORE)) {
+        request.result.createObjectStore(IDB_STORE, { keyPath: 'key' });
+      }
+    };
+    request.onsuccess = () => {
+      idb = request.result;
+      resolve(request.result);
+    };
+    request.onerror = () => {
+      // Unavailable or blocked: fall back to session-only storage.
+      idb = null;
+      resolve(null);
+    };
+  });
+}
+
+function idbPut(doc: StoredDoc): Promise<void> {
+  return openIdb().then(
+    (db) =>
+      new Promise<void>((resolve) => {
+        if (!db) return resolve();
+        const tx = db.transaction(IDB_STORE, 'readwrite');
+        tx.objectStore(IDB_STORE).put(doc);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => resolve();
+        tx.onabort = () => resolve();
+      }),
+  );
+}
+
+function idbDelete(key: string): Promise<void> {
+  return openIdb().then(
+    (db) =>
+      new Promise<void>((resolve) => {
+        if (!db) return resolve();
+        const tx = db.transaction(IDB_STORE, 'readwrite');
+        tx.objectStore(IDB_STORE).delete(key);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => resolve();
+        tx.onabort = () => resolve();
+      }),
+  );
+}
+
+function idbClear(): Promise<void> {
+  return openIdb().then(
+    (db) =>
+      new Promise<void>((resolve) => {
+        if (!db) return resolve();
+        const tx = db.transaction(IDB_STORE, 'readwrite');
+        tx.objectStore(IDB_STORE).clear();
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => resolve();
+        tx.onabort = () => resolve();
+      }),
+  );
+}
+
+function idbAll(): Promise<StoredDoc[]> {
+  return openIdb().then(
+    (db) =>
+      new Promise<StoredDoc[]>((resolve) => {
+        if (!db) return resolve([]);
+        const tx = db.transaction(IDB_STORE, 'readonly');
+        const request = tx.objectStore(IDB_STORE).getAll();
+        request.onsuccess = () => resolve((request.result ?? []) as StoredDoc[]);
+        request.onerror = () => resolve([]);
+      }),
+  );
+}
+
+/**
+ * Loads every stored document into the in-memory maps. Called once before the
+ * app renders, so the synchronous accessors see the persisted files. Safe to
+ * call again; later calls are no-ops.
+ */
+let hydrated = false;
+export async function initLocalDocumentStorage(): Promise<void> {
+  if (hydrated) return;
+  hydrated = true;
+  const docs = await idbAll();
+  for (const doc of docs) {
+    blobs.set(doc.key, doc.blob);
+    if (doc.row) {
+      const fileId = doc.row.fileId;
+      recordDocuments.set(fileId, [...(recordDocuments.get(fileId) ?? []), doc.row]);
+    }
+    if (doc.key.startsWith('derivative:')) {
+      derivativeBytes.set(doc.key.slice('derivative:'.length), doc.blob);
+    }
+  }
+}
 
 /**
  * Reads a PDF page count the same way the API does, by scanning the raw bytes for
@@ -85,7 +216,10 @@ export async function addLocalRecordDocument(fileId: string, barcode: string, fi
     uploadedBy: session.userName(),
   };
   recordDocuments.set(fileId, [...rows, row]);
-  blobs.set(blobKey('record', row.id), new Blob([file], { type: info.contentType }));
+  const key = blobKey('record', row.id);
+  const blob = new Blob([file], { type: info.contentType });
+  blobs.set(key, blob);
+  await idbPut({ key, blob, row });
   return ok(row);
 }
 
@@ -97,8 +231,23 @@ export async function saveLocalRowDocument(
   const issue = validateDocumentFile(file);
   if (issue) throw new Error(issue);
   const info = await documentInfo(file);
-  blobs.set(blobKey(scope, id), new Blob([file], { type: info.contentType }));
+  const key = blobKey(scope, id);
+  const blob = new Blob([file], { type: info.contentType });
+  blobs.set(key, blob);
+  await idbPut({ key, blob });
   return info;
+}
+
+/** Stores the bytes of a locally built deliverable PDF (write-through). */
+export async function saveLocalDerivativeBytes(id: string, bytes: Uint8Array): Promise<void> {
+  const blob = new Blob([bytes as BlobPart], { type: 'application/pdf' });
+  derivativeBytes.set(id, blob);
+  await idbPut({ key: `derivative:${id}`, blob });
+}
+
+/** The stored bytes of a locally built deliverable, or null when they are gone. */
+export function localDerivativeBlob(id: string): Blob | null {
+  return derivativeBytes.get(id) ?? null;
 }
 
 export function localDocumentBlob(scope: 'record' | 'page' | 'map', id: string): Blob {
@@ -116,10 +265,10 @@ export function localRecordDocumentBlob(fileId: string, documentId: string): Blo
 }
 
 /** Removes one stored scan version and its bytes; mirrors the API's delete. */
-export function deleteLocalRecordDocument(
+export async function deleteLocalRecordDocument(
   fileId: string,
   documentId: string,
-): { filename: string; version: number } | null {
+): Promise<{ filename: string; version: number } | null> {
   const rows = recordDocuments.get(fileId) ?? [];
   const row = rows.find((item) => item.id === documentId);
   if (!row) return null;
@@ -128,12 +277,15 @@ export function deleteLocalRecordDocument(
     rows.filter((item) => item.id !== documentId),
   );
   blobs.delete(blobKey('record', documentId));
+  await idbDelete(blobKey('record', documentId));
   return { filename: row.filename, version: row.version };
 }
 
-export function clearLocalDocumentStorage(): void {
+export async function clearLocalDocumentStorage(): Promise<void> {
   blobs.clear();
   recordDocuments.clear();
+  derivativeBytes.clear();
+  await idbClear();
 }
 
 function blobKey(scope: 'record' | 'page' | 'map', id: string): string {

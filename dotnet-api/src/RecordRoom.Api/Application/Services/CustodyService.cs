@@ -18,6 +18,10 @@ public interface ICustodyService
     Task<Result<CustodyEventDto>> RecordAsync(CustodyRecordInput input, CancellationToken ct = default);
     Task<Result<CustodyEventDto>> ReconcileAsync(long id, CustodyReconcileInput input, CancellationToken ct = default);
     Task<Result<CustodyEventDto>> SignOffAsync(long id, CustodySignOffInput input, CancellationToken ct = default);
+    /// <summary>Records a return against a recorded intake: the department's own batch comes back.</summary>
+    Task<Result<CustodyEventDto>> ReturnAgainstAsync(long intakeId, CustodyReturnAgainstInput input, CancellationToken ct = default);
+    /// <summary>The return events recorded against one intake (the batch's return history).</summary>
+    Task<CustodyEventDto[]> ReturnsForAsync(long intakeId, CancellationToken ct = default);
 }
 
 public sealed class CustodyService(
@@ -27,10 +31,25 @@ public sealed class CustodyService(
 {
     private const int MaxPageSize = 100;
 
-    private static CustodyEventDto ToDto(CustodyEvent e) => new(
+    private static CustodyEventDto ToDto(CustodyEvent e, int returnedCount = 0) => new(
         e.Id, Display.Custody(e.Direction), e.BatchRef, e.Department, e.Vendor,
-        e.FileCount, e.ReconciledCount, e.RecordedBy, e.RecordedAt,
+        e.FileCount, e.ReconciledCount, e.ReconciledBy, e.ReconciledAt,
+        returnedCount, e.SourceCustodyId, e.RecordedBy, e.RecordedAt,
         e.SignedOffBy, e.SignedOffAt, e.Remarks);
+
+    /// <summary>Returned totals per intake id for a page of rows, in one query.</summary>
+    private async Task<Dictionary<long, int>> ReturnedTotalsAsync(IEnumerable<long> intakeIds, CancellationToken ct)
+    {
+        var ids = intakeIds.ToArray();
+        if (ids.Length == 0) return [];
+
+        var sums = await db.CustodyEvents.AsNoTracking()
+            .Where(r => r.SourceCustodyId != null && ids.Contains(r.SourceCustodyId.Value))
+            .GroupBy(r => r.SourceCustodyId!.Value)
+            .Select(g => new { Id = g.Key, Total = g.Sum(r => r.FileCount) })
+            .ToListAsync(ct);
+        return sums.ToDictionary(s => s.Id, s => s.Total);
+    }
 
     public async Task<PagedResult<CustodyEventDto>> ListAsync(CustodyQuery query, CancellationToken ct = default)
     {
@@ -60,10 +79,15 @@ public sealed class CustodyService(
             .Take(pageSize)
             .ToListAsync(ct);
 
+        // Intakes carry "x of y returned" so the register shows batch progress.
+        var returned = await ReturnedTotalsAsync(
+            items.Where(e => e.Direction == CustodyDirection.In).Select(e => e.Id), ct);
+
         // The register is small, so collectionTotal is the true filtered size —
         // the UI shows "1-N of total" honestly, with no legacy fallback figure.
         return new PagedResult<CustodyEventDto>(
-            items.Select(ToDto).ToArray(), total, page, pageSize, total);
+            items.Select(e => ToDto(e, e.Direction == CustodyDirection.In ? returned.GetValueOrDefault(e.Id) : 0)).ToArray(),
+            total, page, pageSize, total);
     }
 
     public async Task<Result<CustodyEventDto>> RecordAsync(CustodyRecordInput input, CancellationToken ct = default)
@@ -120,6 +144,8 @@ public sealed class CustodyService(
 
         var before = $"counted {(custody.ReconciledCount?.ToString() ?? "not yet")}";
         custody.ReconciledCount = input.ReconciledCount;
+        custody.ReconciledBy = current.User?.DisplayName ?? current.UserName;
+        custody.ReconciledAt = DateTime.UtcNow;
         if (!string.IsNullOrWhiteSpace(input.Remarks)) custody.Remarks = input.Remarks.Trim();
 
         await audit.LogAsync(
@@ -157,6 +183,68 @@ public sealed class CustodyService(
             RealtimeChannels.Digitization, "custody.signed-off", custody.Id.ToString(),
             $"{Display.Custody(custody.Direction)} · {custody.Department} · signed off");
         return Result<CustodyEventDto>.Ok(ToDto(custody));
+    }
+
+    public async Task<Result<CustodyEventDto>> ReturnAgainstAsync(
+        long intakeId, CustodyReturnAgainstInput input, CancellationToken ct = default)
+    {
+        var intake = await db.CustodyEvents.FirstOrDefaultAsync(e => e.Id == intakeId, ct);
+        if (intake is null) return Result<CustodyEventDto>.Fail("Intake event not found.");
+
+        if (intake.Direction != CustodyDirection.In)
+            return Result<CustodyEventDto>.Fail("Returns are recorded against an intake batch.", "sourceCustodyId");
+
+        if (input.FileCount < 1)
+            return Result<CustodyEventDto>.Fail("Returned count must be at least 1.", "fileCount");
+
+        // The expected total is the counted figure when the intake was
+        // reconciled, otherwise what the department declared.
+        var expected = intake.ReconciledCount ?? intake.FileCount;
+        var already = await db.CustodyEvents.AsNoTracking()
+            .Where(r => r.SourceCustodyId == intakeId)
+            .SumAsync(r => (int?)r.FileCount, ct) ?? 0;
+        var remaining = expected - already;
+
+        if (remaining < 1)
+            return Result<CustodyEventDto>.Fail(
+                $"All {expected} file(s) of this batch are already recorded as returned.", "fileCount");
+
+        if (input.FileCount > remaining)
+            return Result<CustodyEventDto>.Fail(
+                $"Only {remaining} of {expected} file(s) are still out; the return cannot exceed them.", "fileCount");
+
+        var actor = current.User?.DisplayName ?? current.UserName;
+        var handover = new CustodyEvent
+        {
+            Direction = CustodyDirection.Out,
+            SourceCustodyId = intakeId,
+            // The batch identity follows the intake; the register stays one story.
+            BatchRef = intake.BatchRef,
+            Department = intake.Department,
+            FileCount = input.FileCount,
+            RecordedBy = actor,
+            Remarks = input.Remarks.Trim(),
+        };
+        db.CustodyEvents.Add(handover);
+        await audit.LogAsync(
+            db, AuditAction.Create, "CustodyEvent", "pending", "-",
+            $"return · {intake.Department} · {input.FileCount} of {remaining} out",
+            $"{actor} recorded a return of {input.FileCount} file(s) against the {intake.Department} intake ({input.FileCount + already} of {expected} back).",
+            ct);
+        await db.SaveChangesAsync(ct);
+        await audit.AnnounceAsync(
+            RealtimeChannels.Digitization, "custody.returned", handover.Id.ToString(),
+            $"Return · {intake.Department} · {input.FileCount + already} of {expected} back");
+        return Result<CustodyEventDto>.Ok(ToDto(handover));
+    }
+
+    public async Task<CustodyEventDto[]> ReturnsForAsync(long intakeId, CancellationToken ct = default)
+    {
+        var rows = await db.CustodyEvents.AsNoTracking()
+            .Where(r => r.SourceCustodyId == intakeId)
+            .OrderByDescending(r => r.RecordedAt)
+            .ToListAsync(ct);
+        return [.. rows.Select(r => ToDto(r))];
     }
 
 }

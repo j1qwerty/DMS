@@ -55,6 +55,24 @@ public static class DatabaseSeeder
             logger.LogInformation("Seeded the role permission matrix from the v1 lists.");
         }
 
+        // The managed department list (round 3) starts as the vocabulary the
+        // registry seed itself uses; admins add, rename and remove from the
+        // Administration screen afterwards. Only while the table is empty, so
+        // a restart never re-adds a department an admin deleted.
+        if (!await db.Departments.AnyAsync(ct))
+        {
+            foreach (var (name, code) in new[]
+            {
+                ("Audit", "AUD"), ("COMMERCIAL", "COM"), ("Education", "EDU"),
+                ("Engineering", "ENG"), ("Establishment", "EST"), ("HR", "HR"),
+                ("PERSONNEL", "PER"), ("Revenue", "REV"),
+            })
+                db.Departments.Add(new Department { Name = name, Code = code });
+
+            await db.SaveChangesAsync(ct);
+            logger.LogInformation("Seeded the managed department list.");
+        }
+
         if (await db.Files.AnyAsync(ct))
         {
             logger.LogInformation("Seed skipped: the registry already has rows.");

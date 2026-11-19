@@ -270,7 +270,8 @@ export type AuditAction =
   | 'Relocate'
   | 'Approve'
   | 'Reject'
-  | 'Export';
+  | 'Export'
+  | 'View';
 
 export interface AuditEntry {
   id: string;
@@ -347,6 +348,14 @@ export interface DocumentDerivative {
   includesOcrText: boolean;
   createdAt: string;
   createdBy: string;
+  /**
+   * Round 4: a built PDF waits for reviewer sign-off before it counts as the
+   * file's deliverable. Old builds keep their place in the history either way.
+   */
+  status: 'Pending approval' | 'Approved' | 'Rejected';
+  reviewedBy?: string;
+  reviewedAt?: string;
+  reviewNote?: string;
 }
 
 export type CustodyDirection = 'Intake' | 'Return';
@@ -368,11 +377,29 @@ export interface CustodyEvent {
   fileCount: number;
   /** Files actually counted; null until the intake side is reconciled. */
   reconciledCount?: number | null;
+  /** Who ran the reconciliation count, and when (intakes only). */
+  reconciledBy?: string | null;
+  reconciledAt?: string | null;
+  /** Files already returned against this intake (intakes only). */
+  returnedCount?: number;
+  /** The intake a return was recorded against, when it was. */
+  sourceCustodyId?: string | null;
   recordedBy: string;
   recordedAt: string;
   signedOffBy?: string | null;
   signedOffAt?: string | null;
   remarks: string;
+}
+
+/** A managed department (round 3): names and codes maintained in one place. */
+export interface Department {
+  id: string;
+  name: string;
+  code: string;
+  remarks: string;
+  /** Employees currently filed under the department; blocks deletion when > 0. */
+  employeeCount: number;
+  createdAt: string;
 }
 
 /** `upload_map` — scanned room/area maps attached to a file. */

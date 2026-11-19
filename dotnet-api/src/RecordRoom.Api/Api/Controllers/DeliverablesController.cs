@@ -25,10 +25,27 @@ public class DeliverablesController(IScanStudioService studio) : ControllerBase
     public async Task<IResult> List(int fileId, CancellationToken ct) =>
         Results.Ok(ApiResponse<DocumentDerivativeDto[]>.Ok(await studio.ListPdfsAsync(fileId, ct)));
 
-    [Authorize(Policy = "perm:digitization.review")]
+    [Authorize(Policy = "perm:studio.use")]
     [HttpPost]
     public async Task<IResult> Build(int fileId, DeliverablePdfInput input, CancellationToken ct) =>
         ApiResults.FromResult(await studio.BuildPdfAsync(fileId, input, ct));
+
+    /// <summary>
+    /// Round 4: a freshly built PDF is "Pending approval"; a reviewer verifies
+    /// the final composition here. Rejections require a reason and keep the
+    /// build in the history for tracking.
+    /// </summary>
+    [Authorize(Policy = "perm:digitization.review")]
+    [HttpPost("{derivativeId:long}/review")]
+    public async Task<IResult> Review(
+        int fileId, long derivativeId, DeliverableReviewInput input, CancellationToken ct)
+    {
+        // The derivative must belong to the routed file; a mismatched pair is a
+        // client bug, not a missing row.
+        var list = await studio.ListPdfsAsync(fileId, ct);
+        if (list.All(d => d.Id != derivativeId)) return Results.NotFound();
+        return ApiResults.FromResult(await studio.ReviewPdfAsync(derivativeId, input, ct));
+    }
 
     [HttpGet("{derivativeId:long}/content")]
     public async Task<IActionResult> Content(

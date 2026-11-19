@@ -12,7 +12,10 @@ import {
   auditLog,
   barcodeJobs,
   bulkImportJobs,
+  custodyEvents,
+  departments,
   employees,
+  fileScans,
   files,
   issues,
   loginHistory,
@@ -20,8 +23,6 @@ import {
   movements,
   rooms,
   users,
-  fileScans,
-  custodyEvents,
 } from '../data/mock';
 import type {
   AppUser,
@@ -30,6 +31,8 @@ import type {
   BarcodeJob,
   BulkImportJob,
   CustodyEvent,
+  Department,
+  DocumentDerivative,
   Employee,
   FileScan,
   IssueRecord,
@@ -62,15 +65,23 @@ export interface DbShape {
   movements: MovementEvent[];
   audit: AuditEntry[];
   scanPages: FileScan[];
+  /**
+   * Round 4: locally built deliverable PDF rows. Their bytes live in the
+   * IndexedDB document store; the rows persist here so the studio's history
+   * survives a refresh.
+   */
+  derivatives: DocumentDerivative[];
   maps: MapUpload[];
   custodyEvents: CustodyEvent[];
+  departments: Department[];
   barcodeJobs: BarcodeJob[];
   bulkJobs: BulkImportJob[];
   inquiries: InquiryRecord[];
   mediaLinks: MediaLinkRecord[];
 }
 
-const STORAGE_KEY = 'rr-db-v1';
+// v2: the round-3 departments slice; older local snapshots reseed once.
+const STORAGE_KEY = 'rr-db-v2';
 
 export function createSeed(): DbShape {
   return {
@@ -85,8 +96,10 @@ export function createSeed(): DbShape {
     movements: structuredClone(movements),
     audit: structuredClone(auditLog),
     scanPages: structuredClone(fileScans),
+    derivatives: [],
     maps: structuredClone(mapUploads),
     custodyEvents: structuredClone(custodyEvents),
+    departments: structuredClone(departments),
     barcodeJobs: structuredClone(barcodeJobs),
     bulkJobs: structuredClone(bulkImportJobs),
     inquiries: [],

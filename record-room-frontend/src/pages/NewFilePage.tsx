@@ -1,14 +1,22 @@
 import { useFeatures } from '../lib/features';
 import { useMemo, useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Barcode, CheckCircle, MapPin, WarningCircle } from '@phosphor-icons/react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import {
+  ArrowLeft,
+  Barcode,
+  CheckCircle,
+  MapPin,
+  Sparkle,
+  WarningCircle,
+} from '@phosphor-icons/react';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Field, FormGrid, SelectInput, TextArea, TextInput } from '../components/ui/Field';
+import { DepartmentSelect } from '../components/DepartmentSelect';
 import { Flash } from '../components/ui/Flash';
 import { BarcodeSymbol } from '../components/BarcodeSymbol';
-import { useQuery, useService } from '../hooks/useService';
+import { useQuery, useService, useSession } from '../hooks/useService';
 import { buildPayload } from '../lib/barcode';
 import { documentAcceptAttribute, formatDocumentSize, validateDocumentFile } from '../lib/document';
 import { nextFileBarcode } from '../services/impl/files';
@@ -141,6 +149,12 @@ export function NewFilePage() {
   const { barcode } = useFeatures();
   const service = useService();
   const navigate = useNavigate();
+  const { allowed } = useSession();
+  // `?intent=digitize` comes from the Digitization workbench: after a
+  // successful create the operator lands straight in the scan studio with the
+  // uploaded images, ready to compose and build the deliverable PDF.
+  const [params] = useSearchParams();
+  const digitizeIntent = params.get('intent') === 'digitize';
 
   // `nextFileBarcode` needs the live series, which only the API can report, so
   // the highest barcodes are asked for rather than read off the local snapshot.
@@ -160,7 +174,14 @@ export function NewFilePage() {
   const [error, setError] = useState<string | null>(null);
   const [createdId, setCreatedId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [selectedDocument, setSelectedDocument] = useState<File | null>(null);
+  /**
+   * Round 4: one or many attachments. PDFs become the record's versioned
+   * documents; every image becomes a page scan that the studio (and the review
+   * queue) picks up.
+   */
+  const [selectedDocuments, setSelectedDocuments] = useState<File[]>([]);
+  /** How many page scans the last create produced, for the studio hand-off. */
+  const [createdPageCount, setCreatedPageCount] = useState(0);
   const [attachmentMessage, setAttachmentMessage] = useState<{
     tone: 'success' | 'danger';
     text: string;
@@ -270,10 +291,10 @@ export function NewFilePage() {
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (selectedDocument) {
-      const documentError = validateDocumentFile(selectedDocument);
+    for (const document of selectedDocuments) {
+      const documentError = validateDocumentFile(document);
       if (documentError) {
-        setError(documentError);
+        setError(`${document.name}: ${documentError}`);
         return;
       }
     }
@@ -287,32 +308,75 @@ export function NewFilePage() {
       setError(null);
       setCreatedId(result.value.id);
       setAttachmentMessage(null);
-      if (selectedDocument) {
+      setCreatedPageCount(0);
+
+      const failures: string[] = [];
+      let pageNo = 0;
+      // The list is the source of truth for the next page number, so it is
+      // re-read before every image: earlier uploads in this same batch already
+      // claimed their numbers.
+      for (const document of selectedDocuments) {
+        const isPdf =
+          document.type === 'application/pdf' || document.name.toLowerCase().endsWith('.pdf');
         try {
-          const upload = await service.files.uploadDocument(result.value.id, selectedDocument);
-          if (upload.ok) {
-            setAttachmentMessage({
-              tone: 'success',
-              text: upload.value.filename + ' uploaded as version ' + upload.value.version + '.',
-            });
-            setSelectedDocument(null);
+          if (isPdf) {
+            const upload = await service.files.uploadDocument(result.value.id, document);
+            if (!upload.ok) failures.push(`${document.name}: ${upload.error}`);
           } else {
-            setAttachmentMessage({
-              tone: 'danger',
-              text:
-                'The record was created, but the scan was not uploaded: ' +
-                upload.error +
-                ' Open the record to retry.',
+            const pages = await service.digitization.list(result.value.id);
+            pageNo = pages.reduce((max, row) => Math.max(max, row.pageNo), 0) + 1;
+            const added = await service.digitization.add(result.value.id, {
+              pageNo,
+              filename: document.name,
+              documentSize: form.documentSize || 'Other',
+              note: 'Uploaded while registering the file.',
             });
+            if (!added.ok) {
+              failures.push(`${document.name}: ${added.error}`);
+              continue;
+            }
+            const withDocument = await service.digitization.addDocument(added.value.id, document);
+            if (!withDocument.ok) failures.push(`${document.name}: ${withDocument.error}`);
           }
         } catch (uploadError) {
-          setAttachmentMessage({
-            tone: 'danger',
-            text:
-              'The record was created, but the scan could not be uploaded. Open the record to retry. ' +
-              (uploadError instanceof Error ? uploadError.message : ''),
-          });
+          failures.push(
+            `${document.name}: ${uploadError instanceof Error ? uploadError.message : 'upload failed'}`,
+          );
         }
+      }
+
+      const pagesAfter = await service.digitization
+        .list(result.value.id)
+        .then((rows) => rows.length)
+        .catch(() => 0);
+      setCreatedPageCount(pagesAfter);
+
+      if (failures.length > 0) {
+        setAttachmentMessage({
+          tone: 'danger',
+          text:
+            'The record was created, but not every attachment made it: ' +
+            failures.join(' · ') +
+            '. Open the record to retry.',
+        });
+      } else if (selectedDocuments.length > 0) {
+        setAttachmentMessage({
+          tone: 'success',
+          text:
+            pagesAfter > 0
+              ? `${selectedDocuments.length} attachment(s) stored — ${pagesAfter} page scan(s) now await review in the Digitization queue.`
+              : `${selectedDocuments.length} attachment(s) stored as the record's document version(s).`,
+        });
+      }
+      setSelectedDocuments([]);
+
+      // The digitization workbench hands over to the studio straight away: the
+      // operator just scanned a stack, and composing/building the PDF is the
+      // next step of the same session. Replace keeps the create form out of
+      // the history stack, so Back from the studio lands on the registry.
+      if (digitizeIntent) {
+        navigate(`/files/${result.value.id}/studio`, { replace: true, state: { from: '/files' } });
+        return;
       }
       // The new barcode has to be in the series before the next suggestion.
       reloadFiles();
@@ -329,7 +393,8 @@ export function NewFilePage() {
     setRecordKindManuallySet(false);
     setBarcodeOverride(null);
     setCreatedId(null);
-    setSelectedDocument(null);
+    setSelectedDocuments([]);
+    setCreatedPageCount(0);
     setAttachmentMessage(null);
     reloadFiles();
   };
@@ -359,6 +424,12 @@ export function NewFilePage() {
                   Shelf occupancy and the movement log were updated in the same write, and the
                   creation is on the audit trail.
                 </p>
+                {createdPageCount > 0 && (
+                  <p className="mt-2 text-sm">
+                    <strong>{createdPageCount} page scan(s)</strong> were stored with this file —
+                    open the scan studio to compose them and build the deliverable PDF.
+                  </p>
+                )}
                 {attachmentMessage && (
                   <div className="mt-3">
                     <Flash
@@ -370,10 +441,31 @@ export function NewFilePage() {
                 )}
               </div>
             </div>
-            <div className="flex gap-2">
-              <Button variant="ghost" onClick={() => navigate(`/files/${createdId}`)}>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="ghost"
+                icon={<ArrowLeft size={17} />}
+                onClick={() => navigate('/files')}
+              >
+                Back to files
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => navigate(`/files/${createdId}`, { state: { from: '/files' } })}
+              >
                 Open file
               </Button>
+              {allowed('studio.use') && (
+                <Button
+                  variant="ghost"
+                  icon={<Sparkle size={17} />}
+                  onClick={() =>
+                    navigate(`/files/${createdId}/studio`, { state: { from: '/files' } })
+                  }
+                >
+                  Open in scan studio
+                </Button>
+              )}
               <Button onClick={resetForm}>Register another</Button>
             </div>
           </div>
@@ -405,19 +497,13 @@ export function NewFilePage() {
                         />
                       </Field>
                     )}
-                    <Field
-                      label="Department"
-                      htmlFor="file-department"
+                    <DepartmentSelect
+                      id="file-department"
+                      value={form.department}
+                      onChange={(next) => set('department', next)}
                       required
-                      error={errorsFor('department')}
-                    >
-                      <TextInput
-                        id="file-department"
-                        value={form.department}
-                        onChange={(event) => set('department', event.target.value)}
-                        placeholder="Revenue"
-                      />
-                    </Field>
+                      hint={errorsFor('department') ?? undefined}
+                    />
                     <Field
                       label="Subject"
                       htmlFor="file-subject"
@@ -709,23 +795,29 @@ export function NewFilePage() {
                       />
                     </Field>
                     <Field
-                      label="Scanned document (optional)"
+                      label="Scans and documents (optional, one or many)"
                       htmlFor="new-file-document"
-                      hint="Attach the first PDF or image now, or upload it later from the record details. PDF/JPG/PNG/GIF, up to 512 MiB."
+                      hint="Attach scanned pages or a PDF now — PDFs become the record's document versions, images become page scans you can compose in the studio. PDF/JPG/PNG/GIF."
                       className="sm:col-span-2"
                     >
                       <input
                         id="new-file-document"
                         type="file"
+                        multiple
                         accept={documentAcceptAttribute()}
-                        onChange={(event) => setSelectedDocument(event.target.files?.[0] ?? null)}
+                        onChange={(event) =>
+                          setSelectedDocuments(Array.from(event.target.files ?? []))
+                        }
                         className="block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-accent-soft file:px-3 file:py-2 file:font-semibold file:text-accent"
                       />
-                      {selectedDocument && (
-                        <p className="muted mt-2 break-all text-xs">
-                          Selected: {selectedDocument.name} ·{' '}
-                          {formatDocumentSize(selectedDocument.size)}
-                        </p>
+                      {selectedDocuments.length > 0 && (
+                        <ul className="muted mt-2 space-y-1 text-xs">
+                          {selectedDocuments.map((document) => (
+                            <li key={document.name} className="break-all">
+                              {document.name} · {formatDocumentSize(document.size)}
+                            </li>
+                          ))}
+                        </ul>
                       )}
                     </Field>
                   </FormGrid>

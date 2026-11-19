@@ -13,6 +13,7 @@ import type {
   BarcodeJob,
   BulkImportJob,
   CustodyEvent,
+  Department,
   Employee,
   FileScan,
   GalleryItem,
@@ -166,6 +167,78 @@ rooms.forEach((room) => {
 const shelfAt = (shelfId: string) => shelfIndex.get(shelfId);
 
 // ------------------------------------------------------------------ employees
+
+/**
+ * The managed department list (round 3) — the same vocabulary the API seeds,
+ * so both modes offer the same pickers. Codes are what external systems
+ * exchange; names are what people read.
+ */
+export const departments: Department[] = [
+  {
+    id: 'department-1',
+    name: 'Audit',
+    code: 'AUD',
+    remarks: '',
+    employeeCount: 0,
+    createdAt: '2026-01-05 10:00',
+  },
+  {
+    id: 'department-2',
+    name: 'COMMERCIAL',
+    code: 'COM',
+    remarks: '',
+    employeeCount: 0,
+    createdAt: '2026-01-05 10:00',
+  },
+  {
+    id: 'department-3',
+    name: 'Education',
+    code: 'EDU',
+    remarks: '',
+    employeeCount: 0,
+    createdAt: '2026-01-05 10:00',
+  },
+  {
+    id: 'department-4',
+    name: 'Engineering',
+    code: 'ENG',
+    remarks: '',
+    employeeCount: 0,
+    createdAt: '2026-01-05 10:00',
+  },
+  {
+    id: 'department-5',
+    name: 'Establishment',
+    code: 'EST',
+    remarks: '',
+    employeeCount: 0,
+    createdAt: '2026-01-05 10:00',
+  },
+  {
+    id: 'department-6',
+    name: 'HR',
+    code: 'HR',
+    remarks: '',
+    employeeCount: 0,
+    createdAt: '2026-01-05 10:00',
+  },
+  {
+    id: 'department-7',
+    name: 'PERSONNEL',
+    code: 'PER',
+    remarks: '',
+    employeeCount: 0,
+    createdAt: '2026-01-05 10:00',
+  },
+  {
+    id: 'department-8',
+    name: 'Revenue',
+    code: 'REV',
+    remarks: '',
+    employeeCount: 0,
+    createdAt: '2026-01-05 10:00',
+  },
+];
 
 export const employees: Employee[] = [
   {

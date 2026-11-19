@@ -110,12 +110,26 @@ public class AuditController(IReadService read) : ControllerBase
         [FromQuery] string? action,
         [FromQuery] string? actor,
         [FromQuery] string? entity,
+        [FromQuery] string? group,
         [FromQuery] string? search,
         [FromQuery] int limit = 200,
         CancellationToken ct = default) =>
         Results.Ok(ApiResponse<object>.Ok(new
         {
-            entries = await read.AuditAsync(action, actor, entity, search, limit, ct),
+            entries = await read.AuditAsync(action, actor, entity, group, search, limit, ct),
+        }));
+
+    /// <summary>
+    /// The file-view trail: who opened which record, when. A separate
+    /// permission so the admin can hand just this view to a supervisor.
+    /// </summary>
+    [HttpGet("file-views")]
+    [Authorize(Policy = "perm:audit.fileViews")]
+    public async Task<IResult> FileViews(
+        [FromQuery] string? search, [FromQuery] int limit = 200, CancellationToken ct = default) =>
+        Results.Ok(ApiResponse<object>.Ok(new
+        {
+            entries = await read.FileViewsAsync(search, limit, ct),
         }));
 
     [HttpGet("login-history")]

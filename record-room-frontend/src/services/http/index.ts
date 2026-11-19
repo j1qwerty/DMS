@@ -13,6 +13,7 @@ import type {
   BarcodeApi,
   BulkApi,
   CustodyApi,
+  DepartmentsApi,
   DashboardApi,
   ConfigApi,
   ScanApi,
@@ -42,11 +43,14 @@ import {
   setToken,
   toApiId,
   toFieldIssues,
+  toId,
 } from './client';
 import {
   toAppUser,
   toArea,
+  num,
   toCustodyEvent,
+  toDepartment,
   toAuditEntry,
   toBarcodeJob,
   toBulkJob,
@@ -671,6 +675,7 @@ export const httpDigitizationService: ScanApi = {
       fileName: input.filename,
       pageNo: input.pageNo,
       documentSize: input.documentSize,
+      note: input.note ?? '',
     });
     return result.ok ? ok(toFileScan(result.value)) : result;
   },
@@ -751,6 +756,21 @@ export const httpDigitizationService: ScanApi = {
     return result.ok ? ok(toFileScan(result.value)) : result;
   },
 
+  async runOcr(scanId) {
+    const result = await attempt<Dto>('POST', `/api/scans/${toApiId(scanId, 'scan')}/ocr`);
+    return result.ok
+      ? ok({
+          scanId: toId(result.value.scanId as number),
+          barcode: str(result.value.barcode),
+          pageNo: num(result.value.pageNo),
+          version: num(result.value.version),
+          ocrText: str(result.value.ocrText),
+          method: str(result.value.method),
+          ranAt: str(result.value.ranAt),
+        })
+      : result;
+  },
+
   async scanBlob(scanId, variant) {
     return getBlob(
       `/api/scans/${toApiId(scanId, 'scan')}/content${variant === 'processed' ? '?variant=processed' : ''}`,
@@ -766,6 +786,15 @@ export const httpDigitizationService: ScanApi = {
     const result = await attempt<Dto>('POST', `/api/files/${toApiId(fileId, 'file')}/pdf`, {
       fileName: filename ?? '',
     });
+    return result.ok ? ok(toDerivative(result.value)) : result;
+  },
+
+  async reviewPdf(derivativeId, decision, note) {
+    const result = await attempt<Dto>(
+      'POST',
+      `/api/files/0/pdf/${toApiId(derivativeId, 'derivative')}/review`,
+      { decision, note: note ?? '' },
+    );
     return result.ok ? ok(toDerivative(result.value)) : result;
   },
 
@@ -848,9 +877,17 @@ export const httpAuditService: AuditApi = {
         action: query.action,
         actor: query.actor,
         entity: query.entity,
+        group: query.group,
         search: query.search,
         limit: query.limit,
       })}`,
+    );
+    return list(payload.entries, toAuditEntry);
+  },
+
+  async fileViews(query = {}) {
+    const payload = await get<{ entries: Dto[] }>(
+      `/api/audit/file-views${qs({ search: query.search, limit: query.limit })}`,
     );
     return list(payload.entries, toAuditEntry);
   },
@@ -1136,6 +1173,60 @@ export const httpCustodyService: CustodyApi = {
       },
     );
     return result.ok ? ok(toCustodyEvent(result.value)) : result;
+  },
+
+  async returnAgainst(id, input) {
+    const result = await attempt<CustodyDto>(
+      'POST',
+      `/api/custody/${toApiId(id, 'custody')}/return`,
+      {
+        fileCount: input.fileCount,
+        remarks: input.remarks ?? '',
+      },
+    );
+    return result.ok ? ok(toCustodyEvent(result.value)) : result;
+  },
+
+  async returnsFor(id) {
+    const payload = await get<{ entries: CustodyDto[] } | CustodyDto[]>(
+      `/api/custody/${toApiId(id, 'custody')}/returns`,
+    );
+    const rows = Array.isArray(payload) ? payload : payload.entries;
+    return rows.map((row) => toCustodyEvent(row as Record<string, unknown>));
+  },
+};
+
+// -------------------------------------------------------------- departments
+
+export const httpDepartmentsService: DepartmentsApi = {
+  async list() {
+    return list(await get<Dto[]>('/api/departments'), toDepartment);
+  },
+
+  async create(input) {
+    const result = await attempt<Dto>('POST', '/api/departments', {
+      name: input.name,
+      code: input.code,
+      remarks: input.remarks ?? '',
+    });
+    return result.ok ? ok(toDepartment(result.value)) : result;
+  },
+
+  async update(id, input) {
+    const result = await attempt<Dto>('PUT', `/api/departments/${toApiId(id, 'department')}`, {
+      name: input.name,
+      code: input.code,
+      remarks: input.remarks ?? '',
+    });
+    return result.ok ? ok(toDepartment(result.value)) : result;
+  },
+
+  async remove(id) {
+    const result = await attempt<boolean>(
+      'DELETE',
+      `/api/departments/${toApiId(id, 'department')}`,
+    );
+    return result.ok ? ok(true) : result;
   },
 };
 

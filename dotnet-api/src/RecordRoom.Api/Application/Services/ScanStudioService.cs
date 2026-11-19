@@ -44,6 +44,13 @@ public interface IScanStudioService
     /// <summary>Builds the PDF from the file's approved pages, in composition order.</summary>
     Task<Result<DocumentDerivativeDto>> BuildPdfAsync(int fileId, DeliverablePdfInput input, CancellationToken ct = default);
 
+    /// <summary>
+    /// Round 4: reviewer sign-off on a freshly built PDF — approve the final
+    /// composition, or reject it with a reason. The row and its bytes stay in
+    /// the history either way.
+    /// </summary>
+    Task<Result<DocumentDerivativeDto>> ReviewPdfAsync(long derivativeId, DeliverableReviewInput input, CancellationToken ct = default);
+
     Task<PrivateDocumentContent?> OpenPdfAsync(long derivativeId, CancellationToken ct = default);
 }
 
@@ -56,7 +63,17 @@ public sealed class ScanStudioService(
     IFileRefs fileRefs,
     ILogger<ScanStudioService> logger) : IScanStudioService
 {
-    static ScanStudioService() => QuestPDF.Settings.License = LicenseType.Community;
+    static ScanStudioService()
+    {
+        QuestPDF.Settings.License = LicenseType.Community;
+        // QuestPDF 2026.9 stopped reading system fonts by default, which made
+        // every "Build deliverable PDF" fail on a missing "Segoe UI" family —
+        // on Windows too. The deliverable's text is metadata (header, footer,
+        // OCR layer), so it must render on every machine: use the deployment's
+        // fonts and fall back to the first available family instead of throwing.
+        QuestPDF.Settings.UseSystemFonts = true;
+        QuestPDF.Settings.ThrowOnMissingFontFamilies = false;
+    }
 
     private async Task<RecordFile?> FileByBarcodeAsync(string barcode, CancellationToken ct) =>
         await db.Files.AsNoTracking().FirstOrDefaultAsync(f => f.Barcode == barcode, ct);
@@ -287,7 +304,8 @@ public sealed class ScanStudioService(
 
     private static DocumentDerivativeDto ToDto(DocumentDerivative d, RecordFile file) => new(
         d.Id, file.Id, d.Barcode, d.Kind, d.FileName, d.SizeBytes, d.Sha256,
-        d.PageCount, d.SourceVersions, d.IncludesOcrText, d.CreatedAt, d.CreatedBy, file.FileNumber);
+        d.PageCount, d.SourceVersions, d.IncludesOcrText, d.CreatedAt, d.CreatedBy, file.FileNumber,
+        d.Status, d.ReviewedBy, d.ReviewedAt, d.ReviewNote);
 
     public async Task<Result<DocumentDerivativeDto>> BuildPdfAsync(int fileId, DeliverablePdfInput input, CancellationToken ct)
     {
@@ -331,6 +349,17 @@ public sealed class ScanStudioService(
         {
             pdf = Compose(file.Barcode, file.FileNumber, file.Subject, sheets);
         }
+        catch (Exception ex) when (ex.Message.Contains("glyph", StringComparison.OrdinalIgnoreCase))
+        {
+            // The OCR text layer is invisible (the scan image covers it), so a
+            // glyph gap — Hindi text on a machine without a Devanagari font —
+            // must not lose the deliverable. Rebuild without the layer and
+            // report it honestly instead of claiming a searchable PDF.
+            logger.LogWarning(ex,
+                "OCR text could not be shaped for {Barcode}; building without the text layer.", file.Barcode);
+            includesOcr = false;
+            pdf = Compose(file.Barcode, file.FileNumber, file.Subject, sheets, includeText: false);
+        }
         catch (Exception ex)
         {
             logger.LogError(ex, "PDF composition failed for {Barcode}.", file.Barcode);
@@ -359,15 +388,56 @@ public sealed class ScanStudioService(
             IncludesOcrText = includesOcr,
             CreatedAt = DateTime.UtcNow,
             CreatedBy = current.User?.DisplayName ?? current.UserName,
+            // Round 4: a fresh build waits for reviewer sign-off on the final
+            // composition before it counts as the file's deliverable.
+            Status = "Pending approval",
         };
         db.Derivatives.Add(derivative);
         await audit.LogAsync(db, AuditAction.Create, "DocumentDerivative", "pending", "-",
-            $"{derivative.FileName}; pages={derivative.PageCount}; sha256={derivative.Sha256}",
+            $"{derivative.FileName}; pages={derivative.PageCount}; sha256={derivative.Sha256}; status=pending approval",
             $"Deliverable PDF built for {file.Barcode} from {withContent.Count} approved page(s)", ct);
         await db.SaveChangesAsync(ct);
         await audit.AnnounceAsync(RealtimeChannels.Digitization, "deliverable.built", derivative.Id.ToString(),
             $"{derivative.FileName} built for {file.Barcode}");
         return Result<DocumentDerivativeDto>.Ok(ToDto(derivative, file));
+    }
+
+    public async Task<Result<DocumentDerivativeDto>> ReviewPdfAsync(
+        long derivativeId, DeliverableReviewInput input, CancellationToken ct)
+    {
+        var row = await db.Derivatives.FirstOrDefaultAsync(d => d.Id == derivativeId, ct);
+        if (row is null) return Result<DocumentDerivativeDto>.Fail("Deliverable PDF not found.", "derivativeId");
+
+        var decision = input.Decision?.Trim();
+        if (!string.Equals(decision, "Approved", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(decision, "Rejected", StringComparison.OrdinalIgnoreCase))
+            return Result<DocumentDerivativeDto>.Fail("Decision must be Approved or Rejected.", "decision");
+        var normalized = string.Equals(decision, "Approved", StringComparison.OrdinalIgnoreCase)
+            ? "Approved" : "Rejected";
+
+        if (row.Status != "Pending approval")
+            return Result<DocumentDerivativeDto>.Fail(
+                $"This PDF was already {row.Status.ToLowerInvariant()}.", "derivativeId");
+
+        var note = input.Note?.Trim();
+        if (normalized == "Rejected" && string.IsNullOrWhiteSpace(note))
+            return Result<DocumentDerivativeDto>.Fail("A rejection reason is required.", "note");
+
+        var file = await FileByBarcodeAsync(row.Barcode, ct);
+        row.Status = normalized;
+        row.ReviewedBy = current.User?.DisplayName ?? current.UserName;
+        row.ReviewedAt = DateTime.UtcNow;
+        row.ReviewNote = string.IsNullOrWhiteSpace(note) ? null : note;
+
+        var action = normalized == "Approved" ? AuditAction.Approve : AuditAction.Reject;
+        await audit.LogAsync(db, action, "DocumentDerivative", row.Id.ToString(),
+            "pending approval", normalized.ToLowerInvariant(),
+            $"{row.FileName} {normalized.ToLowerInvariant()} by {row.ReviewedBy}"
+                + (row.ReviewNote is null ? "" : $" — {row.ReviewNote}"), ct);
+        await db.SaveChangesAsync(ct);
+        await audit.AnnounceAsync(RealtimeChannels.Digitization, "deliverable.reviewed", row.Id.ToString(),
+            $"{row.FileName} {normalized.ToLowerInvariant()} for {row.Barcode}");
+        return Result<DocumentDerivativeDto>.Ok(ToDto(row, file ?? new RecordFile { Barcode = row.Barcode, FileNumber = row.Barcode, Subject = string.Empty }));
     }
 
     public async Task<PrivateDocumentContent?> OpenPdfAsync(long derivativeId, CancellationToken ct)
@@ -384,10 +454,14 @@ public sealed class ScanStudioService(
     /// footer numbers pages, and where OCR text exists it is laid down *under*
     /// the image — fully covered, so the output reads as a scan while the text
     /// stays selectable and searchable (§3.5's invisible text layer).
+    /// `includeText: false` drops that layer when the available fonts cannot
+    /// shape it (e.g. Hindi OCR text without a Devanagari font); the deliverable
+    /// itself must always build.
     /// </summary>
     private static byte[] Compose(
         string barcode, string fileNumber, string subject,
-        IReadOnlyList<(byte[] Bytes, string? Text, string Size)> sheets)
+        IReadOnlyList<(byte[] Bytes, string? Text, string Size)> sheets,
+        bool includeText = true)
     {
         return Document.Create(container =>
         {
@@ -397,7 +471,7 @@ public sealed class ScanStudioService(
                 {
                     page.Size(PageSize(sheet.Size));
                     page.Margin(12);
-                    page.DefaultTextStyle(x => x.FontFamily(Fonts.SegoeUI).FontSize(9));
+                    page.DefaultTextStyle(x => x.FontFamily("Segoe UI").FontSize(9));
 
                     page.Header().Row(row =>
                     {
@@ -410,7 +484,7 @@ public sealed class ScanStudioService(
                     page.Content().Layers(layers =>
                     {
                         // The invisible layer first (behind), the image over it.
-                        if (!string.IsNullOrWhiteSpace(sheet.Text))
+                        if (includeText && !string.IsNullOrWhiteSpace(sheet.Text))
                         {
                             layers.Layer().Text(sheet.Text.Trim().ReplaceLineEndings(" ")).FontSize(4);
                         }

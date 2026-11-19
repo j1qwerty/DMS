@@ -15,7 +15,6 @@
 import type { FeatureKey, Features } from '../lib/features';
 import type { Permission, RolePermissionMatrix } from './permissions-matrix';
 import type {
-  DocumentDerivative,
   AppUser,
   Area,
   AuditAction,
@@ -26,11 +25,13 @@ import type {
   BulkImportJob,
   CustodyEvent,
   DashboardStats,
+  Department,
+  DocumentDerivative,
   Employee,
   FileCreateInput,
+  FileScan,
   FileStatus,
   FileType,
-  RecordKind,
   IssueRecord,
   LoginHistoryEntry,
   MapUpload,
@@ -38,6 +39,7 @@ import type {
   MovementKind,
   RecordFile,
   RecordFileDocument,
+  RecordKind,
   ReportDefinition,
   ReportKey,
   Role,
@@ -47,7 +49,6 @@ import type {
   Shelf,
   StorageStatus,
   StorageUnit,
-  FileScan,
   TimelineEvent,
 } from '../types';
 import type {
@@ -324,7 +325,7 @@ export interface ScanApi {
   /** Rejects a repeated file + `pageNo`; bumps `version` on rescan. */
   add(
     fileId: string,
-    input: { pageNo: number; filename: string; documentSize: string },
+    input: { pageNo: number; filename: string; documentSize: string; note?: string },
   ): Promise<Result<FileScan>>;
   addDocument(scanId: string, file: File): Promise<Result<FileScan>>;
   remove(scanId: string): Promise<Result<true>>;
@@ -355,13 +356,37 @@ export interface ScanApi {
   revert(scanId: string): Promise<Result<FileScan>>;
   /** Duplicates a page as its next version (insert-after semantics). */
   duplicate(scanId: string): Promise<Result<FileScan>>;
+  /** Re-runs OCR (PDF text layer, else raster + tesseract hin+eng) and stores the text. */
+  runOcr(scanId: string): Promise<Result<ScanOcrResult>>;
   /** The stored bytes; `processed` serves the enhanced copy when one exists. */
   scanBlob(scanId: string, variant?: 'original' | 'processed'): Promise<Blob>;
   /** Generated PDF deliverables of one file, newest first. */
   listPdfs(fileId: string): Promise<DocumentDerivative[]>;
   /** Builds the PDF from the file's approved pages, in composition order. */
   buildPdf(fileId: string, filename?: string): Promise<Result<DocumentDerivative>>;
+  /**
+   * Round 4: a freshly built PDF is "Pending approval"; a reviewer signs off
+   * the final composition here (approve or reject with a reason). The row —
+   * and its bytes — stay in the history either way.
+   */
+  reviewPdf(
+    derivativeId: string,
+    decision: 'Approved' | 'Rejected',
+    note?: string,
+  ): Promise<Result<DocumentDerivative>>;
   pdfBlob(derivativeId: string): Promise<Blob>;
+}
+
+/** What one OCR pass produced, and how. */
+export interface ScanOcrResult {
+  scanId: string;
+  barcode: string;
+  pageNo: number;
+  version: number;
+  ocrText: string;
+  /** "tesseract hin+eng" or "none" — what produced the text. */
+  method: string;
+  ranAt: string;
 }
 
 // ------------------------------------------------------------- custody chain
@@ -392,6 +417,16 @@ export interface CustodyApi {
   reconcile(id: string, reconciledCount: number, remarks?: string): Promise<Result<CustodyEvent>>;
   /** Closes an event with a sign-off; closed events become read-only. */
   signOff(id: string, signedOffBy?: string): Promise<Result<CustodyEvent>>;
+  /**
+   * Records a return against a recorded intake — the department's own batch
+   * comes back, all at once or partially (6 of 10, then 4 of 10).
+   */
+  returnAgainst(
+    id: string,
+    input: { fileCount: number; remarks?: string },
+  ): Promise<Result<CustodyEvent>>;
+  /** The return events recorded against one intake batch. */
+  returnsFor(id: string): Promise<CustodyEvent[]>;
 }
 
 // ----------------------------------------------------------------- upload map
@@ -425,6 +460,11 @@ export interface AuditQuery {
   action?: AuditAction | 'All';
   actor?: string;
   entity?: string;
+  /**
+   * Round-4 grouping: documents / digitization / logins / issues (the last two
+   * were one "logins-issues" tab in round 3 and are separate tabs now).
+   */
+  group?: 'documents' | 'digitization' | 'logins-issues' | 'logins' | 'issues';
   search?: string;
   limit?: number;
 }
@@ -436,6 +476,21 @@ export interface AuditApi {
     search?: string;
   }): Promise<LoginHistoryEntry[]>;
   actors(): Promise<string[]>;
+  /** Who opened which record, when — its own permission (audit.fileViews). */
+  fileViews(query?: { search?: string; limit?: number }): Promise<AuditEntry[]>;
+}
+
+// ------------------------------------------------------------ departments api
+
+/** The managed department list (round 3): names and codes picked from on forms. */
+export interface DepartmentsApi {
+  list(): Promise<Department[]>;
+  create(input: { name: string; code: string; remarks?: string }): Promise<Result<Department>>;
+  update(
+    id: string,
+    input: { name: string; code: string; remarks?: string },
+  ): Promise<Result<Department>>;
+  remove(id: string): Promise<Result<true>>;
 }
 
 // ---------------------------------------------------------------- report api
@@ -533,6 +588,7 @@ export interface RecordRoomService {
   issues: IssueApi;
   movements: MovementApi;
   employees: EmployeesApi;
+  departments: DepartmentsApi;
   digitization: ScanApi;
   custody: CustodyApi;
   uploads: UploadsApi;

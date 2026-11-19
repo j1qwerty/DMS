@@ -942,6 +942,150 @@ $filtered = Invoke-Api -Path '/api/custody?direction=Intake&search=SMOKE' -Token
 Assert-Equal 200 $filtered.Status 'the register filters by direction and text'
 Assert-True ($filtered.Data.data.items.Count -ge 1) 'the smoke-test intake appears in the filtered register'
 
+# ============================================================ departments
+Write-Step 'Managed departments (round 3)'
+$departments = Invoke-Api -Path '/api/departments' -Token $admin
+Assert-Equal 200 $departments.Status 'GET /api/departments responds'
+Assert-True ($departments.Data.data.Count -ge 8) 'the seeded department list is present'
+Assert-True (@($departments.Data.data | Where-Object { $_.name -eq 'Revenue' }).Count -eq 1) 'Revenue is in the list with its code'
+
+$empDepartments = Invoke-Api -Path '/api/departments' -Token $employeeToken
+Assert-Equal 200 $empDepartments.Status 'any authenticated user can read the department list'
+$opCreateDept = Invoke-Api -Method POST -Path '/api/departments' -Token $operatorToken -Body @{
+    name = 'Zonal Audit'; code = 'ZA'
+}
+Assert-Equal 403 $opCreateDept.Status 'an operator cannot add departments'
+
+$newDept = Invoke-Api -Method POST -Path '/api/departments' -Token $admin -Body @{
+    name = 'Smoke Department'; code = 'SMK'; remarks = 'harness row'
+}
+Assert-Equal 200 $newDept.Status 'an admin adds a department'
+$dupDept = Invoke-Api -Method POST -Path '/api/departments' -Token $admin -Body @{
+    name = 'Smoke Department'; code = 'OTHER'
+}
+Assert-Equal 400 $dupDept.Status 'a duplicate department name is refused'
+$dupCode = Invoke-Api -Method POST -Path '/api/departments' -Token $admin -Body @{
+    name = 'Another Name'; code = 'SMK'
+}
+Assert-Equal 400 $dupCode.Status 'a duplicate department code is refused'
+
+$renamedDept = Invoke-Api -Method PUT -Path "/api/departments/$($newDept.Data.data.id)" -Token $admin -Body @{
+    name = 'Smoke Department Renamed'; code = 'SMK'
+}
+Assert-Equal 200 $renamedDept.Status 'an admin renames the department'
+Assert-Equal 'Smoke Department Renamed' $renamedDept.Data.data.name 'the rename round-trips'
+
+# Deleting a department employees still use is refused; the smoke row is unused.
+$inUse = ($departments.Data.data | Where-Object { $_.employeeCount -gt 0 } | Select-Object -First 1)
+if ($inUse) {
+    $refusedDelete = Invoke-Api -Method DELETE -Path "/api/departments/$($inUse.id)" -Token $admin
+    Assert-Equal 400 $refusedDelete.Status 'a department with employees cannot be deleted'
+}
+$deletedDept = Invoke-Api -Method DELETE -Path "/api/departments/$($newDept.Data.data.id)" -Token $admin
+Assert-Equal 200 $deletedDept.Status 'an unused department can be deleted'
+
+# ============================================================ custody returns
+Write-Step 'Custody returns against an intake batch (round 3)'
+$returnIntake = Invoke-Api -Method POST -Path '/api/custody' -Token $admin -Body @{
+    direction = 'Intake'; department = 'Revenue'; fileCount = 10
+    batchRef = 'SMOKE-RETURNS'; vendor = 'ScanServe'
+}
+Assert-Equal 200 $returnIntake.Status 'a 10-file intake is recorded'
+$returnIntakeId = $returnIntake.Data.data.id
+
+$partial = Invoke-Api -Method POST -Path "/api/custody/$returnIntakeId/return" -Token $admin -Body @{
+    fileCount = 6; remarks = 'first half back'
+}
+Assert-Equal 200 $partial.Status 'a partial return of 6 of 10 is recorded'
+Assert-Equal 'Return' $partial.Data.data.direction 'the return row carries the Return direction'
+Assert-True ($null -ne $partial.Data.data.sourceCustodyId) 'the return is linked to its intake'
+
+$over = Invoke-Api -Method POST -Path "/api/custody/$returnIntakeId/return" -Token $admin -Body @{
+    fileCount = 5
+}
+Assert-Equal 400 $over.Status 'returning more than the remaining 4 is refused'
+
+$rest = Invoke-Api -Method POST -Path "/api/custody/$returnIntakeId/return" -Token $admin -Body @{
+    fileCount = 4; remarks = 'rest back'
+}
+Assert-Equal 200 $rest.Status 'the remaining 4 are returned'
+
+$none = Invoke-Api -Method POST -Path "/api/custody/$returnIntakeId/return" -Token $admin -Body @{
+    fileCount = 1
+}
+Assert-Equal 400 $none.Status 'a fully returned batch refuses another return'
+
+$afterReturns = Invoke-Api -Path "/api/custody?search=SMOKE-RETURNS" -Token $admin
+$intakeRow = @($afterReturns.Data.data.items | Where-Object { $_.id -eq $returnIntakeId })[0]
+Assert-Equal 10 $intakeRow.returnedCount 'the intake row reports 10 of 10 returned'
+$returnsList = Invoke-Api -Path "/api/custody/$returnIntakeId/returns" -Token $admin
+Assert-Equal 2 @($returnsList.Data.data).Count 'the batch lists its two return rows'
+
+# ============================================================ file views
+Write-Step 'File-view tracking (round 3)'
+$viewFile = Invoke-Api -Path "/api/files/$newFileId" -Token $admin
+Assert-Equal 200 $viewFile.Status 'opening the file detail responds'
+$viewFile2 = Invoke-Api -Path "/api/files/$newFileId" -Token $supervisorToken
+Assert-Equal 200 $viewFile2.Status 'a second viewer opens the same file'
+
+$empViews = Invoke-Api -Path '/api/audit/file-views' -Token $employeeToken
+Assert-Equal 403 $empViews.Status 'an employee cannot read the file-view trail'
+$views = Invoke-Api -Path '/api/audit/file-views' -Token $admin
+Assert-Equal 200 $views.Status 'the admin reads the file-view trail'
+$viewRows = @($views.Data.data | Where-Object { $_.entityId -eq "$newFileId" })
+Assert-True ($viewRows.Count -ge 2) 'both opens of the file are on the trail'
+
+# The permission is a matrix cell: grant it to Supervisor and it works at once.
+$grantViews = Invoke-Api -Method PUT -Path '/api/permissions/Supervisor/audit.fileViews' -Token $admin -Body @{ granted = $true }
+Assert-Equal 200 $grantViews.Status 'audit.fileViews is granted to Supervisor'
+$supViews = Invoke-Api -Path '/api/audit/file-views' -Token $supervisorToken
+Assert-Equal 200 $supViews.Status 'the supervisor can now read the file-view trail'
+$revokeViews = Invoke-Api -Method PUT -Path '/api/permissions/Supervisor/audit.fileViews' -Token $admin -Body @{ granted = $false }
+Assert-Equal 200 $revokeViews.Status 'the grant is revoked again'
+$supViewsAfter = Invoke-Api -Path '/api/audit/file-views' -Token $supervisorToken
+Assert-Equal 403 $supViewsAfter.Status 'the revoked grant is refused on the next request'
+
+# ============================================================ audit groups
+Write-Step 'Audit trail groups (round 3)'
+$groupDocuments = Invoke-Api -Path '/api/audit?group=documents' -Token $admin
+Assert-Equal 200 $groupDocuments.Status 'the documents group responds'
+$documentEntities = @($groupDocuments.Data.data.entries | Select-Object -ExpandProperty entity -Unique)
+Assert-True ($documentEntities.Count -ge 1) 'the documents group has entries'
+foreach ($entity in $documentEntities) {
+    Assert-True (@('RecordFile','MapUpload','BulkImportJob','BarcodeJob','Department') -contains $entity) "documents group carries only registry entities ($entity)"
+}
+$groupDigitization = Invoke-Api -Path '/api/audit?group=digitization' -Token $admin
+Assert-Equal 200 $groupDigitization.Status 'the digitization group responds'
+$digitizationEntities = @($groupDigitization.Data.data.entries | Select-Object -ExpandProperty entity -Unique)
+foreach ($entity in $digitizationEntities) {
+    Assert-True (@('FileScanPage','CustodyEvent','DocumentDerivative') -contains $entity) "digitization group carries only scan-pipeline entities ($entity)"
+}
+$groupLogins = Invoke-Api -Path '/api/audit?group=logins-issues' -Token $admin
+Assert-Equal 200 $groupLogins.Status 'the logins-issues group responds'
+
+# ============================================================ studio permission
+Write-Step 'Scan studio permission (studio.use)'
+# The studio permission is granted to every role by default; an employee — who
+# never had digitization.upload — can now prepare pages.
+$empPage = Invoke-Api -Method POST -Path "/api/files/$newFileId/scans" -Token $employeeToken -Body @{
+    fileName = 'employee-studio-page.png'; pageNo = 81; documentSize = 'A4'
+}
+Assert-Equal 200 $empPage.Status 'an employee can add a studio page'
+$empReorder = Invoke-Api -Method PUT -Path "/api/files/$newFileId/scans/order" -Token $employeeToken -Body @{
+    scanIds = @($empPage.Data.data.id)
+}
+Assert-Equal 200 $empReorder.Status 'an employee can save the studio order'
+
+# Revoke studio.use from Employee and the next request is refused.
+$revokeStudio = Invoke-Api -Method PUT -Path '/api/permissions/Employee/studio.use' -Token $admin -Body @{ granted = $false }
+Assert-Equal 200 $revokeStudio.Status 'studio.use is revoked from Employee'
+$empPageAfter = Invoke-Api -Method POST -Path "/api/files/$newFileId/scans" -Token $employeeToken -Body @{
+    fileName = 'employee-studio-page-2.png'; pageNo = 82; documentSize = 'A4'
+}
+Assert-Equal 403 $empPageAfter.Status 'the revoked studio permission is enforced at once'
+$restoreStudio = Invoke-Api -Method PUT -Path '/api/permissions/Employee/studio.use' -Token $admin -Body @{ granted = $true }
+Assert-Equal 200 $restoreStudio.Status 'studio.use is restored to Employee'
+
 # ============================================================ full-text search
 Write-Step 'Registry search + OCR text (§3.1)'
 # The seeded first under-digitization file carries OCR text containing
@@ -1008,6 +1152,69 @@ Assert-True (@($pdfList.Data.data).Count -ge 1) 'the deliverable is listed on th
 $pdfId = $pdf.Data.data.id
 $pdfBytes = curl.exe -s "$BaseUrl/api/files/$newFileId/pdf/$pdfId/content" -H "Authorization: Bearer $admin"
 Assert-True ($pdfBytes -like '*%PDF*') 'the deliverable downloads as real PDF bytes'
+
+# ====================================================== deliverable review (round 4)
+Write-Step 'Deliverable PDF review (round 4)'
+Assert-Equal 'Pending approval' $pdf.Data.data.status 'a fresh build awaits reviewer approval'
+Assert-True (-not $pdf.Data.data.reviewedBy) 'an unreviewed build has no reviewer yet'
+
+$empReview = Invoke-Api -Method POST -Path "/api/files/$newFileId/pdf/$pdfId/review" -Token $employeeToken -Body @{
+    decision = 'Approved'
+}
+Assert-Equal 403 $empReview.Status 'an employee cannot review a deliverable'
+
+$badDecision = Invoke-Api -Method POST -Path "/api/files/$newFileId/pdf/$pdfId/review" -Token $admin -Body @{
+    decision = 'Maybe'
+}
+Assert-Equal 400 $badDecision.Status 'an unknown review decision is refused'
+
+$rejectNoReason = Invoke-Api -Method POST -Path "/api/files/$newFileId/pdf/$pdfId/review" -Token $admin -Body @{
+    decision = 'Rejected'
+}
+Assert-Equal 400 $rejectNoReason.Status 'a rejection without a reason is refused'
+
+$reject = Invoke-Api -Method POST -Path "/api/files/$newFileId/pdf/$pdfId/review" -Token $admin -Body @{
+    decision = 'Rejected'; note = 'Smoke test: page order needs a fix'
+}
+Assert-Equal 200 $reject.Status 'a reviewer can reject a build with a reason'
+Assert-Equal 'Rejected' $reject.Data.data.status 'the rejected build carries its status'
+Assert-True ([bool]$reject.Data.data.reviewedBy) 'the rejection records the reviewer'
+Assert-Equal 'Smoke test: page order needs a fix' $reject.Data.data.reviewNote 'the rejection keeps the reason'
+
+$reReview = Invoke-Api -Method POST -Path "/api/files/$newFileId/pdf/$pdfId/review" -Token $admin -Body @{
+    decision = 'Approved'
+}
+Assert-Equal 400 $reReview.Status 'an already reviewed build cannot be reviewed again'
+
+$rebuild = Invoke-Api -Method POST -Path "/api/files/$newFileId/pdf" -Token $admin -Body @{ }
+Assert-Equal 200 $rebuild.Status 'the deliverable can be rebuilt after a rejection'
+$approve = Invoke-Api -Method POST -Path "/api/files/$newFileId/pdf/$($rebuild.Data.data.id)/review" -Token $admin -Body @{
+    decision = 'Approved'
+}
+Assert-Equal 200 $approve.Status 'the fixed build is approved'
+Assert-Equal 'Approved' $approve.Data.data.status 'the approved build is the deliverable'
+
+$history = Invoke-Api -Path "/api/files/$newFileId/pdf" -Token $admin
+Assert-True (@($history.Data.data).Count -ge 2) 'every build stays in the history'
+Assert-Equal 'Approved' @($history.Data.data)[0].status 'the history lists the newest build first'
+$foreignReview = Invoke-Api -Method POST -Path "/api/files/999999/pdf/$pdfId/review" -Token $admin -Body @{
+    decision = 'Approved'
+}
+Assert-Equal 404 $foreignReview.Status 'a derivative from another file is not reviewable here'
+
+# ====================================================== split audit groups (round 4)
+Write-Step 'Split audit groups (round 4)'
+$logins = Invoke-Api -Path '/api/audit?group=logins&limit=50' -Token $admin
+Assert-Equal 200 $logins.Status 'the logins group is readable'
+Assert-True (@($logins.Data.data).Count -ge 1) 'the logins group has entries'
+$loginsEntities = @($logins.Data.data | ForEach-Object { $_.entity } | Sort-Object -Unique)
+Assert-True ($loginsEntities.Count -eq 1 -and $loginsEntities[0] -eq 'Session') 'the logins group carries session entities only'
+
+$issues = Invoke-Api -Path '/api/audit?group=issues&limit=200' -Token $admin
+Assert-Equal 200 $issues.Status 'the issues group is readable'
+Assert-True (@($issues.Data.data).Count -ge 1) 'the issues group has entries'
+$issuesEntities = @($issues.Data.data | ForEach-Object { $_.entity } | Sort-Object -Unique)
+Assert-True (($issuesEntities | Where-Object { $_ -notin @('IssueRecord', 'MovementEvent') }).Count -eq 0) 'the issues group carries the issue / movement trail only'
 
 # ============================================================ restore switches
 Write-Step 'Feature groups restored to the seeded profile'

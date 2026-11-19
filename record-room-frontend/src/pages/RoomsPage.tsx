@@ -159,7 +159,7 @@ export function RoomsPage() {
                   <div className="mt-auto flex items-center gap-2 border-t border-base p-3">
                     <Link
                       to={`/rooms/${room.id}`}
-                      className="focus-ring inline-flex min-h-10 flex-1 items-center justify-center gap-2 rounded-lg bg-[var(--rr-accent)] px-3 text-sm font-semibold text-white hover:bg-[var(--rr-accent-strong)] dark:text-[#0d1420]"
+                      className="focus-ring inline-flex min-h-10 flex-1 items-center justify-center gap-2 rounded-lg bg-[var(--rr-accent-fill)] px-3 text-sm font-semibold text-white hover:bg-[var(--rr-accent-strong)]"
                     >
                       Open room <ArrowRight size={15} weight="bold" />
                     </Link>

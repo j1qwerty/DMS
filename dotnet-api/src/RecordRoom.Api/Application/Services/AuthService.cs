@@ -305,14 +305,17 @@ public sealed class AuthService(
             "files.view", "files.create", "files.edit", "files.bulkImport",
             "issue.issue", "issue.return", "locations.view", "locations.edit",
             "digitization.view", "digitization.upload", "digitization.review",
+            "studio.use",
             "employees.view", "employees.edit", "users.view", "users.edit",
-            "audit.view", "reports.view", "reports.export", "barcodes.print",
+            "audit.view", "audit.fileViews", "reports.view", "reports.export",
+            "barcodes.print",
         ],
         Role.Supervisor =>
         [
             "files.view", "files.create", "files.edit", "files.bulkImport",
             "issue.issue", "issue.return", "locations.view", "locations.edit",
             "digitization.view", "digitization.upload", "digitization.review",
+            "studio.use",
             "employees.view", "employees.edit", "users.view",
             "audit.view", "reports.view", "reports.export", "barcodes.print",
         ],
@@ -320,8 +323,10 @@ public sealed class AuthService(
         [
             "files.view", "files.create", "issue.issue", "issue.return",
             "locations.view", "digitization.view", "digitization.upload",
-            "employees.view", "reports.view", "barcodes.print",
+            "studio.use", "employees.view", "reports.view", "barcodes.print",
         ],
-        _ => ["files.view", "digitization.view", "reports.view"],
+        // The studio is where operators and employees prepare pages, so it is
+        // granted by default and an admin can revoke it per role.
+        _ => ["files.view", "digitization.view", "studio.use", "reports.view"],
     };
 }

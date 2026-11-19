@@ -7,7 +7,6 @@ import {
   Plus,
   SortAscending,
   SortDescending,
-  UploadSimple,
   X,
 } from '@phosphor-icons/react';
 import { Link, useSearchParams } from 'react-router-dom';
@@ -290,16 +289,8 @@ export function FilesPage() {
               <span className="hidden sm:inline">Export this page</span>
               <span className="sm:hidden">Export</span>
             </Button>
-            {allowed('files.bulkImport') && (
-              <LinkButton
-                to="/admin/bulk-import"
-                variant="ghost"
-                className="hidden sm:inline-flex"
-                icon={<UploadSimple size={17} />}
-              >
-                Bulk import
-              </LinkButton>
-            )}
+            {/* Round 4: the bulk-import entry is hidden everywhere; the page
+                itself stays reachable by URL behind files.bulkImport. */}
             {allowed('files.create') && (
               <LinkButton to="/files/new" icon={<Plus size={17} weight="bold" />}>
                 Register file
@@ -363,7 +354,7 @@ export function FilesPage() {
             >
               <span className="hidden sm:inline">Filters</span>
               {activeFilters > 0 && (
-                <span className="grid size-5 place-items-center rounded-full bg-[var(--rr-accent)] text-[11px] text-white dark:text-[#0d1420]">
+                <span className="grid size-5 place-items-center rounded-full bg-[var(--rr-accent-fill)] text-[11px] text-white">
                   {activeFilters}
                 </span>
               )}
@@ -385,7 +376,7 @@ export function FilesPage() {
                   className={cn(
                     'focus-ring min-h-9 shrink-0 rounded-full border px-3.5 text-[13px] font-semibold transition',
                     active
-                      ? 'border-[var(--rr-accent)] bg-[var(--rr-accent)] text-white dark:text-[#0d1420]'
+                      ? 'border-[var(--rr-accent-fill)] bg-[var(--rr-accent-fill)] text-white'
                       : 'border-base bg-[var(--rr-surface)] hover:bg-[var(--rr-surface-2)]',
                   )}
                 >

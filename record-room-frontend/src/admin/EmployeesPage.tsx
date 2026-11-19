@@ -11,6 +11,7 @@ import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
 import { Field, FormGrid, SelectInput, TextInput } from '../components/ui/Field';
+import { DepartmentSelect } from '../components/DepartmentSelect';
 import { StatusBadge } from '../components/ui/Flash';
 import { EmptyState } from '../components/ui/EmptyState';
 import { TableSkeleton } from '../components/ui/Skeletons';
@@ -355,13 +356,12 @@ function EmployeeForm({
             onChange={(event) => set('dateOfBirth', event.target.value)}
           />
         </Field>
-        <Field label="Department" htmlFor="emp-dept">
-          <TextInput
-            id="emp-dept"
-            value={value.department}
-            onChange={(event) => set('department', event.target.value)}
-          />
-        </Field>
+        <DepartmentSelect
+          id="emp-dept"
+          value={value.department}
+          onChange={(next) => set('department', next)}
+          required
+        />
         <Field label="Designation" htmlFor="emp-designation">
           <TextInput
             id="emp-designation"

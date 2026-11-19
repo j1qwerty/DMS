@@ -99,15 +99,22 @@ export const session = {
       listeners.delete(listener);
     };
   },
-  /** Display name for audit rows; falls back to `system` for seeded events. */
+  /**
+   * Display name for audit rows; falls back to `system` for seeded events.
+   *
+   * Reads `get()`, not the module variable: after a page refresh the session is
+   * restored from localStorage lazily, so `current` is still null here — reading
+   * it directly wrote every post-refresh custody/audit actor as `system`.
+   */
   actorName(): string {
-    return current?.displayName ?? current?.userName ?? 'system';
+    const user = session.get();
+    return user?.displayName ?? user?.userName ?? 'system';
   },
   userName(): string {
-    return current?.userName ?? 'system';
+    return session.get()?.userName ?? 'system';
   },
   role(): Role {
-    return current?.role ?? 'Operator';
+    return session.get()?.role ?? 'Operator';
   },
   isSignedIn(): boolean {
     return session.get() !== null;

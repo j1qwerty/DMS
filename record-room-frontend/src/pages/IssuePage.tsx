@@ -15,6 +15,7 @@ import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { Field, FormGrid, SelectInput, TextInput } from '../components/ui/Field';
+import { EmployeeCombobox } from '../components/EmployeeCombobox';
 import { Flash } from '../components/ui/Flash';
 import { EmptyState } from '../components/ui/EmptyState';
 import { useQuery, useService, useSession } from '../hooks/useService';
@@ -42,7 +43,9 @@ export function IssuePage() {
 
   const [scan, setScan] = useState('');
   const [fileSearch, setFileSearch] = useState('');
-  const [employeeSearch, setEmployeeSearch] = useState('');
+  // The borrower field: the typed query plus the pick made from it. A query
+  // that matches nobody is kept — the issue records the name as typed.
+  const [employeeQuery, setEmployeeQuery] = useState('');
   const [cart, setCart] = useState<RecordFile[]>([]);
   const [borrowerType, setBorrowerType] = useState<'Employee' | 'Depositor'>('Employee');
   const [employeeCode, setEmployeeCode] = useState('');
@@ -56,15 +59,16 @@ export function IssuePage() {
   const [committing, setCommitting] = useState(false);
   const scanInputRef = useRef<HTMLInputElement>(null);
 
-  // Employees and the borrower roll-up both live in the API now, so they are
-  // asked for rather than derived from a local snapshot.
+  // The borrower roll-up lives in the API; the employee matches are fetched by
+  // the combobox itself. The picked employee is looked up by code so the
+  // receipt carries the department exactly as filed.
   const { data: employeePage } = useQuery(
-    () => service.employees.list({ search: employeeSearch, pageSize: 100, status: 'Active' }),
-    [employeeSearch],
+    () => service.employees.list({ pageSize: 500, status: 'Active' }),
+    [],
     EMPTY_EMPLOYEES,
   );
   const employees = employeePage.items;
-  const employee = employees.find((item) => item.employeeCode === employeeCode);
+  const employee = employees.find((item) => item.employeeCode === employeeCode) ?? null;
   const { data: fileSearchPage } = useQuery(
     () =>
       fileSearch.trim().length >= 2
@@ -131,8 +135,12 @@ export function IssuePage() {
       const result = await service.issues.issueFiles({
         borrowerType,
         borrowerEmployeeCode: borrowerType === 'Employee' ? employeeCode : depositorCode,
+        // A picked employee files under their own name; a typed-but-unmatched
+        // name is recorded as typed (the notice on screen says so).
         borrowerName:
-          borrowerType === 'Employee' ? (employee?.name ?? '') : 'Court advocate (walk-in)',
+          borrowerType === 'Employee'
+            ? (employee?.name ?? employeeQuery.trim())
+            : 'Court advocate (walk-in)',
         department: borrowerType === 'Employee' ? (employee?.department ?? '') : 'Legal',
         purpose,
         fileIds: cart.map((file) => file.id),
@@ -379,30 +387,20 @@ export function IssuePage() {
             </Field>
 
             {borrowerType === 'Employee' ? (
-              <div className="space-y-2">
-                <Field label="Find employee" htmlFor="issue-employee-search">
-                  <TextInput
-                    id="issue-employee-search"
-                    value={employeeSearch}
-                    onChange={(event) => setEmployeeSearch(event.target.value)}
-                    placeholder="Search by employee name, code or department"
-                  />
-                </Field>
-                <Field label="Employee" htmlFor="issue-employee" required>
-                  <SelectInput
-                    id="issue-employee"
-                    value={employeeCode}
-                    onChange={(event) => setEmployeeCode(event.target.value)}
-                  >
-                    <option value="">Select an employee</option>
-                    {employees.map((item) => (
-                      <option key={item.id} value={item.employeeCode}>
-                        {item.employeeCode} · {item.name} · {item.department}
-                      </option>
-                    ))}
-                  </SelectInput>
-                </Field>
-              </div>
+              <EmployeeCombobox
+                text={employeeQuery}
+                selected={employee}
+                onTextChange={(text) => {
+                  setEmployeeQuery(text);
+                  if (employeeCode) setEmployeeCode('');
+                }}
+                onSelect={(picked) => {
+                  setEmployeeCode(picked.employeeCode);
+                  setEmployeeQuery(`${picked.employeeCode} · ${picked.name}`);
+                }}
+                onClear={() => setEmployeeCode('')}
+                hint="Results appear as you type — pick one, or leave the typed name to record it as written."
+              />
             ) : (
               <Field
                 label="Depositor code"
@@ -457,7 +455,16 @@ export function IssuePage() {
             <div className="flex flex-wrap gap-2">
               <Button
                 className="flex-1"
-                disabled={!allowed('issue.issue') || cart.length === 0 || scanning || committing}
+                disabled={
+                  !allowed('issue.issue') ||
+                  cart.length === 0 ||
+                  scanning ||
+                  committing ||
+                  (borrowerType === 'Employee' &&
+                    employeeCode.length === 0 &&
+                    employeeQuery.trim().length === 0) ||
+                  (borrowerType === 'Depositor' && depositorCode.trim().length === 0)
+                }
                 icon={<CheckCircle size={17} />}
                 onClick={() => void commit()}
               >

@@ -478,7 +478,7 @@ export const filesService: FilesApi = {
   async deleteDocument(fileId, documentId) {
     const file = await filesService.get(fileId);
     if (!file) return err('File not found.', 'fileId');
-    const removed = deleteLocalRecordDocument(fileId, documentId);
+    const removed = await deleteLocalRecordDocument(fileId, documentId);
     if (!removed) return err('Scan version not found.', 'documentId');
     store.update((draft) =>
       log(draft, {

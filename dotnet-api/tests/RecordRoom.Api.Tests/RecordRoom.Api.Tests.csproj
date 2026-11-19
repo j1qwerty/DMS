@@ -9,16 +9,25 @@
 
   <ItemGroup>
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.12" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
   </ItemGroup>
 
+  <!-- IFormFile / IHostEnvironment / MemoryCache: the flow tests exercise the
+       real service classes, which live in the web project. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
   <!--
-    Integration coverage lives in scripts/test-api.ps1, which drives the real
-    HTTP surface against a real SQL Server. This project covers only the pure
-    logic that is awkward to reach over HTTP: hashing, the barcode grammar, the
-    display-name mapping and CSV row classification.
+    Round 4: flow tests (Round4FlowTests) run the real service classes against
+    a real SQLite database in memory and a real on-disk document store, so they
+    assert database rows AND stored files for the full flows: registration,
+    edit, custody, issue/return, scan upload → review → deliverable build →
+    review. SQLite is a test provider only; production runs SQL Server, driven
+    end-to-end over HTTP by scripts/test-api.ps1.
   -->
   <ItemGroup>
     <ProjectReference Include="..\..\src\RecordRoom.Api\RecordRoom.Api.csproj" />

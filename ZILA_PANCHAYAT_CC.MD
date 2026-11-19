@@ -143,3 +143,27 @@ The harness turns the feature groups **on** after authentication (they seed
 off — §F) and restores the seeded profile before the summary, so every hidden
 group's endpoints are still exercised on each run. Unit-test totals: API 165
 (was 146), web 132 passing.
+
+## §R — Round 3 (2026-11-18) — UI corrections + final-scope closing
+
+| Item | State | Where |
+|---|---|---|
+| Menu: Overview first; Maps/Help folded away; one Digitization entry with tabs | DONE | `Sidebar.tsx`, `MobileTabBar.tsx`, `DigitizationPage.tsx` (tab in URL), `/custody` redirects |
+| Sidebar `permitted()` feature-check bug (Rooms/Maps/Help bounced to /files) | DONE (bug fixed) | `Sidebar.tsx` |
+| Contrast: `@custom-variant dark` (dark: followed the OS, not the .dark class) + `--rr-accent-fill` white-text fills | DONE | `global.css`, `Button.tsx`, tabs, toggles, avatars |
+| Logged-in user on topbar only | DONE | sidebar footer keeps Settings + sign-out |
+| Permission matrix alignment | DONE | `UsersPage.tsx` table-fixed, widths, nowrap |
+| Custody: batch prefilled `DIG-YYYYMMDD-HHmm` | DONE | `lib/batchRef.ts` (reusable) |
+| Custody: Return… against an intake (partial/repeated), x/y column, view-details modal, signer names, counted-by stamps | DONE | `CustodyPage.tsx` + API `POST /api/custody/{id}/return`, `GET /{id}/returns`, `ReconciledBy/At` |
+| Issue desk employee combobox; unmatched name saved as typed with notice | DONE | `EmployeeCombobox.tsx` + `IssuePage.tsx` |
+| Departments CRUD (names + codes) + selects on employee/custody/file forms | DONE | `DepartmentsPage.tsx`, `DepartmentSelect.tsx`, API `/api/departments`, rename follows employees |
+| Audit regrouped: Documents / Digitization / Logins & issues / File views | DONE | `AuditPage.tsx` + API `?group=` |
+| File-view tracking (5-min per-user throttle) + `audit.fileViews` permission | DONE | `FilesService.RecordViewAsync`, `GET /api/audit/file-views` |
+| Scan studio reachable (file page button) + `studio.use` permission (all four roles) | DONE | `FileDetailPage.tsx`, route guard, 8 endpoints re-gated |
+| OCR run/display in the studio | DONE | `ScanStudioPage.tsx` + `POST /api/scans/{id}/ocr` |
+| Hindi OCR: PDFium raster + tesseract hin+eng on upload and re-run; tessdata shipped | DONE + E2E-verified | `OcrTextExtractor.cs`, `TesseractOcrEngine.cs`, `tessdata/` (rendered Hindi page read exactly) |
+| Dashboard: registry, % mapped, issued, due+overdue, digitization % | DONE | `DashboardPage.tsx` (five cards, scope order) |
+| Deliverable regeneration tracking (who/when/pages/sha; per-edit audit) | DONE (existed; now visible in studio + digitization audit group) | `DocumentDerivative`, audit rows |
+| Tests | DONE | web 154 (+20 round-3), API 171 (+6 extractor), harness +5 sections (departments, returns, file views, groups, studio.use) |
+
+**Not verifiable here:** the PowerShell harness itself needs the user's Windows + SQL Server run (all sections follow the existing pattern; the API round-trips were unit-verified where logic is pure).

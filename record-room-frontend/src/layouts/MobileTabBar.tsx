@@ -1,12 +1,5 @@
 import { NavLink, useLocation } from 'react-router-dom';
-import {
-  Archive,
-  ClipboardText,
-  DotsThree,
-  Files,
-  MapTrifold,
-  ScanSmiley,
-} from '@phosphor-icons/react';
+import { Archive, ClipboardText, DotsThree, Files, ScanSmiley } from '@phosphor-icons/react';
 import type { Icon } from '@phosphor-icons/react';
 import { cn } from '../lib/utils';
 import { useSession } from '../hooks/useService';
@@ -26,9 +19,8 @@ interface Tab {
 
 const tabs: Tab[] = [
   { label: 'Documents', to: '/files', icon: Files },
-  { label: 'Maps', to: '/maps', icon: MapTrifold, permission: 'files.view', feature: 'maps' },
   { label: 'Scan', to: '/scan', icon: ScanSmiley, barcode: 'on' },
-  { label: 'Review', to: '/digitization', icon: Archive, barcode: 'off' },
+  { label: 'Digitization', to: '/digitization', icon: Archive, barcode: 'off' },
   { label: 'Issue', to: '/issue', icon: ClipboardText, permission: 'issue.issue' },
 ];
 

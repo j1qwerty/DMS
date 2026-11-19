@@ -17,6 +17,7 @@
 import type { RecordRoomService } from './contracts';
 import { store } from './store';
 import { auditService } from './impl/audit';
+import { departmentsService } from './impl/departments';
 import { authService } from './impl/auth';
 import { barcodesService } from './impl/barcodes';
 import { bulkService } from './impl/bulk';
@@ -42,6 +43,7 @@ import {
   httpDashboardService,
   httpDigitizationService,
   httpEmployeesService,
+  httpDepartmentsService,
   httpFilesService,
   httpInquiriesService,
   httpIssuesService,
@@ -66,6 +68,7 @@ const localService: RecordRoomService = {
   issues: issuesService,
   movements: movementsService,
   employees: employeesService,
+  departments: departmentsService,
   digitization: scansService,
   custody: custodyService,
   uploads: uploadsService,
@@ -79,7 +82,7 @@ const localService: RecordRoomService = {
   media: mediaService,
   async reset() {
     store.reset();
-    clearLocalDocumentStorage();
+    await clearLocalDocumentStorage();
   },
 };
 
@@ -91,6 +94,7 @@ const httpService: RecordRoomService = {
   issues: httpIssuesService,
   movements: httpMovementsService,
   employees: httpEmployeesService,
+  departments: httpDepartmentsService,
   digitization: httpDigitizationService,
   custody: httpCustodyService,
   uploads: httpUploadsService,

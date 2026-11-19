@@ -6,8 +6,10 @@ import { can, type Permission } from '../services/permissions';
 const adminNav: Array<{ to: string; label: string; permission: Permission }> = [
   { to: '/admin/users', label: 'Users & roles', permission: 'users.view' },
   { to: '/admin/employees', label: 'Employees', permission: 'employees.view' },
+  { to: '/admin/departments', label: 'Departments', permission: 'employees.view' },
   { to: '/admin/locations', label: 'Room layout', permission: 'locations.view' },
-  { to: '/admin/bulk-import', label: 'Bulk import', permission: 'files.bulkImport' },
+  // Round 4: bulk import is hidden from the UI everywhere. The route and page
+  // stay (direct URL, files.bulkImport permission still gates them).
   { to: '/admin/audit', label: 'Audit & logins', permission: 'audit.view' },
 ];
 

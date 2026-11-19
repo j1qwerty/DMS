@@ -6,9 +6,6 @@ import {
   Files,
   Gauge,
   Gear,
-  Handshake,
-  MapTrifold,
-  Question,
   ShieldCheck,
   SignOut,
   Stack,
@@ -19,7 +16,7 @@ import { cn } from '../lib/utils';
 import { useSession } from '../hooks/useService';
 import { can, type Permission } from '../services/permissions';
 import { useFeatures, type FeatureKey } from '../lib/features';
-import { APP_NAME, RECORD_ROOM_SECTION } from '../lib/brand';
+import { APP_NAME } from '../lib/brand';
 
 interface NavItem {
   label: string;
@@ -34,25 +31,19 @@ interface NavItem {
 }
 
 /**
- * The product is a Document Management System. Its core is the document register, maps
- * and digitization; the record room (physical files, rooms, barcodes) is an additional
- * section in the same menu. Related screens are reached from tabs on the page itself,
- * so the menu stays short.
+ * The product is a Document Management System. The menu follows the work: the
+ * overview first, then the register, digitization (scan review and custody on
+ * one page), the issue desk and the rooms. Maps are a Documents filter, not a
+ * separate destination, and support lives in Settings — so nothing opens the
+ * same page twice.
  */
 const groups: Array<{ title: string; items: NavItem[] }> = [
   {
-    title: 'Document management',
+    title: 'Workspace',
     items: [
-      { label: 'Documents', to: '/files', icon: Files, also: ['/search'] },
-      { label: 'Maps', to: '/maps', icon: MapTrifold, permission: 'files.view', feature: 'maps' },
-      { label: 'Scan review', to: '/digitization', icon: Archive, also: ['/custody'] },
-      { label: 'Custody register', to: '/custody', icon: Handshake },
-      { label: 'Reports', to: '/reports', icon: ChartBar, permission: 'reports.view' },
-    ],
-  },
-  {
-    title: RECORD_ROOM_SECTION,
-    items: [
+      { label: 'Overview', to: '/overview', icon: Gauge },
+      { label: 'Documents', to: '/files', icon: Files, also: ['/search', '/maps'] },
+      { label: 'Digitization', to: '/digitization', icon: Archive, also: ['/custody'] },
       {
         label: 'Issue & return',
         to: '/issue',
@@ -66,31 +57,28 @@ const groups: Array<{ title: string; items: NavItem[] }> = [
         also: ['/barcodes'],
         feature: 'recordRoom',
       },
+      { label: 'Reports', to: '/reports', icon: ChartBar, permission: 'reports.view' },
     ],
   },
   {
     title: 'Manage',
     items: [
-      { label: 'Overview', to: '/overview', icon: Gauge },
       {
         label: 'Administration',
         to: '/admin',
         icon: ShieldCheck,
-        anyOf: ['users.view', 'employees.view', 'locations.view', 'files.bulkImport', 'audit.view'],
+        anyOf: ['users.view', 'employees.view', 'locations.view', 'audit.view', 'audit.fileViews'],
       },
     ],
   },
 ];
 
-const footerLinks: NavItem[] = [
-  { label: 'Help & support', to: '/support', icon: Question, feature: 'support' },
-  { label: 'Settings', to: '/settings', icon: Gear },
-];
+const footerLinks: NavItem[] = [{ label: 'Settings', to: '/settings', icon: Gear }];
 
 export function BrandMark({ size = 36 }: { size?: number }) {
   return (
     <div
-      className="grid shrink-0 place-items-center rounded-lg bg-[var(--rr-accent)] text-white dark:text-[#0d1420]"
+      className="grid shrink-0 place-items-center rounded-lg bg-[var(--rr-accent-fill)] text-white"
       style={{ width: size, height: size }}
     >
       <Archive size={Math.round(size * 0.55)} weight="bold" />
@@ -103,10 +91,11 @@ export function Sidebar({ mobileOpen, onClose }: { mobileOpen: boolean; onClose:
   const { user, signOut } = useSession();
   const features = useFeatures();
 
-  const permitted = (item: NavItem) =>
-    (!item.feature || features[item.feature]) && item.anyOf
-      ? item.anyOf.some((permission) => can(user?.role, permission))
-      : !item.permission || can(user?.role, item.permission);
+  const permitted = (item: NavItem) => {
+    if (item.feature && !features[item.feature]) return false;
+    if (item.anyOf) return item.anyOf.some((permission) => can(user?.role, permission));
+    return !item.permission || can(user?.role, item.permission);
+  };
 
   const visibleGroups = groups
     .map((group) => ({ ...group, items: group.items.filter(permitted) }))
@@ -181,26 +170,16 @@ export function Sidebar({ mobileOpen, onClose }: { mobileOpen: boolean; onClose:
 
         <div className="shrink-0 border-t border-base p-3">
           <div className="space-y-0.5">{footerLinks.filter(permitted).map(link)}</div>
-          <div className="mt-3 flex items-center gap-3 rounded-lg bg-[var(--rr-bg)] p-2.5">
-            <div className="grid size-9 shrink-0 place-items-center rounded-full bg-[var(--rr-accent)] text-sm font-bold text-white dark:text-[#0d1420]">
-              {(user?.displayName ?? '?').slice(0, 1).toUpperCase()}
-            </div>
-            <div className="min-w-0 flex-1 leading-tight">
-              <p className="truncate text-[13px] font-semibold">
-                {user?.displayName ?? 'Signed out'}
-              </p>
-              <p className="muted truncate text-xs">{user?.role}</p>
-            </div>
-            <button
-              type="button"
-              onClick={signOut}
-              className="focus-ring muted grid size-9 place-items-center rounded-lg transition-colors hover:bg-[var(--rr-danger)] hover:text-white"
-              aria-label="Sign out"
-              title="Sign out"
-            >
-              <SignOut size={18} />
-            </button>
-          </div>
+          {/* The signed-in user shows on the topbar only; here a quiet way out. */}
+          <button
+            type="button"
+            onClick={signOut}
+            className="focus-ring muted mt-2 flex min-h-10 w-full items-center gap-3 rounded-lg px-3 text-[15px] transition hover:bg-[var(--rr-danger)] hover:text-white"
+            aria-label="Sign out"
+          >
+            <SignOut size={20} />
+            Sign out
+          </button>
         </div>
       </aside>
     </>

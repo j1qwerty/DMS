@@ -6,6 +6,42 @@ import { BrandMark } from './Sidebar';
 import { CommandPalette } from '../components/CommandPalette';
 import { useFeatures } from '../lib/features';
 import { APP_SHORT } from '../lib/brand';
+import { dataSource } from '../services';
+
+/**
+ * Which data layer is live, always visible (round 4): a red dot while the app
+ * runs on the in-browser demo dataset — nothing you create reaches a server —
+ * and a green dot once VITE_API_MODE=http points at the .NET API.
+ */
+function DataSourceBadge() {
+  const demo = dataSource === 'local';
+  return (
+    <span
+      title={
+        demo
+          ? 'Demo mode: data lives only in this browser. Start the API (dotnet run, port 5199) and set VITE_API_MODE=http in record-room-frontend/.env.local to work against the real database.'
+          : 'Live API: every change is written to the .NET API and its database.'
+      }
+      className={`focus-ring inline-flex min-h-9 items-center gap-2 rounded-full border px-3 text-xs font-semibold ${
+        demo
+          ? 'border-[color-mix(in_srgb,var(--rr-danger)_40%,transparent)] bg-[color-mix(in_srgb,var(--rr-danger)_10%,transparent)] text-[var(--rr-danger)]'
+          : 'border-[color-mix(in_srgb,var(--rr-success)_40%,transparent)] bg-[color-mix(in_srgb,var(--rr-success)_10%,transparent)] text-[var(--rr-success)]'
+      }`}
+    >
+      <span className="relative flex size-2">
+        {demo && (
+          <span className="absolute inline-flex size-2 animate-ping rounded-full bg-[var(--rr-danger)] opacity-60" />
+        )}
+        <span
+          className={`relative inline-flex size-2 rounded-full ${
+            demo ? 'bg-[var(--rr-danger)]' : 'bg-[var(--rr-success)]'
+          }`}
+        />
+      </span>
+      <span className="hidden sm:inline">{demo ? 'Demo data' : 'Live API'}</span>
+    </span>
+  );
+}
 
 export function Topbar({
   dark,
@@ -109,6 +145,7 @@ export function Topbar({
       </form>
 
       <div className="ml-auto flex items-center gap-1">
+        <DataSourceBadge />
         <button
           onClick={() => setDark(!dark)}
           className="focus-ring grid size-11 place-items-center rounded-lg hover:bg-[var(--rr-surface-2)]"
@@ -125,7 +162,7 @@ export function Topbar({
             aria-expanded={menuOpen}
             aria-label="Account menu"
           >
-            <span className="grid size-8 place-items-center rounded-full bg-[var(--rr-accent)] text-sm font-bold text-white dark:text-[#0d1420]">
+            <span className="grid size-8 place-items-center rounded-full bg-[var(--rr-accent-fill)] text-sm font-bold text-white">
               {(user?.displayName ?? '?').slice(0, 1).toUpperCase()}
             </span>
             <span className="hidden text-left leading-tight md:block">

@@ -16,7 +16,12 @@ import type { FileScan } from '../../types';
 import { log } from './audit';
 import { filesService } from './files';
 import { session } from './session';
-import { localDocumentBlob, saveLocalRowDocument } from './document-storage';
+import {
+  localDocumentBlob,
+  localDerivativeBlob,
+  saveLocalRowDocument,
+  saveLocalDerivativeBytes,
+} from './document-storage';
 import type { DocumentDerivative } from '../../types';
 import { validateDocumentFile } from '../../lib/document';
 
@@ -315,6 +320,40 @@ export const scansService: ScanApi = {
     return ok(await scansService.list(fileId));
   },
 
+  async runOcr(scanId) {
+    // The local demo has no OCR engine; the API deployment rasterizes pages
+    // and runs tesseract hin+eng. Here the pass returns what the page already
+    // carries, or synthesizes the same one-line description the PDF build
+    // uses, so the studio flow is complete in both modes.
+    const row = store.getState().scanPages.find((item) => item.id === scanId);
+    if (!row) return err('Scan page not found.', 'scanId');
+    const file = store.getState().files.find((item) => item.fileBarcode === row.fileBarcode);
+    const text =
+      row.ocrText?.trim() ||
+      `Page ${row.pageNo} of ${file?.fileNumber ?? row.fileBarcode} (${row.documentSize}).`;
+    store.update((draft) => {
+      const page = draft.scanPages.find((item) => item.id === scanId);
+      if (page) page.ocrText = text;
+      log(draft, {
+        action: 'Update',
+        entity: 'FileScanPage',
+        entityId: scanId,
+        before: row.ocrText?.trim() ? 'text present' : 'no text',
+        after: `${text.length} characters`,
+        summary: `OCR re-run for page ${row.pageNo} of ${row.fileBarcode}: demo mode`,
+      });
+    });
+    return ok({
+      scanId,
+      barcode: row.fileBarcode,
+      pageNo: row.pageNo,
+      version: row.version,
+      ocrText: text,
+      method: 'demo',
+      ranAt: timestamp(),
+    });
+  },
+
   async rotate(scanId, degrees) {
     const row = store.getState().scanPages.find((item) => item.id === scanId);
     if (!row) return err('Scan page not found.', 'scanId');
@@ -435,15 +474,18 @@ export const scansService: ScanApi = {
     return localDocumentBlob('page', scanId);
   },
 
-  // Deliverable PDFs (§3.5). Local mode composes a real, minimal text PDF
-  // from the pages' OCR text; the API composes the image deliverable with
-  // QuestPDF. Derivative records live for the session (demo mode).
+  // Deliverable PDFs (§3.5), round 4: rows persist in the store and their bytes
+  // in the IndexedDB document store, so the studio's history — including every
+  // superseded build — survives a refresh. Local mode composes a real, minimal
+  // text PDF from the pages' OCR text; the API composes the image deliverable
+  // with QuestPDF.
   async listPdfs(fileId) {
     const file = await filesService.get(fileId);
     if (!file) return [];
-    return localDerivatives
-      .filter((row) => row.fileId === fileId)
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    return store
+      .getState()
+      .derivatives.filter((row) => row.fileId === fileId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
   },
 
   async buildPdf(fileId, filename) {
@@ -480,31 +522,62 @@ export const scansService: ScanApi = {
       includesOcrText: pages.some((row) => !!row.ocrText?.trim()),
       createdAt: timestamp(),
       createdBy: session.actorName(),
+      // A fresh build waits for reviewer sign-off before it is the deliverable.
+      status: 'Pending approval',
     };
-    derivativeBytes.set(derivative.id, bytes);
-    localDerivatives.unshift(derivative);
+    await saveLocalDerivativeBytes(derivative.id, bytes);
     store.update((draft) => {
+      draft.derivatives.unshift(derivative);
       log(draft, {
         action: 'Create',
         entity: 'DocumentDerivative',
         entityId: derivative.id,
         before: '-',
-        after: `${derivative.filename}; pages=${derivative.pageCount}`,
+        after: `${derivative.filename}; pages=${derivative.pageCount}; status=pending approval`,
         summary: `Deliverable PDF built for ${file.fileBarcode} from ${pages.length} approved page(s)`,
       });
     });
     return ok(derivative);
   },
 
+  async reviewPdf(derivativeId, decision, note) {
+    const row = store.getState().derivatives.find((item) => item.id === derivativeId);
+    if (!row) return err('Deliverable PDF not found.', 'derivativeId');
+    if (row.status !== 'Pending approval') {
+      return err(`This PDF was already ${row.status.toLowerCase()}.`, 'derivativeId');
+    }
+    if (decision === 'Rejected' && !note?.trim()) {
+      return err('A rejection reason is required.', 'note');
+    }
+    const updated: DocumentDerivative = {
+      ...row,
+      status: decision,
+      reviewedBy: session.actorName(),
+      reviewedAt: timestamp(),
+      reviewNote: note?.trim() || undefined,
+    };
+    store.update((draft) => {
+      const index = draft.derivatives.findIndex((item) => item.id === derivativeId);
+      if (index >= 0) draft.derivatives[index] = updated;
+      log(draft, {
+        action: decision === 'Approved' ? 'Approve' : 'Reject',
+        entity: 'DocumentDerivative',
+        entityId: derivativeId,
+        before: 'pending approval',
+        after: decision.toLowerCase(),
+        summary: `${row.filename} ${decision.toLowerCase()} by ${updated.reviewedBy}`,
+      });
+    });
+    return ok(updated);
+  },
+
   async pdfBlob(derivativeId) {
-    const bytes = derivativeBytes.get(derivativeId);
-    return new Blob([new Uint8Array(bytes ?? [])] as BlobPart[], { type: 'application/pdf' });
+    const blob = localDerivativeBlob(derivativeId);
+    // A missing blob (cleared browser storage) still downloads an empty shell
+    // rather than failing the whole studio, mirroring the old behaviour.
+    return blob ?? new Blob([], { type: 'application/pdf' });
   },
 };
-
-/** Session-local derivative records + their composed bytes (local mode only). */
-const localDerivatives: DocumentDerivative[] = [];
-const derivativeBytes = new Map<string, Uint8Array>();
 
 /** A small, valid, text-only PDF: one page per sheet, with header lines. */
 function composeLocalPdf(pages: Array<{ label: string; text: string }>): Uint8Array {

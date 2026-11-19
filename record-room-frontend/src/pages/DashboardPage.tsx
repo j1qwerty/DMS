@@ -157,7 +157,7 @@ export function DashboardPage() {
         }
       />
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <Stat
           icon={Files}
           label="Files in registry"
@@ -166,22 +166,29 @@ export function DashboardPage() {
           to="/files"
         />
         <Stat
-          icon={ClipboardText}
-          label="Issued right now"
-          value={formatNumber(stats.issuedNow)}
-          note={`${stats.activeBorrowers} borrower${stats.activeBorrowers === 1 ? '' : 's'}`}
-          to="/files?status=Issued"
-        />
-        <Stat
           icon={MapPin}
-          label="Placed on a shelf"
+          label="Files mapped"
           value={`${stats.mappedPercent}%`}
           note={`${stats.roomCount} room${stats.roomCount === 1 ? '' : 's'}`}
           to="/rooms"
         />
         <Stat
+          icon={ClipboardText}
+          label="Files issued"
+          value={formatNumber(stats.issuedNow)}
+          note={`${stats.activeBorrowers} borrower${stats.activeBorrowers === 1 ? '' : 's'}`}
+          to="/files?status=Issued"
+        />
+        <Stat
+          icon={Clock}
+          label="Files due"
+          value={formatNumber(stats.dueToday)}
+          note={`${stats.overdueCount} overdu${stats.overdueCount === 1 ? 'e' : 'es'}`}
+          to="/files?status=Issued"
+        />
+        <Stat
           icon={Archive}
-          label="Scans approved"
+          label="Digitization"
           value={`${stats.digitizationPercent}%`}
           note={`${stats.pendingApprovals} waiting for review`}
           to="/digitization"

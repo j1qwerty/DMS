@@ -335,10 +335,20 @@ public sealed record DocumentDerivativeDto(
     bool IncludesOcrText,
     DateTime CreatedAt,
     string CreatedBy,
-    string? FileNumber = null);
+    string? FileNumber = null,
+    string Status = "Pending approval",
+    string? ReviewedBy = null,
+    DateTime? ReviewedAt = null,
+    string? ReviewNote = null);
 
 /// <summary>Body of POST /api/files/{fileId}/pdf — builds the deliverable from approved pages.</summary>
 public sealed record DeliverablePdfInput(string? FileName = null);
+
+/// <summary>
+/// Body of POST /api/files/{fileId}/pdf/{derivativeId}/review — the reviewer's
+/// verdict on a freshly built deliverable. A rejection requires a reason.
+/// </summary>
+public sealed record DeliverableReviewInput(string Decision, string? Note = null);
 
 // Custody chain (§3.8) ---------------------------------------------------------
 
@@ -354,6 +364,13 @@ public sealed record CustodyEventDto(
     string Vendor,
     int FileCount,
     int? ReconciledCount,
+    /// <summary>Who ran the reconciliation count, and when (intakes only).</summary>
+    string? ReconciledBy,
+    DateTime? ReconciledAt,
+    /// <summary>Files already returned against this intake (intakes only; 0 until a return lands).</summary>
+    int ReturnedCount,
+    /// <summary>The intake a return was recorded against, when it was.</summary>
+    long? SourceCustodyId,
     string RecordedBy,
     DateTime RecordedAt,
     string? SignedOffBy,
@@ -376,6 +393,32 @@ public sealed record CustodyRecordInput(
 
 public sealed record CustodyReconcileInput(int ReconciledCount, string Remarks = "");
 public sealed record CustodySignOffInput(string SignedOffBy = "");
+public sealed record CustodyReturnAgainstInput(int FileCount, string Remarks = "");
+
+// Departments ------------------------------------------------------------------
+
+public sealed record DepartmentDto(
+    int Id,
+    string Name,
+    string Code,
+    string Remarks,
+    /// <summary>Employees currently filed under the department (blocks deletion when > 0).</summary>
+    int EmployeeCount,
+    DateTime CreatedAt);
+
+public sealed record DepartmentInput(string Name, string Code, string Remarks = "");
+
+// OCR ---------------------------------------------------------------------------
+
+public sealed record ScanOcrDto(
+    long ScanId,
+    string Barcode,
+    int PageNo,
+    int Version,
+    string OcrText,
+    /// <summary>"pdf-text-layer", "tesseract hin+eng" or "none" — what produced the text.</summary>
+    string Method,
+    DateTime RanAt);
 
 // Uploads ---------------------------------------------------------------------
 

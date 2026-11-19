@@ -302,6 +302,12 @@ namespace RecordRoom.Api.Migrations
                     b.Property<int>("FileCount")
                         .HasColumnType("int");
 
+                    b.Property<DateTime?>("ReconciledAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("ReconciledBy")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<int?>("ReconciledCount")
                         .HasColumnType("int");
 
@@ -325,6 +331,9 @@ namespace RecordRoom.Api.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
 
+                    b.Property<long?>("SourceCustodyId")
+                        .HasColumnType("bigint");
+
                     b.Property<string>("Vendor")
                         .IsRequired()
                         .HasMaxLength(128)
@@ -338,7 +347,49 @@ namespace RecordRoom.Api.Migrations
 
                     b.HasIndex("RecordedAt");
 
+                    b.HasIndex("SourceCustodyId");
+
                     b.ToTable("CustodyEvents", (string)null);
+                });
+
+            modelBuilder.Entity("RecordRoom.Api.Domain.Department", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("ModifiedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("Remarks")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Code")
+                        .IsUnique();
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("Departments", (string)null);
                 });
 
             modelBuilder.Entity("RecordRoom.Api.Domain.DocumentDerivative", b =>
@@ -381,6 +432,17 @@ namespace RecordRoom.Api.Migrations
                     b.Property<int>("PageCount")
                         .HasColumnType("int");
 
+                    b.Property<string>("ReviewNote")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime?>("ReviewedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("ReviewedBy")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<string>("Sha256")
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
@@ -392,6 +454,11 @@ namespace RecordRoom.Api.Migrations
                         .IsRequired()
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
 
                     b.Property<string>("StorageKey")
                         .HasMaxLength(80)

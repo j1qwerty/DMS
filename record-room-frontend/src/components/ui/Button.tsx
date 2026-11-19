@@ -15,12 +15,14 @@ type ButtonProps = BaseProps & ButtonHTMLAttributes<HTMLButtonElement> & { to?: 
 type LinkButtonProps = BaseProps & { to: string; onClick?: () => void };
 
 const styles = {
-  primary:
-    'bg-[var(--rr-accent)] text-white hover:bg-[var(--rr-accent-strong)] dark:text-[#0d1420]',
+  // Fills carry white text in both themes (see --rr-accent-fill in global.css):
+  // the earlier dark: overrides followed the OS media query, not the app's
+  // .dark class, and produced black text on blue for OS-dark machines.
+  primary: 'bg-[var(--rr-accent-fill)] text-white hover:bg-[var(--rr-accent-strong)]',
   secondary: 'bg-[var(--rr-surface-2)] text-[var(--rr-text)] hover:brightness-[0.97]',
   ghost:
     'border border-[var(--rr-border)] bg-[var(--rr-surface)] text-[var(--rr-text)] hover:bg-[var(--rr-surface-2)]',
-  danger: 'bg-[var(--rr-danger)] text-white hover:brightness-95 dark:text-[#0d1420]',
+  danger: 'bg-[var(--rr-danger)] text-white hover:brightness-95',
 };
 
 const sizes = {

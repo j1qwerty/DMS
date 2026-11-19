@@ -20,6 +20,7 @@ import type {
   BulkImportJob,
   BulkImportRow,
   CustodyEvent,
+  Department,
   DashboardStats,
   Employee,
   FileScan,
@@ -42,10 +43,10 @@ import type { ReportKey } from '../../types';
 import { toId } from './client';
 import { cleanDisplayText } from '../../lib/utils';
 
-const str = (value: unknown): string =>
+export const str = (value: unknown): string =>
   value === null || value === undefined ? '' : cleanDisplayText(String(value));
 
-const num = (value: unknown, fallback = 0): number =>
+export const num = (value: unknown, fallback = 0): number =>
   typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 
 // ---------------------------------------------------------------- identity
@@ -389,11 +390,26 @@ export function toCustodyEvent(dto: Record<string, unknown>): CustodyEvent {
     vendor: str(dto.vendor),
     fileCount: num(dto.fileCount),
     reconciledCount: dto.reconciledCount == null ? null : num(dto.reconciledCount),
+    reconciledBy: dto.reconciledBy ? str(dto.reconciledBy) : null,
+    reconciledAt: dto.reconciledAt ? str(dto.reconciledAt) : null,
+    returnedCount: dto.returnedCount == null ? 0 : num(dto.returnedCount),
+    sourceCustodyId: dto.sourceCustodyId ? toId(dto.sourceCustodyId as number) : null,
     recordedBy: str(dto.recordedBy),
     recordedAt: str(dto.recordedAt),
     signedOffBy: dto.signedOffBy ? str(dto.signedOffBy) : null,
     signedOffAt: dto.signedOffAt ? str(dto.signedOffAt) : null,
     remarks: str(dto.remarks),
+  };
+}
+
+export function toDepartment(dto: Record<string, unknown>): Department {
+  return {
+    id: toId(dto.id as number),
+    name: str(dto.name),
+    code: str(dto.code),
+    remarks: str(dto.remarks),
+    employeeCount: num(dto.employeeCount),
+    createdAt: str(dto.createdAt),
   };
 }
 
@@ -554,5 +570,9 @@ export function toDerivative(dto: Record<string, unknown>): DocumentDerivative {
     includesOcrText: dto.includesOcrText === true,
     createdAt: str(dto.createdAt),
     createdBy: str(dto.createdBy),
+    status: (str(dto.status) || 'Pending approval') as DocumentDerivative['status'],
+    reviewedBy: str(dto.reviewedBy) || undefined,
+    reviewedAt: str(dto.reviewedAt) || undefined,
+    reviewNote: str(dto.reviewNote) || undefined,
   };
 }

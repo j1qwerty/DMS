@@ -80,6 +80,18 @@ public class DocumentDerivative
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public string CreatedBy { get; set; } = string.Empty;
 
+    // ------------------------------------------------- review (round 4)
+    /// <summary>
+    /// "Pending approval" when built; a reviewer verifies the final composition
+    /// (added / reordered / removed pages) and sets Approved or Rejected. The
+    /// newest Approved build is the file's deliverable; every build stays in the
+    /// history for tracking either way.
+    /// </summary>
+    public string Status { get; set; } = "Pending approval";
+    public string? ReviewedBy { get; set; }
+    public DateTime? ReviewedAt { get; set; }
+    public string? ReviewNote { get; set; }
+
     public RecordFile? RecordFile { get; set; }
 }
 
@@ -190,6 +202,15 @@ public class CustodyEvent
     public int FileCount { get; set; }
     /// <summary>Files actually counted; null until the intake side is reconciled.</summary>
     public int? ReconciledCount { get; set; }
+    /// <summary>Who ran the reconciliation count, and when.</summary>
+    public string? ReconciledBy { get; set; }
+    public DateTime? ReconciledAt { get; set; }
+    /// <summary>
+    /// The intake this return was recorded against. Null on intakes and on
+    /// returns recorded standalone. Partial returns are several rows pointing
+    /// at the same intake (6 of 10, then 4 of 10).
+    /// </summary>
+    public long? SourceCustodyId { get; set; }
     public string RecordedBy { get; set; } = string.Empty;
     public DateTime RecordedAt { get; set; } = DateTime.UtcNow;
     public string? SignedOffBy { get; set; }

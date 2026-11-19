@@ -33,6 +33,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Inquiry> Inquiries => Set<Inquiry>();
     public DbSet<MediaLink> MediaLinks => Set<MediaLink>();
     public DbSet<CustodyEvent> CustodyEvents => Set<CustodyEvent>();
+    public DbSet<Department> Departments => Set<Department>();
 
     public DbSet<FeatureSetting> FeatureSettings => Set<FeatureSetting>();
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
@@ -207,6 +208,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.Sha256).HasMaxLength(64);
             e.Property(x => x.CreatedBy).HasMaxLength(64);
             e.Property(x => x.SourceVersions).HasMaxLength(1000);
+            // Round 4: reviewer sign-off on a built deliverable.
+            e.Property(x => x.Status).HasMaxLength(32);
+            e.Property(x => x.ReviewedBy).HasMaxLength(64);
+            e.Property(x => x.ReviewNote).HasMaxLength(500);
             e.HasIndex(x => x.Barcode);
             e.HasOne(x => x.RecordFile).WithMany().HasForeignKey(x => x.Barcode)
                 .HasPrincipalKey(x => x.Barcode).OnDelete(DeleteBehavior.Restrict);
@@ -275,6 +280,18 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasIndex(x => x.RecordedAt);
             e.HasIndex(x => x.Department);
             e.HasIndex(x => x.Direction);
+            // Returns point at their intake; the register renders "x of y" per batch.
+            e.HasIndex(x => x.SourceCustodyId);
+        });
+
+        b.Entity<Department>(e =>
+        {
+            e.ToTable("Departments");
+            e.Property(x => x.Name).HasMaxLength(128);
+            e.Property(x => x.Code).HasMaxLength(32);
+            e.Property(x => x.Remarks).HasMaxLength(500);
+            e.HasIndex(x => x.Name).IsUnique();
+            e.HasIndex(x => x.Code).IsUnique();
         });
 
         // ------------------------------------------------------- configuration

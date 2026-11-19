@@ -74,6 +74,8 @@ public enum AuditAction
     Approve = 8,
     Reject = 9,
     Export = 10,
+    /// <summary>A record was opened — the "who accessed" half of the audit scope.</summary>
+    View = 11,
 }
 
 public enum PageStatus

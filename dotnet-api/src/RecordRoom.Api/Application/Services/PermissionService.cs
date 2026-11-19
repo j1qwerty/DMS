@@ -42,7 +42,7 @@ public sealed class PermissionService(
     Infrastructure.Features.IFeatureFlags flags) : IPermissionService
 {
     /// <summary>
-    /// The permission catalogue — same 19 keys as the frontend
+    /// The permission catalogue — same 21 keys as the frontend
     /// `services/permissions.ts` `PERMISSIONS`, in the same order so the
     /// matrix renders identically on both sides.
     /// </summary>
@@ -52,9 +52,10 @@ public sealed class PermissionService(
         "issue.issue", "issue.return",
         "locations.view", "locations.edit",
         "digitization.view", "digitization.upload", "digitization.review",
+        "studio.use",
         "employees.view", "employees.edit",
         "users.view", "users.edit",
-        "audit.view",
+        "audit.view", "audit.fileViews",
         "reports.view", "reports.export",
         "barcodes.print",
     ];

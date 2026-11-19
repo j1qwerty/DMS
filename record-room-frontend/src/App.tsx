@@ -51,9 +51,6 @@ const DigitizationPage = lazy(() =>
 const ScanStudioPage = lazy(() =>
   import('./pages/ScanStudioPage').then((m) => ({ default: m.ScanStudioPage })),
 );
-const CustodyPage = lazy(() =>
-  import('./pages/CustodyPage').then((m) => ({ default: m.CustodyPage })),
-);
 const ReportsPage = lazy(() =>
   import('./pages/ReportsPage').then((m) => ({ default: m.ReportsPage })),
 );
@@ -67,6 +64,9 @@ const SupportPage = lazy(() =>
 const UsersPage = lazy(() => import('./admin/UsersPage').then((m) => ({ default: m.UsersPage })));
 const EmployeesPage = lazy(() =>
   import('./admin/EmployeesPage').then((m) => ({ default: m.EmployeesPage })),
+);
+const DepartmentsPage = lazy(() =>
+  import('./admin/DepartmentsPage').then((m) => ({ default: m.DepartmentsPage })),
 );
 const LocationsPage = lazy(() =>
   import('./admin/LocationsPage').then((m) => ({ default: m.LocationsPage })),
@@ -150,7 +150,7 @@ export function App() {
             <Route path="/files" element={<KeyedFilesPage />} />
             <Route path="/files/new" element={guarded(NewFilePage, 'files.create')} />
             <Route path="/files/:fileId" element={<FileDetailPage />} />
-            <Route path="/files/:fileId/studio" element={<ScanStudioPage />} />
+            <Route path="/files/:fileId/studio" element={guarded(ScanStudioPage, 'studio.use')} />
             <Route path="/files/:fileId/scan" element={<FileViewerPage />} />
             <Route path="/files/:fileId/map" element={<FileViewerPage />} />
             <Route
@@ -179,7 +179,8 @@ export function App() {
               }
             />
             <Route path="/digitization" element={<DigitizationPage />} />
-            <Route path="/custody" element={<CustodyPage />} />
+            {/* The register moved under Digitization as a tab; old links follow. */}
+            <Route path="/custody" element={<Navigate to="/digitization?tab=custody" replace />} />
             <Route path="/reports" element={<ReportsPage />} />
             <Route
               path="/support"
@@ -195,6 +196,7 @@ export function App() {
               <Route index element={guarded(UsersPage, 'users.view')} />
               <Route path="users" element={guarded(UsersPage, 'users.view')} />
               <Route path="employees" element={guarded(EmployeesPage, 'employees.view')} />
+              <Route path="departments" element={guarded(DepartmentsPage, 'employees.view')} />
               <Route path="locations" element={guarded(LocationsPage, 'locations.view')} />
               <Route path="bulk-import" element={guarded(BulkImportPage, 'files.bulkImport')} />
               <Route

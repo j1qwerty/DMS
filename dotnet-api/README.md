@@ -129,6 +129,9 @@ configuration, so a site can change the cadence without a rebuild.
 | `Jwt:ExpiryMinutes` | `120` | token lifetime |
 | `Database:MigrateOnStartup` | `true` | apply migrations on boot |
 | `Database:SeedOnStartup` | `true` | seed when the registry is empty |
+| `FileStorage:RootPath` | `App_Data/documents` (inside the API folder) | where uploaded scans, maps and studio-built PDFs live on disk; env `FileStorage__RootPath`. Relative → resolved against the API folder; absolute used as-is (`D:\RecordRoom\documents`). The effective path is logged as **`Document storage root`** at startup |
+| `FileStorage:MaxUploadBytes` | `50331648` (48 MiB, hard ceiling) | per-file upload limit; env `FileStorage__MaxUploadBytes` |
+| `Ocr:Enabled` | `true` | run the tesseract (hin+eng) pipeline on scan upload |
 | `Redis:ConnectionString` | empty | enables the Redis cache when set |
 | `Hangfire:Storage` | `InMemory` | or `SqlServer` |
 | `Hangfire:EnableScheduling` | `true` | register the recurring jobs on startup |
@@ -140,6 +143,31 @@ configuration, so a site can change the cadence without a rebuild.
 
 Migrations and the seeder never crash the process: a database that is not
 reachable yet is logged and reported by `/api/health` instead.
+
+### Files on disk, keys in the database
+
+The database never stores file paths. Every upload (scan page, map, record
+document) and every studio-built deliverable PDF is written under
+`FileStorage:RootPath` under a generated key (`<guid>.<ext>`); the tables carry
+only that `StorageKey` plus size / content type / SHA-256. Two consequences
+worth knowing:
+
+- moving the library is a folder copy plus one config change (`FileStorage__RootPath`)
+  — no database edit, because no row ever names a location;
+- a stored key is not a path, so nothing a client uploads can address a file
+  outside the root.
+
+Back up the database **and** the storage folder together: a row without its
+bytes shows an honest "no stored document" in the UI, and bytes without rows
+are unreachable.
+
+### OCR text is stored, not re-derived
+
+The tesseract (hin+eng) pass runs **once**, when a scan's document is attached
+(`FileScanPages.OcrText`), or when someone explicitly re-runs OCR
+(`POST /api/scans/{id}/ocr`). Reads never re-OCR: the registry search matches
+the stored column, and the studio shows the stored text; the deliverable PDF
+embeds it once at build time as the invisible text layer.
 
 ## Barcode switch and product config
 
