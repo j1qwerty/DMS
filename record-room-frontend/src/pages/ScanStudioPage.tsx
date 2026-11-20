@@ -38,6 +38,7 @@ import { Modal } from '../components/ui/Modal';
 import { Field, TextArea, TextInput } from '../components/ui/Field';
 import { StatusBadge } from '../components/ui/Flash';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
+import { PageImageViewer } from '../components/files/PageImageViewer';
 import { service } from '../services';
 import { useFlash, useSession } from '../hooks/useService';
 import { documentAcceptAttribute } from '../lib/document';
@@ -414,6 +415,15 @@ export function ScanStudioPage() {
   const closeVersionPreview = () => {
     if (versionPreview) URL.revokeObjectURL(versionPreview.url);
     setVersionPreview(null);
+  };
+
+  // Left/right arrows switch the stored version being previewed.
+  const stepVersionPreview = (delta: number) => {
+    if (!versionPreview) return;
+    const index = unifiedVersions.findIndex((v) => v.id === versionPreview.version.id);
+    const next = index + delta;
+    if (next < 0 || next >= unifiedVersions.length) return;
+    void openVersionPreview(unifiedVersions[next]);
   };
 
   const executeBuildPdf = async (name: string, remarks: string) => {
@@ -996,6 +1006,15 @@ export function ScanStudioPage() {
           className="fixed inset-0 z-[60] flex flex-col bg-slate-950/90"
           role="dialog"
           aria-modal="true"
+          onKeyDown={(event) => {
+            if (event.key === 'ArrowLeft') {
+              event.preventDefault();
+              stepLightbox(-1);
+            } else if (event.key === 'ArrowRight') {
+              event.preventDefault();
+              stepLightbox(1);
+            }
+          }}
         >
           {/* header: identity + status + close */}
           <div className="flex items-center justify-between gap-3 p-3 text-white">
@@ -1070,20 +1089,19 @@ export function ScanStudioPage() {
               >
                 <ArrowLeft size={18} />
               </button>
-              <div className="grid min-w-0 flex-1 place-items-center overflow-hidden rounded-xl bg-white">
-                {previews[lightboxScan.id] ? (
-                  <img
-                    src={previews[lightboxScan.id]}
-                    alt={`Page ${lightboxScan.pageNo}`}
-                    className="max-h-full max-w-full object-contain"
-                  />
-                ) : (
-                  <div className="flex flex-col items-center gap-2 p-8 text-center">
+              {previews[lightboxScan.id] ? (
+                <PageImageViewer
+                  src={previews[lightboxScan.id]}
+                  alt={`Page ${lightboxScan.pageNo}`}
+                />
+              ) : (
+                <div className="flex flex-1 items-center justify-center rounded-xl bg-white p-8 text-center">
+                  <div className="flex flex-col items-center gap-2 text-center">
                     <FilePdf size={30} className="text-accent" />
                     <p className="muted text-xs">No preview for this page</p>
                   </div>
-                )}
-              </div>
+                </div>
+              )}
               <button
                 type="button"
                 onClick={() => stepLightbox(1)}
@@ -1291,6 +1309,15 @@ export function ScanStudioPage() {
           className="fixed inset-0 z-[60] flex flex-col bg-slate-950/90 p-3"
           role="dialog"
           aria-modal="true"
+          onKeyDown={(event) => {
+            if (event.key === 'ArrowLeft') {
+              event.preventDefault();
+              stepVersionPreview(-1);
+            } else if (event.key === 'ArrowRight') {
+              event.preventDefault();
+              stepVersionPreview(1);
+            }
+          }}
         >
           <div className="flex items-center justify-between gap-3 pb-3 text-white">
             <div className="min-w-0">

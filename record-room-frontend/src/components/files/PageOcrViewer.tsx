@@ -222,6 +222,27 @@ export function PageOcrViewer({
   const zoom = (delta: number) =>
     setScale((current) => Math.min(2.5, Math.max(0.5, Math.round((current + delta) * 10) / 10)));
 
+  // Left/right arrows switch document pages; typing in an input keeps arrows.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+      const target = event.target;
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement
+      ) {
+        return;
+      }
+      event.preventDefault();
+      setCurrentPage((page) =>
+        Math.max(1, Math.min(numPages, page + (event.key === 'ArrowRight' ? 1 : -1))),
+      );
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [numPages]);
+
   const pageLabel = numPages > 0 ? `${currentPage} / ${numPages}` : '—';
   const ocrTextOfCurrent = ocrByPage.get(currentPage)?.trim() ?? '';
 
