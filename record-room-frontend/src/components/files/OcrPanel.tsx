@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowClockwise,
+  ArrowLeft,
+  ArrowRight,
   Check,
   Copy,
   MagnifyingGlass,
   PencilSimple,
+  Spinner,
   TextAa,
   X,
 } from '@phosphor-icons/react';
@@ -15,7 +18,7 @@ import { EmptyState } from '../ui/EmptyState';
 import { StatusBadge } from '../ui/Flash';
 import { TextInput } from '../ui/Field';
 import { useFlash, useQuery, useService, useSession } from '../../hooks/useService';
-import { cn } from '../../lib/utils';
+import { authoritativeScanRows } from '../../lib/scanMerge';
 import { extractPdfPagesToImages } from '../../lib/pdf-unpack';
 import type { DocumentDerivative, FileScan, RecordFileDocument } from '../../types';
 import type { OcrStatusInfo } from '../../services/contracts';
@@ -117,9 +120,12 @@ export function OcrPanel({ fileId }: { fileId: string }) {
   }, [service]);
 
   // A page is part of the OCR surface when it has a document or already
-  // carries text — the seed rows and API rows can arrive text-only.
+  // carries text — the seed rows and API rows can arrive text-only. Studio
+  // drafts of the same page numbers are merged away in favour of the file's
+  // approved pages (issue 2: the OCR tab shows the file's pages, not the
+  // studio's unapproved edits).
   const scanned = useMemo(
-    () => pages.filter((page) => page.hasDocument || page.ocrText?.trim()),
+    () => authoritativeScanRows(pages).filter((page) => page.hasDocument || page.ocrText?.trim()),
     [pages],
   );
   const withText = scanned.filter((page) => page.ocrText?.trim());
@@ -133,8 +139,64 @@ export function OcrPanel({ fileId }: { fileId: string }) {
       page.filename.toLowerCase().includes(needle)
     );
   });
+  const noMatch = Boolean(search.trim()) && visible.length === 0;
 
   const selected = scanned.find((page) => page.id === selectedId) ?? visible[0] ?? scanned[0];
+  const selectedIndex = selected ? scanned.findIndex((page) => page.id === selected.id) : -1;
+
+  const goToPage = (index: number) => {
+    const page = scanned[index];
+    if (!page) return;
+    setSelectedId(page.id);
+    setEditing(false);
+  };
+
+  // Preview of the selected page: the stored scan bytes as an object URL.
+  // Blob URLs are revoked when the selection moves or the panel unmounts.
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [prevPreviewId, setPrevPreviewId] = useState('');
+  if (prevPreviewId !== (selected?.id ?? '') || (selected?.id && !selected?.hasDocument)) {
+    setPrevPreviewId(selected?.id ?? '');
+    setPreviewUrl(null);
+  }
+  useEffect(() => {
+    const id = selected?.id;
+    if (!id || !selected?.hasDocument) return;
+    let live = true;
+    let url: string | null = null;
+    service.digitization
+      .scanBlob(id)
+      .then((blob) => {
+        if (!live) return;
+        url = URL.createObjectURL(blob);
+        setPreviewUrl(url);
+      })
+      .catch(() => {
+        if (live) setPreviewUrl(null);
+      });
+    return () => {
+      live = false;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [selected?.id, selected?.hasDocument, service]);
+
+  // Left/right arrow keys navigate the pages while the panel is open.
+  useEffect(() => {
+    if (!selected) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement)
+        return;
+      if (editing || bulk !== null) return;
+      event.preventDefault();
+      const index = scanned.findIndex((page) => page.id === selected.id);
+      const next = index + (event.key === 'ArrowRight' ? 1 : -1);
+      if (next >= 0 && next < scanned.length) goToPage(next);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scanned, selected, editing, bulk]);
 
   const regenerate = async (page: FileScan) => {
     setBusyId(page.id);
@@ -319,187 +381,189 @@ export function OcrPanel({ fileId }: { fileId: string }) {
         </div>
       )}
 
-      {/* Master–detail: page list left, the selected page's text right. */}
-      <div className="grid gap-4 lg:grid-cols-[300px_minmax(0,1fr)]">
+      {/* Body: the page preview on the left (issue 2 — the OCR tab shows the
+          stored scan of the selected page), the OCR text with page selection
+          on top on the right. */}
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,2fr)]">
         <Card padding={false} className="overflow-hidden">
-          <ul className="max-h-[70vh] divide-y divide-[var(--rr-border)] overflow-y-auto">
-            {visible.map((page) => {
-              const hasText = Boolean(page.ocrText?.trim());
-              const isSelected = selected?.id === page.id;
-              return (
-                <li key={page.id}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedId(page.id);
-                      setEditing(false);
-                    }}
-                    className={cn(
-                      'flex w-full items-center gap-3 px-4 py-3 text-left transition',
-                      isSelected
-                        ? 'bg-accent-soft/40 border-l-[3px] border-[var(--rr-accent)]'
-                        : 'hover:bg-[var(--rr-surface-2)] border-l-[3px] border-transparent',
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        'grid size-8 shrink-0 place-items-center rounded-lg',
-                        hasText
-                          ? 'bg-[color-mix(in_srgb,var(--rr-success)_14%,transparent)] text-[var(--rr-success)]'
-                          : 'bg-[var(--rr-surface-2)] text-[var(--rr-muted)]',
-                      )}
-                    >
-                      <TextAa size={16} />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="flex items-center gap-2 text-sm font-semibold">
-                        Page {page.pageNo}
-                        <span className="muted text-[11px] font-normal">v{page.version}</span>
-                      </span>
-                      <span className="muted mt-0.5 block truncate text-[11px]">
-                        {hasText
-                          ? `${page.ocrText!.trim().slice(0, 60)}${page.ocrText!.trim().length > 60 ? '…' : ''}`
-                          : 'No OCR text'}
-                      </span>
-                    </span>
-                    {page.ocrEditedBy && page.ocrEditedAt ? (
-                      <Badge tone="info">edited</Badge>
-                    ) : hasText ? (
-                      <Badge tone="success">text</Badge>
-                    ) : (
-                      <Badge tone="neutral">none</Badge>
-                    )}
-                  </button>
-                </li>
-              );
-            })}
-            {visible.length === 0 && (
-              <li className="muted p-5 text-center text-xs">No page matches this text search.</li>
-            )}
-          </ul>
-        </Card>
-
-        <Card padding={false} className="overflow-hidden">
-          {selected ? (
+          {noMatch || !selected ? (
+            <div className="p-6 text-center">
+              <EmptyState
+                title={noMatch ? 'No page matches this text search' : 'No page selected'}
+                description={noMatch ? 'Try another word.' : ''}
+              />
+            </div>
+          ) : (
             <>
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-base px-4 py-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-semibold">Page {selected.pageNo}</span>
-                  <span className="muted text-xs">v{selected.version}</span>
+              <div className="flex items-center justify-between border-b border-base px-4 py-2.5">
+                <span className="text-sm font-semibold">Page {selected.pageNo}</span>
+                <span className="flex items-center gap-2 text-xs">
                   <StatusBadge status={selected.status} />
-                  {selected.ocrEditedBy && selected.ocrEditedAt && (
-                    <Badge tone="info">Edited by hand</Badge>
-                  )}
-                  {selected.ocrEditedAt && (
-                    <span className="muted text-[11px]">
-                      {selected.ocrEditedBy} · {new Date(selected.ocrEditedAt).toLocaleString()}
-                    </span>
-                  )}
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  {selected.ocrText?.trim() && !editing && (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      icon={<Copy size={14} />}
-                      onClick={() => void copyPage(selected)}
-                    >
-                      Copy
-                    </Button>
-                  )}
-                  {canEditOcr && (
-                    <>
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        icon={<ArrowClockwise size={14} />}
-                        disabled={busyId === selected.id || bulk !== null}
-                        onClick={() => void regenerate(selected)}
-                      >
-                        {selected.ocrText?.trim() ? 'Re-run OCR' : 'Run OCR'}
-                      </Button>
-                      {editing ? (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          icon={<X size={14} />}
-                          onClick={() => setEditing(false)}
-                        >
-                          Cancel
-                        </Button>
-                      ) : (
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          icon={<PencilSimple size={14} />}
-                          onClick={() => {
-                            setEditing(true);
-                            setDraft(selected.ocrText ?? '');
-                          }}
-                        >
-                          Edit text
-                        </Button>
-                      )}
-                    </>
-                  )}
-                </div>
+                  <span className="muted">v{selected.version}</span>
+                  {selected.dpi ? <span className="muted">{selected.dpi} DPI</span> : null}
+                </span>
               </div>
-
-              <div className="p-4">
-                {editing ? (
-                  <div className="space-y-3">
-                    <textarea
-                      value={draft}
-                      onChange={(event) => setDraft(event.target.value)}
-                      rows={16}
-                      aria-label={`OCR text of page ${selected.pageNo}`}
-                      className="focus-ring w-full rounded-lg border border-base bg-[var(--rr-bg)] p-3 font-mono text-[13px] leading-6 outline-none"
-                    />
-                    <div className="flex justify-end">
-                      <Button
-                        size="sm"
-                        icon={<Check size={15} />}
-                        disabled={busyId === selected.id}
-                        onClick={() => void save(selected)}
-                      >
-                        Save correction
-                      </Button>
-                    </div>
+              <div className="grid h-[62vh] place-items-center overflow-hidden bg-[var(--rr-bg)] p-3">
+                {!selected.hasDocument ? (
+                  <div className="flex flex-col items-center gap-2 text-center text-xs">
+                    <TextAa size={26} className="text-[var(--rr-muted)]" />
+                    <span className="muted">This page has no stored scan image.</span>
                   </div>
-                ) : selected.ocrText?.trim() ? (
-                  <p className="max-h-[60vh] overflow-y-auto whitespace-pre-wrap break-words rounded-lg bg-[var(--rr-bg)] p-4 font-mono text-[13px] leading-6">
-                    {selected.ocrText}
-                  </p>
+                ) : previewUrl ? (
+                  <img
+                    src={previewUrl}
+                    alt={`Page ${selected.pageNo}`}
+                    className="max-h-full max-w-full rounded-lg object-contain shadow-sm"
+                  />
                 ) : (
-                  <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
-                    <TextAa size={28} className="text-[var(--rr-muted)]" />
-                    <p className="muted text-sm">
-                      No OCR text on this page yet — run recognition to make it searchable.
-                    </p>
-                    {canEditOcr && (
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        icon={<ArrowClockwise size={14} />}
-                        disabled={busyId === selected.id || bulk !== null}
-                        onClick={() => void regenerate(selected)}
-                      >
-                        Run OCR on this page
-                      </Button>
-                    )}
+                  <div className="flex flex-col items-center gap-2 text-center text-xs">
+                    <Spinner size={20} className="animate-spin text-accent" />
+                    <span className="muted">Loading the scan of page {selected.pageNo}…</span>
                   </div>
                 )}
               </div>
             </>
-          ) : (
-            <div className="p-6">
-              <EmptyState
-                title="No page matches this text search"
-                description="Try another word."
-              />
-            </div>
           )}
         </Card>
+
+        <div className="space-y-3">
+          {/* Page selection on top, with left/right arrows for navigation. */}
+          {selected && !noMatch && (
+            <div className="flex items-center justify-between gap-2">
+              <Button
+                size="sm"
+                variant="secondary"
+                icon={<ArrowLeft size={13} />}
+                disabled={selectedIndex <= 0 || bulk !== null}
+                onClick={() => goToPage(selectedIndex - 1)}
+              >
+                Previous page
+              </Button>
+              <span className="text-sm font-semibold">
+                Page {selected.pageNo} / {scanned.length}
+              </span>
+              <Button
+                size="sm"
+                variant="secondary"
+                icon={<ArrowRight size={13} />}
+                disabled={selectedIndex >= scanned.length - 1 || bulk !== null}
+                onClick={() => goToPage(selectedIndex + 1)}
+              >
+                Next page
+              </Button>
+            </div>
+          )}
+
+          <Card padding={false} className="overflow-hidden">
+            {noMatch || !selected ? (
+              <div className="p-6">
+                <EmptyState
+                  title={noMatch ? 'No page matches this text search' : 'No page selected'}
+                  description={noMatch ? 'Try another word.' : ''}
+                />
+              </div>
+            ) : (
+              <>
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-base px-4 py-3">
+                  <span className="text-sm font-semibold">OCR text</span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {selected.ocrText?.trim() && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        icon={<Copy size={14} />}
+                        onClick={() => void copyPage(selected)}
+                      >
+                        Copy
+                      </Button>
+                    )}
+                    {canEditOcr && (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          icon={<ArrowClockwise size={14} />}
+                          disabled={busyId === selected.id || bulk !== null}
+                          onClick={() => void regenerate(selected)}
+                        >
+                          {selected.ocrText?.trim() ? 'Re-run OCR' : 'Run OCR'}
+                        </Button>
+                        {editing ? (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            icon={<X size={14} />}
+                            onClick={() => setEditing(false)}
+                          >
+                            Cancel
+                          </Button>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            icon={<PencilSimple size={14} />}
+                            onClick={() => {
+                              setEditing(true);
+                              setDraft(selected.ocrText ?? '');
+                            }}
+                          >
+                            Edit text
+                          </Button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                <div className="p-4">
+                  {editing ? (
+                    <div className="space-y-3">
+                      <textarea
+                        value={draft}
+                        onChange={(event) => setDraft(event.target.value)}
+                        rows={16}
+                        aria-label={`OCR text of page ${selected.pageNo}`}
+                        className="focus-ring w-full rounded-lg border border-base bg-[var(--rr-bg)] p-3 font-mono text-[13px] leading-6 outline-none"
+                      />
+                      <div className="flex justify-end">
+                        <Button
+                          size="sm"
+                          icon={<Check size={15} />}
+                          disabled={busyId === selected.id}
+                          onClick={() => void save(selected)}
+                        >
+                          Save correction
+                        </Button>
+                      </div>
+                    </div>
+                  ) : selected.ocrText?.trim() ? (
+                    <p className="max-h-[60vh] overflow-y-auto whitespace-pre-wrap break-words rounded-lg bg-[var(--rr-bg)] p-4 font-mono text-[13px] leading-6">
+                      {selected.ocrText}
+                    </p>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
+                      <TextAa size={28} className="text-[var(--rr-muted)]" />
+                      <p className="muted text-sm">
+                        No OCR text on this page yet — run recognition to make it searchable.
+                      </p>
+                      {canEditOcr && (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          icon={<ArrowClockwise size={14} />}
+                          disabled={busyId === selected.id || bulk !== null}
+                          onClick={() => void regenerate(selected)}
+                        >
+                          Run OCR on this page
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </Card>
+        </div>
       </div>
     </div>
   );

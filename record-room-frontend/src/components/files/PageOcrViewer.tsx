@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Copy,
@@ -17,6 +17,7 @@ import { Badge } from '../ui/Badge';
 import { StatusBadge } from '../ui/Flash';
 import { useFlash } from '../../hooks/useService';
 import type { FileScan } from '../../types';
+import { authoritativeScanRows } from '../../lib/scanMerge';
 import { cn } from '../../lib/utils';
 
 /**
@@ -72,6 +73,8 @@ export function PageOcrViewer({
   scanPages,
   fileId,
   toolbarExtra,
+  showOcr,
+  onToggleOcr,
 }: {
   /** Changing it re-loads the blob and resets page, zoom, search and cache. */
   docKey: string;
@@ -82,6 +85,10 @@ export function PageOcrViewer({
   /** For the "open the OCR tab" link of the side panel. */
   fileId?: string;
   toolbarExtra?: ReactNode;
+  /** OCR panel open — lifted so the page can widen the preview and show the
+   * version picker while OCR is open. */
+  showOcr: boolean;
+  onToggleOcr: (open: boolean) => void;
 }) {
   const { success, danger } = useFlash();
 
@@ -90,14 +97,11 @@ export function PageOcrViewer({
   const [numPages, setNumPages] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
   const [scale, setScale] = useState(1);
-  const [showOcr, setShowOcr] = useState(false);
   const [isPdf, setIsPdf] = useState(true);
 
   const [query, setQuery] = useState('');
   const [searching, setSearching] = useState(false);
   const [results, setResults] = useState<SearchHit[] | null>(null);
-
-  const [wide, setWide] = useState(() => window.innerWidth >= 768);
 
   const pdfRef = useRef<PDFDocumentProxy | null>(null);
   const textCache = useRef(new Map<number, string>());
@@ -111,12 +115,6 @@ export function PageOcrViewer({
     setCurrentPage(1);
     setResults(null);
   }
-
-  useEffect(() => {
-    const onResize = () => setWide(window.innerWidth >= 768);
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, []);
 
   // Blob lifecycle: one object URL per docKey, revoked on change/unmount.
   useEffect(() => {
@@ -147,21 +145,24 @@ export function PageOcrViewer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docKey, filename]);
 
-  // OCR text per rendered page: several scan rows can carry one PDF page range;
-  // the latest version wins, page order follows pageIndex ?? pageNo.
-  const ocrByPage = useMemo(() => {
-    const map = new Map<number, string>();
-    for (const scan of scanPages) {
-      const key = scan.pageIndex ?? scan.pageNo;
-      map.set(key, (map.get(key) ? `${map.get(key)}\n` : '') + (scan.ocrText ?? ''));
+  // OCR text per rendered page: one authoritative row per page number — the
+  // approved row the file shows as current, else the latest row. A studio
+  // draft appended for the same page number must not shadow it (issue 2).
+  const scanByPage = useMemo(() => {
+    const map = new Map<number, FileScan>();
+    for (const scan of authoritativeScanRows(scanPages)) {
+      map.set(scan.pageIndex ?? scan.pageNo, scan);
     }
     return map;
   }, [scanPages]);
 
-  const scanOfPage = useMemo(
-    () => scanPages.find((scan) => (scan.pageIndex ?? scan.pageNo) === currentPage),
-    [scanPages, currentPage],
-  );
+  const ocrByPage = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const [key, scan] of scanByPage) map.set(key, scan.ocrText ?? '');
+    return map;
+  }, [scanByPage]);
+
+  const scanOfPage = useMemo(() => scanByPage.get(currentPage), [scanByPage, currentPage]);
 
   const pdfTextOf = async (pageNo: number): Promise<string> => {
     const cached = textCache.current.get(pageNo);
@@ -223,44 +224,6 @@ export function PageOcrViewer({
 
   const pageLabel = numPages > 0 ? `${currentPage} / ${numPages}` : '—';
   const ocrTextOfCurrent = ocrByPage.get(currentPage)?.trim() ?? '';
-
-  const thumbButton = (pageNo: number, children: ReactNode) => (
-    <button
-      key={pageNo}
-      type="button"
-      onClick={() => setCurrentPage(pageNo)}
-      title={`Go to page ${pageNo}`}
-      className={cn(
-        'focus-ring relative shrink-0 rounded-lg border p-1 transition',
-        currentPage === pageNo
-          ? 'border-[var(--rr-accent)] bg-accent-soft'
-          : 'border-base bg-[var(--rr-bg)] hover:border-[var(--rr-accent)]',
-      )}
-    >
-      {children}
-    </button>
-  );
-
-  const filmstrip = (
-    <div
-      className={cn(
-        'gap-2 border-base p-2',
-        wide
-          ? 'flex w-[92px] shrink-0 flex-col overflow-y-auto border-r'
-          : 'flex overflow-x-auto border-b',
-      )}
-    >
-      {Array.from({ length: numPages }, (_, index) => index + 1).map((pageNo) =>
-        thumbButton(
-          pageNo,
-          <div className="flex h-12 w-14 flex-col items-center justify-center rounded bg-[var(--rr-surface-2)]">
-            <span className="text-[9px] uppercase tracking-wider text-[var(--rr-muted)]">Page</span>
-            <span className="text-sm font-bold text-[var(--rr-text)]">{pageNo}</span>
-          </div>,
-        ),
-      )}
-    </div>
-  );
 
   return (
     <div className="overflow-hidden rounded-2xl border border-base bg-[var(--rr-surface)]">
@@ -357,7 +320,7 @@ export function PageOcrViewer({
 
           <button
             type="button"
-            onClick={() => setShowOcr((open) => !open)}
+            onClick={() => onToggleOcr(!showOcr)}
             className={cn(
               'focus-ring inline-flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold transition',
               showOcr
@@ -457,8 +420,6 @@ export function PageOcrViewer({
         </div>
       ) : (
         <div className="flex min-h-[540px] flex-col lg:h-[calc(100dvh-16rem)] lg:flex-row">
-          {numPages > 1 && filmstrip}
-
           <div className="flex min-w-0 flex-1 justify-center overflow-auto bg-[var(--rr-surface-2)] p-4">
             {!url ? (
               <div className="grid h-72 w-full max-w-sm animate-pulse place-items-center rounded-xl bg-[var(--rr-bg)] text-xs muted">
@@ -474,37 +435,53 @@ export function PageOcrViewer({
                 />
               </div>
             ) : (
-              <Document
-                file={url}
-                options={PDF_OPTIONS}
-                onLoadSuccess={(pdf) => {
-                  pdfRef.current = pdf;
-                  setNumPages(pdf.numPages);
-                }}
-                onLoadError={() => setFailed(true)}
-                loading={
-                  <div className="grid h-72 w-full max-w-sm place-items-center rounded-xl bg-[var(--rr-bg)] text-xs muted">
+              // react-pdf 11 suspends by default while it loads a document.
+              // The boundary must be HERE, next to the reader: without it the
+              // suspension bubbles to the app-shell Suspense in App.tsx, which
+              // unmounts the whole shell into its "Loading…" fallback and, on
+              // reveal, reconnects every effect in the tree. PageOcrViewer's
+              // blob effect is among them, so it re-fetched the document,
+              // created a NEW object URL, and react-pdf — keyed on the file —
+              // suspended again: the entire page kept "refreshing" in a loop.
+              <Suspense
+                fallback={
+                  <div className="grid h-72 w-full max-w-sm animate-pulse place-items-center rounded-xl bg-[var(--rr-bg)] text-xs muted">
                     Loading document…
                   </div>
                 }
-                error={
-                  <div className="grid h-72 place-items-center p-6 text-center text-xs muted">
-                    This PDF could not be rendered. Try downloading it.
-                  </div>
-                }
               >
-                <Page
-                  key={`${docKey}-${currentPage}-${scale}`}
-                  pageNumber={Math.min(Math.max(1, currentPage), Math.max(1, numPages))}
-                  scale={scale}
-                  renderTextLayer={false}
-                  renderAnnotationLayer={false}
-                  className="mx-auto shadow-sm"
+                <Document
+                  file={url}
+                  options={PDF_OPTIONS}
+                  onLoadSuccess={(pdf) => {
+                    pdfRef.current = pdf;
+                    setNumPages(pdf.numPages);
+                  }}
+                  onLoadError={() => setFailed(true)}
                   loading={
-                    <div className="h-[600px] w-[440px] animate-pulse rounded bg-[var(--rr-bg)]" />
+                    <div className="grid h-72 w-full max-w-sm place-items-center rounded-xl bg-[var(--rr-bg)] text-xs muted">
+                      Loading document…
+                    </div>
                   }
-                />
-              </Document>
+                  error={
+                    <div className="grid h-72 place-items-center p-6 text-center text-xs muted">
+                      This PDF could not be rendered. Try downloading it.
+                    </div>
+                  }
+                >
+                  <Page
+                    key={`${docKey}-${currentPage}-${scale}`}
+                    pageNumber={Math.min(Math.max(1, currentPage), Math.max(1, numPages))}
+                    scale={scale}
+                    renderTextLayer={false}
+                    renderAnnotationLayer={false}
+                    className="mx-auto shadow-sm"
+                    loading={
+                      <div className="h-[600px] w-[440px] animate-pulse rounded bg-[var(--rr-bg)]" />
+                    }
+                  />
+                </Document>
+              </Suspense>
             )}
           </div>
 
@@ -528,7 +505,7 @@ export function PageOcrViewer({
                   )}
                   <button
                     type="button"
-                    onClick={() => setShowOcr(false)}
+                    onClick={() => onToggleOcr(false)}
                     className="focus-ring rounded p-1 text-[var(--rr-muted)] hover:text-[var(--rr-text)]"
                     aria-label="Close OCR panel"
                   >

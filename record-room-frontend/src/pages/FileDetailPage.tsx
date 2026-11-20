@@ -116,6 +116,8 @@ export function FileDetailPage() {
   const [eOfficeDraft, setEOfficeDraft] = useState<string | null>(null);
   const [savingEOffice, setSavingEOffice] = useState(false);
   const [compressing, setCompressing] = useState<CompressionTarget | null>(null);
+  /** OCR opened from the preview; mirrors PageOcrViewer's own open/close state. */
+  const [ocrOpen, setOcrOpen] = useState(false);
 
   const {
     data: file,
@@ -479,7 +481,38 @@ export function FileDetailPage() {
 
       {/* TAB 1: Document Preview */}
       {tab === 'scan' && (
-        <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div
+          className={cn(
+            'grid grid-cols-1 gap-5',
+            ocrOpen ? 'lg:grid-cols-[minmax(0,1fr)]' : 'lg:grid-cols-[minmax(0,1fr)_320px]',
+          )}
+        >
+          {/* OCR open: the version picker moves to a dropdown on top of the
+              preview, and the right-hand version sidebar leaves — the preview
+              gets wider and the OCR panel opens on its right. */}
+          {ocrOpen && (
+            <Card className="mb-4">
+              <Field
+                label="Preview version"
+                htmlFor="preview-version"
+                hint="Switch the stored scan or built deliverable being previewed."
+              >
+                <SelectInput
+                  id="preview-version"
+                  value={selectedVersion?.id ?? ''}
+                  onChange={(event) => pick(event.target.value)}
+                >
+                  {allVersions.map((version, index) => (
+                    <option key={version.id} value={version.id}>
+                      {index === 0 ? 'Current version · ' : ''}
+                      {version.filename} ({version.versionLabel})
+                    </option>
+                  ))}
+                </SelectInput>
+              </Field>
+            </Card>
+          )}
+
           {/* Main Viewer Area (Full Height & Page-size Responsive) */}
           <div className="min-w-0">
             {selectedVersion ? (
@@ -515,6 +548,8 @@ export function FileDetailPage() {
                 }
                 scanPages={scanPages}
                 fileId={file.id}
+                showOcr={ocrOpen}
+                onToggleOcr={setOcrOpen}
               />
             ) : (
               <Card>
@@ -529,7 +564,7 @@ export function FileDetailPage() {
                           onClick={() => setDialog('upload')}
                           icon={<UploadSimple size={16} />}
                         >
-                          Upload scan
+                          Upload pdf
                         </Button>
                       )}
                       {canStudio && (
@@ -549,203 +584,208 @@ export function FileDetailPage() {
             )}
           </div>
 
-          {/* Right Sidebar: Selectable Version History */}
-          <div className="space-y-4">
-            <Card>
-              <div className="mb-3 flex items-center justify-between border-b border-base pb-3">
-                <div>
-                  <p className="text-sm font-semibold">Document versions</p>
-                  <p className="muted text-xs">{allVersions.length} stored version(s)</p>
+          {/* Right Sidebar: Selectable Version History (only when OCR is closed) */}
+          {!ocrOpen && (
+            <div className="space-y-4">
+              <Card>
+                <div className="mb-3 flex items-center justify-between border-b border-base pb-3">
+                  <div>
+                    <p className="text-sm font-semibold">Document versions</p>
+                    <p className="muted text-xs">{allVersions.length} stored version(s)</p>
+                  </div>
+                  {canEdit && (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => setDialog('upload')}
+                      icon={<UploadSimple size={15} />}
+                    >
+                      Upload pdf
+                    </Button>
+                  )}
                 </div>
-                {canEdit && (
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => setDialog('upload')}
-                    icon={<UploadSimple size={15} />}
-                  >
-                    Upload scan
-                  </Button>
-                )}
-              </div>
 
-              {/* Active Studio Draft indicator if user edited pages in studio */}
-              {(() => {
-                const draft = getStudioDraft(file.id);
-                if (!draft) return null;
-                return (
-                  <div className="mb-3 rounded-xl border-2 border-dashed border-amber-400 bg-amber-50/60 p-3 dark:border-amber-600/50 dark:bg-amber-950/20">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="truncate text-xs font-semibold text-amber-900 dark:text-amber-200">
-                            {draft.draftFilename}
-                          </span>
-                          <Badge tone="warning">Unsaved draft</Badge>
+                {/* Active Studio Draft indicator if user edited pages in studio */}
+                {(() => {
+                  const draft = getStudioDraft(file.id);
+                  if (!draft) return null;
+                  return (
+                    <div className="mb-3 rounded-xl border-2 border-dashed border-amber-400 bg-amber-50/60 p-3 dark:border-amber-600/50 dark:bg-amber-950/20">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="truncate text-xs font-semibold text-amber-900 dark:text-amber-200">
+                              {draft.draftFilename}
+                            </span>
+                            <Badge tone="warning">Unsaved draft</Badge>
+                          </div>
+                          <p className="mt-1 text-[11px] text-amber-800 dark:text-amber-300">
+                            Studio draft · {draft.pageCount} page(s) · Last updated{' '}
+                            {new Date(draft.updatedAt).toLocaleTimeString()}
+                          </p>
                         </div>
-                        <p className="mt-1 text-[11px] text-amber-800 dark:text-amber-300">
-                          Studio draft · {draft.pageCount} page(s) · Last updated{' '}
-                          {new Date(draft.updatedAt).toLocaleTimeString()}
-                        </p>
+                      </div>
+                      <div className="mt-2.5 flex items-center justify-end border-t border-amber-200/60 pt-2 dark:border-amber-800/60">
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          className="!h-7 !px-2 text-[11px]"
+                          onClick={() => navigate(`/files/${file.id}/studio`)}
+                          icon={<PencilSimple size={13} />}
+                        >
+                          Edit in studio
+                        </Button>
                       </div>
                     </div>
-                    <div className="mt-2.5 flex items-center justify-end border-t border-amber-200/60 pt-2 dark:border-amber-800/60">
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        className="!h-7 !px-2 text-[11px]"
-                        onClick={() => navigate(`/files/${file.id}/studio`)}
-                        icon={<PencilSimple size={13} />}
-                      >
-                        Edit in studio
-                      </Button>
-                    </div>
-                  </div>
-                );
-              })()}
+                  );
+                })()}
 
-              {allVersions.length === 0 ? (
-                <p className="muted py-4 text-center text-xs">No scan versions recorded yet.</p>
-              ) : (
-                <ul className="divide-y divide-[var(--rr-border)]">
-                  {allVersions.map((version, index) => {
-                    const isSelected = selectedVersion?.id === version.id;
-                    const isCurrent = index === 0;
+                {allVersions.length === 0 ? (
+                  <p className="muted py-4 text-center text-xs">No scan versions recorded yet.</p>
+                ) : (
+                  <ul className="divide-y divide-[var(--rr-border)]">
+                    {allVersions.map((version, index) => {
+                      const isSelected = selectedVersion?.id === version.id;
+                      const isCurrent = index === 0;
 
-                    return (
-                      <li
-                        key={version.id}
-                        className={cn(
-                          'rounded-xl p-3 transition',
-                          isSelected
-                            ? 'border border-[var(--rr-accent)] bg-accent-soft/40'
-                            : 'hover:bg-[var(--rr-surface-2)]',
-                        )}
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <button
-                            type="button"
-                            onClick={() => pick(version.id)}
-                            className="min-w-0 flex-1 text-left focus:outline-none"
-                          >
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              <Badge tone={version.source === 'document' ? 'info' : 'neutral'}>
-                                {version.source === 'document' ? (
-                                  'Scan PDF'
-                                ) : (
-                                  <span className="inline-flex items-center gap-1">
-                                    <FilePdf size={11} /> Built PDF
-                                  </span>
-                                )}
-                              </Badge>
-                              {isCurrent && <Badge tone="success">Current version</Badge>}
-                              {version.source === 'derivative' && version.status !== 'Approved' && (
-                                <Badge tone={version.status === 'Rejected' ? 'danger' : 'warning'}>
-                                  {version.status}
+                      return (
+                        <li
+                          key={version.id}
+                          className={cn(
+                            'rounded-xl p-3 transition',
+                            isSelected
+                              ? 'border border-[var(--rr-accent)] bg-accent-soft/40'
+                              : 'hover:bg-[var(--rr-surface-2)]',
+                          )}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <button
+                              type="button"
+                              onClick={() => pick(version.id)}
+                              className="min-w-0 flex-1 text-left focus:outline-none"
+                            >
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <Badge tone={version.source === 'document' ? 'info' : 'neutral'}>
+                                  {version.source === 'document' ? (
+                                    'Scan PDF'
+                                  ) : (
+                                    <span className="inline-flex items-center gap-1">
+                                      <FilePdf size={11} /> Built PDF
+                                    </span>
+                                  )}
                                 </Badge>
-                              )}
-                            </div>
-                            <p className="mt-1.5 truncate text-xs font-semibold">
-                              {version.filename}
-                            </p>
-                            <p className="muted mt-1 text-[11px]">
-                              {version.versionLabel} ·{' '}
-                              {new Date(version.updatedAt).toLocaleString()}
-                            </p>
-                            <p className="muted text-[11px]">
-                              {version.sizeBytes ? formatDocumentSize(version.sizeBytes) : ''}
-                              {version.pageCount
-                                ? ` · ${describePageCount(version.pageCount)}`
-                                : ''}
-                            </p>
-                            {version.rawDeriv?.compressedFrom && (
-                              <p className="mt-0.5 text-[11px] text-accent">
-                                Compressed copy of {version.rawDeriv.compressedFrom}
-                                {version.rawDeriv.savedPercent !== undefined
-                                  ? ` · −${version.rawDeriv.savedPercent}%`
+                                {isCurrent && <Badge tone="success">Current version</Badge>}
+                                {version.source === 'derivative' &&
+                                  version.status !== 'Approved' && (
+                                    <Badge
+                                      tone={version.status === 'Rejected' ? 'danger' : 'warning'}
+                                    >
+                                      {version.status}
+                                    </Badge>
+                                  )}
+                              </div>
+                              <p className="mt-1.5 truncate text-xs font-semibold">
+                                {version.filename}
+                              </p>
+                              <p className="muted mt-1 text-[11px]">
+                                {version.versionLabel} ·{' '}
+                                {new Date(version.updatedAt).toLocaleString()}
+                              </p>
+                              <p className="muted text-[11px]">
+                                {version.sizeBytes ? formatDocumentSize(version.sizeBytes) : ''}
+                                {version.pageCount
+                                  ? ` · ${describePageCount(version.pageCount)}`
                                   : ''}
                               </p>
-                            )}
-                            {version.rawDeriv?.includesOcrText && (
-                              <p className="mt-0.5 text-[11px] text-accent">
-                                Includes searchable OCR text
-                              </p>
-                            )}
-                            {version.reviewNote && (
-                              <p className="mt-1 text-[11px] text-[var(--rr-warning)]">
-                                Note: {version.reviewNote}
-                              </p>
-                            )}
-                          </button>
-                          <div className="flex items-center gap-1">
-                            {canCompress && (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setCompressing({
-                                    fileId: file.id,
-                                    source: version.source,
-                                    id: version.id,
-                                  })
-                                }
-                                className="focus-ring rounded p-1 text-[var(--rr-muted)] hover:text-accent"
-                                title="Compress a copy of this version"
-                                aria-label="Compress a copy of this version"
-                              >
-                                <ArrowsDownUp size={14} />
-                              </button>
-                            )}
-                            {canStudio && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="!h-7 !px-2 text-[11px]"
-                                onClick={() => navigate(`/files/${file.id}/studio`)}
-                                title="Open this file in studio"
-                              >
-                                Edit in studio
-                              </Button>
-                            )}
-                            {version.source === 'document' && version.rawDoc && canDeleteScan && (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setRemoval({ kind: 'document', doc: version.rawDoc! })
-                                }
-                                className="focus-ring rounded p-1 text-[var(--rr-muted)] hover:text-[var(--rr-danger)]"
-                                title="Delete this scan version"
-                                aria-label="Delete this scan version"
-                              >
-                                <Trash size={14} />
-                              </button>
-                            )}
-                            {version.source === 'derivative' &&
-                              version.rawDeriv &&
-                              canDeleteDeliverable && (
+                              {version.rawDeriv?.compressedFrom && (
+                                <p className="mt-0.5 text-[11px] text-accent">
+                                  Compressed copy of {version.rawDeriv.compressedFrom}
+                                  {version.rawDeriv.savedPercent !== undefined
+                                    ? ` · −${version.rawDeriv.savedPercent}%`
+                                    : ''}
+                                </p>
+                              )}
+                              {version.rawDeriv?.includesOcrText && (
+                                <p className="mt-0.5 text-[11px] text-accent">
+                                  Includes searchable OCR text
+                                </p>
+                              )}
+                              {version.reviewNote && (
+                                <p className="mt-1 text-[11px] text-[var(--rr-warning)]">
+                                  Note: {version.reviewNote}
+                                </p>
+                              )}
+                            </button>
+                            <div className="flex items-center gap-1">
+                              {canCompress && (
                                 <button
                                   type="button"
                                   onClick={() =>
-                                    setRemoval({
-                                      kind: 'derivative',
-                                      derivative: version.rawDeriv!,
+                                    setCompressing({
+                                      fileId: file.id,
+                                      source: version.source,
+                                      id: version.id,
                                     })
                                   }
+                                  className="focus-ring rounded p-1 text-[var(--rr-muted)] hover:text-accent"
+                                  title="Compress a copy of this version"
+                                  aria-label="Compress a copy of this version"
+                                >
+                                  <ArrowsDownUp size={14} />
+                                </button>
+                              )}
+                              {canStudio && (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="!h-7 !px-2 text-[11px]"
+                                  onClick={() => navigate(`/files/${file.id}/studio`)}
+                                  title="Open this file in studio"
+                                >
+                                  Edit in studio
+                                </Button>
+                              )}
+                              {version.source === 'document' && version.rawDoc && canDeleteScan && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setRemoval({ kind: 'document', doc: version.rawDoc! })
+                                  }
                                   className="focus-ring rounded p-1 text-[var(--rr-muted)] hover:text-[var(--rr-danger)]"
-                                  title="Delete this deliverable build"
-                                  aria-label="Delete this deliverable build"
+                                  title="Delete this scan version"
+                                  aria-label="Delete this scan version"
                                 >
                                   <Trash size={14} />
                                 </button>
                               )}
+                              {version.source === 'derivative' &&
+                                version.rawDeriv &&
+                                canDeleteDeliverable && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setRemoval({
+                                        kind: 'derivative',
+                                        derivative: version.rawDeriv!,
+                                      })
+                                    }
+                                    className="focus-ring rounded p-1 text-[var(--rr-muted)] hover:text-[var(--rr-danger)]"
+                                    title="Delete this deliverable build"
+                                    aria-label="Delete this deliverable build"
+                                  >
+                                    <Trash size={14} />
+                                  </button>
+                                )}
+                            </div>
                           </div>
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </Card>
-          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </Card>
+            </div>
+          )}
         </div>
       )}
 
