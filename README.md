@@ -1,4 +1,8 @@
 # Document Management System (with an additional Record Room section)
+## start the app
+- run ` dotnet run --project dotnet-api\src\RecordRoom.Api --urls http://localhost:5199 ` in one terminal to start the server
+- new terminal ` cd record-room-frontend ` then run ` npm i ` then run ` npm dev `
+
 
 The product is a **Document Management System**: a document register with search
 (full-text, OCR-backed), scanned-document storage with versioning, reports and
