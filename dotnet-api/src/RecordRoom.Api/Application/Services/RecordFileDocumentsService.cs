@@ -19,6 +19,7 @@ public interface IRecordFileDocumentsService
     Task<PrivateDocumentContent?> OpenAsync(int fileId, long documentId, CancellationToken ct = default);
     Task<Result<bool>> DeleteAsync(int fileId, long documentId, CancellationToken ct = default);
     Task<Dictionary<int, string>?> GetOcrAsync(int fileId, long documentId, CancellationToken ct = default);
+    Task<Result<bool>> QueueOcrAsync(int fileId, long documentId, CancellationToken ct = default);
     Task<Result<bool>> SaveOcrPageAsync(int fileId, long documentId, int pageNo, string text, CancellationToken ct = default);
 }
 
@@ -90,6 +91,26 @@ public sealed class RecordFileDocumentsService(
         if (row is null) return null;
 
         return await ReadSavedOcrAsync(row, documentStore, logger, ct);
+    }
+
+    public async Task<Result<bool>> QueueOcrAsync(int fileId, long documentId, CancellationToken ct = default)
+    {
+        var row = await db.FileDocuments.AsNoTracking()
+            .FirstOrDefaultAsync(d => d.Id == documentId && d.RecordFileId == fileId, ct);
+        if (row is null) return Result<bool>.Fail("Document not found.", "documentId");
+        try
+        {
+            backgroundJobs.Enqueue<ScanProcessingJobs>(job => job.ReextractDocumentOcrAsync(documentId, CancellationToken.None));
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Could not queue OCR re-run for document {DocumentId}.", documentId);
+            return Result<bool>.Fail("Could not queue OCR. Try again.", "ocr");
+        }
+        await audit.LogAsync(db, AuditAction.Update, "RecordFileDocument", row.Id.ToString(),
+            "-", "OCR re-run queued", $"Queued OCR re-run for {row.OriginalFileName}", ct);
+        await db.SaveChangesAsync(ct);
+        return Result<bool>.Ok(true);
     }
 
     public async Task<Result<bool>> SaveOcrPageAsync(int fileId, long documentId, int pageNo, string text, CancellationToken ct = default)

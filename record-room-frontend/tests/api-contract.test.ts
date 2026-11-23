@@ -354,13 +354,14 @@ describeIfLive('round-4 contract: split audit groups and deliverable review', ()
 
     const logins = await fetch(`${apiBase()}/api/audit?group=logins&limit=50`, { headers });
     expect(logins.status).toBe(200);
-    const loginRows = ((await logins.json()) as { data: { entity: string }[] }).data;
+    type AuditResponse = { data: { entries: { entity: string }[] } };
+    const loginRows = ((await logins.json()) as AuditResponse).data.entries;
     expect(loginRows.length).toBeGreaterThan(0);
     expect(loginRows.every((row) => row.entity === 'Session')).toBe(true);
 
     const issues = await fetch(`${apiBase()}/api/audit?group=issues&limit=50`, { headers });
     expect(issues.status).toBe(200);
-    const issueRows = ((await issues.json()) as { data: { entity: string }[] }).data;
+    const issueRows = ((await issues.json()) as AuditResponse).data.entries;
     expect(issueRows.length).toBeGreaterThan(0);
     expect(
       issueRows.every((row) => row.entity === 'IssueRecord' || row.entity === 'MovementEvent'),

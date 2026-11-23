@@ -487,6 +487,10 @@ export const filesService: FilesApi = {
     return docs.some((doc) => doc.id === documentId) ? (getLocalDocumentOcr(documentId) ?? {}) : {};
   },
 
+  async rerunDocumentOcr() {
+    return err('OCR recognition requires the API.', 'ocr');
+  },
+
   async saveDocumentOcr(fileId, documentId, pageNo, text) {
     const doc = (await filesService.listDocuments(fileId)).find((row) => row.id === documentId);
     if (!doc) return err('Document not found.', 'documentId');

@@ -56,7 +56,7 @@ public class ScanProcessingJobs(
                     page.StorageKey, page.ContentType ?? "application/octet-stream", ct);
                 text = extraction.Text;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 // Best effort, exactly like the old inline pass: an OCR failure
                 // must never leave the page stuck or the job retrying forever.
@@ -71,7 +71,9 @@ public class ScanProcessingJobs(
             p => p.Barcode == page.Barcode && p.PageNo == page.PageNo
                 && p.Status == PageStatus.Active && p.Id != page.Id, ct);
 
-        page.OcrText = text;
+        await db.Entry(page).ReloadAsync(ct);
+        if (db.Entry(page).State == EntityState.Detached || page.Status != PageStatus.Processing) return;
+        if (!string.IsNullOrWhiteSpace(text) && string.IsNullOrWhiteSpace(page.OcrText)) page.OcrText = text;
         page.Status = hasActiveSibling ? PageStatus.Duplicate : PageStatus.PendingReview;
         await db.SaveChangesAsync(ct);
 
@@ -107,8 +109,17 @@ public class ScanProcessingJobs(
         }
     }
 
-    [DisableConcurrentExecution(timeoutInSeconds: 600)]
-    public async Task ExtractDocumentOcrAsync(long documentId, CancellationToken ct = default)
+    [DisableConcurrentExecution("recordroom-document-ocr", 600)]
+    [AutomaticRetry(Attempts = 2)]
+    public Task ExtractDocumentOcrAsync(long documentId, CancellationToken ct = default) =>
+        ProcessDocumentAsync(documentId, rerun: false, ct);
+
+    [DisableConcurrentExecution("recordroom-document-ocr", 600)]
+    [AutomaticRetry(Attempts = 2)]
+    public Task ReextractDocumentOcrAsync(long documentId, CancellationToken ct = default) =>
+        ProcessDocumentAsync(documentId, rerun: true, ct);
+
+    private async Task ProcessDocumentAsync(long documentId, bool rerun, CancellationToken ct)
     {
         using var scope = services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -116,7 +127,7 @@ public class ScanProcessingJobs(
         var extractor = scope.ServiceProvider.GetRequiredService<OcrTextExtractor>();
         var audit = scope.ServiceProvider.GetRequiredService<IAuditWriter>();
         var doc = await db.FileDocuments.Include(d => d.RecordFile).FirstOrDefaultAsync(d => d.Id == documentId, ct);
-        if (doc?.RecordFile is not { } file || (doc.OcrProcessedAt is not null && !doc.ImportToStudio)) return;
+        if (doc?.RecordFile is not { } file || (!rerun && doc.OcrProcessedAt is not null && !doc.ImportToStudio)) return;
 
         var saved = await RecordFileDocumentsService.ReadSavedOcrAsync(doc, store, logger, ct);
         await using var stream = await store.OpenReadAsync(doc.StorageKey, ct);
@@ -131,17 +142,12 @@ public class ScanProcessingJobs(
 
         Dictionary<int, string>? extracted = null;
         Exception? extractionError = null;
-        if (doc.OcrProcessedAt is null)
+        if (rerun || doc.OcrProcessedAt is null)
         {
-            try
-            {
-                extracted = await extractor.ExtractPagesAsync(bytes, doc.ContentType, ct, saved);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                extractionError = ex;
-                logger.LogWarning(ex, "OCR failed for document {DocumentId}.", documentId);
-            }
+            (extracted, extractionError) = await extractor.ExtractPagesAsync(
+                bytes, doc.ContentType, ct, rerun ? null : saved);
+            if (extractionError is not null)
+                logger.LogWarning(extractionError, "OCR failed for document {DocumentId}.", documentId);
         }
 
         var studioPages = new List<(int Page, StoredDocument Document)>();
@@ -166,7 +172,11 @@ public class ScanProcessingJobs(
                 var pages = await RecordFileDocumentsService.ReadSavedOcrAsync(doc, store, logger, ct);
                 if (extracted is not null)
                     foreach (var (page, text) in extracted)
-                        pages.TryAdd(page, text);
+                    {
+                        if (!pages.TryAdd(page, text) && rerun && !string.IsNullOrWhiteSpace(text)
+                            && pages[page] == saved.GetValueOrDefault(page))
+                            pages[page] = text;
+                    }
 
                 if (doc.ImportToStudio && studioPages.Count > 0)
                 {
@@ -192,7 +202,7 @@ public class ScanProcessingJobs(
                 }
 
                 doc.OcrPagesJson = JsonSerializer.Serialize(pages);
-                if (extracted is not null) doc.OcrProcessedAt = DateTime.UtcNow;
+                if (extracted is not null && extractionError is null) doc.OcrProcessedAt = DateTime.UtcNow;
                 doc.OcrRevision++;
                 try
                 {

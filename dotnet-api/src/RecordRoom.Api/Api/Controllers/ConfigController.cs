@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using RecordRoom.Api.Application;
 using RecordRoom.Api.Application.Contracts;
 using RecordRoom.Api.Application.Services;
+using RecordRoom.Api.Domain;
 using RecordRoom.Api.Infrastructure.Features;
 using RecordRoom.Api.Infrastructure.Ocr;
 
@@ -26,14 +27,15 @@ namespace RecordRoom.Api.Api.Controllers;
 public class ConfigController(
     IFeatureFlags flags,
     IFeatureSettingsService settings,
-    IOcrEngine ocrEngine,
+    IOcrEngineSelector engines,
     IConfiguration configuration) : ControllerBase
 {
     [HttpGet]
     [AllowAnonymous]
     [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
-    public IResult Get()
+    public async Task<IResult> Get(CancellationToken ct)
     {
+        var ocrEngine = await engines.GetAsync(ct);
         var status = ocrEngine.Describe();
         var ocrEnabled = configuration.GetValue("Ocr:Enabled", true);
         return Results.Ok(new AppConfigDto(
@@ -44,12 +46,17 @@ public class ConfigController(
             new OcrStatusDto(
                 ocrEnabled,
                 ocrEnabled && status.Available,
-                "tesseract",
+                ocrEngine.Name,
                 ocrEngine.Languages,
                 !ocrEnabled
                     ? "OCR is switched off in this deployment (Ocr__Enabled=false)."
                     : status.Note)));
     }
+
+    [HttpPut("ocr-engine")]
+    [Authorize(Roles = nameof(Role.Admin))]
+    public async Task<IResult> UpdateOcrEngine([FromBody] OcrEngineUpdateInput input, CancellationToken ct) =>
+        ApiResults.FromResult(await settings.SetOcrEngineAsync(input.Engine, ct));
 
     /// <summary>Every group with its live state — the Settings → Feature visibility source.</summary>
     [HttpGet("features")]
@@ -91,3 +98,5 @@ public class ConfigController(
         snapshot.GetValueOrDefault("maps"),
         snapshot.GetValueOrDefault("support"));
 }
+
+public sealed record OcrEngineUpdateInput(string? Engine);

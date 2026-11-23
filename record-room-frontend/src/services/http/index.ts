@@ -488,6 +488,12 @@ export const httpFilesService: FilesApi = {
     return map;
   },
 
+  async rerunDocumentOcr(fileId, documentId) {
+    return wrapTrue(
+      await attempt<boolean>('POST', `/api/files/${fileId}/documents/${documentId}/ocr`),
+    );
+  },
+
   async saveDocumentOcr(fileId, documentId, pageNo, text) {
     const result = await attempt<boolean>(
       'PUT',
@@ -1455,7 +1461,7 @@ export const httpConfigService: ConfigApi = {
       ocr: {
         enabled: body.ocr?.enabled !== false,
         available: body.ocr?.available === true,
-        engine: body.ocr?.engine ?? 'tesseract',
+        engine: body.ocr?.engine === 'paddleocr' ? 'paddleocr' : 'tesseract',
         languages: body.ocr?.languages ?? 'hin+eng',
         note: body.ocr?.note ?? '',
       },
@@ -1467,5 +1473,9 @@ export const httpConfigService: ConfigApi = {
       features: patch,
     });
     return result.ok ? ok(fromFeatureRows(result.value)) : result;
+  },
+
+  async updateOcrEngine(engine) {
+    return attempt<typeof engine>('PUT', '/api/config/ocr-engine', { engine });
   },
 };

@@ -18,6 +18,7 @@ import type { HubConnection } from '@microsoft/signalr';
 
 export type Channel =
   | 'files'
+  | 'config'
   | 'locations'
   | 'issues'
   | 'movements'
@@ -38,6 +39,7 @@ export interface Notification {
 type Listener = (notification: Notification) => void;
 
 const ALL: Channel[] = [
+  'config',
   'dashboard',
   'files',
   'issues',

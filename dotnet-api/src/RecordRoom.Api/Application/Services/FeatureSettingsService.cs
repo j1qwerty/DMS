@@ -4,6 +4,7 @@ using RecordRoom.Api.Domain;
 using RecordRoom.Api.Infrastructure.Auth;
 using RecordRoom.Api.Infrastructure.Data;
 using RecordRoom.Api.Infrastructure.Features;
+using RecordRoom.Api.Infrastructure.Ocr;
 
 namespace RecordRoom.Api.Application.Services;
 
@@ -18,6 +19,8 @@ public interface IFeatureSettingsService
 {
     Task<FeatureSettingDto[]> ListAsync(CancellationToken ct = default);
     Task<Result<FeatureSettingDto[]>> UpdateAsync(FeatureUpdateInput input, CancellationToken ct = default);
+    Task<string> GetOcrEngineAsync(CancellationToken ct = default);
+    Task<Result<string>> SetOcrEngineAsync(string? engine, CancellationToken ct = default);
 }
 
 public sealed class FeatureSettingsService(
@@ -26,6 +29,40 @@ public sealed class FeatureSettingsService(
     ICurrentUserAccessor current,
     IFeatureFlags flags) : IFeatureSettingsService
 {
+    private const string PaddleSettingKey = "ocrEnginePaddle";
+
+    public async Task<string> GetOcrEngineAsync(CancellationToken ct = default) =>
+        await db.FeatureSettings.AsNoTracking().AnyAsync(row => row.FeatureKey == PaddleSettingKey && row.Enabled, ct)
+            ? OcrEngineNames.Paddle
+            : OcrEngineNames.Tesseract;
+
+    public async Task<Result<string>> SetOcrEngineAsync(string? engine, CancellationToken ct = default)
+    {
+        if (engine is not (OcrEngineNames.Tesseract or OcrEngineNames.Paddle))
+            return Result<string>.Fail("Choose Tesseract or PaddleOCR.", "engine");
+
+        var usePaddle = engine == OcrEngineNames.Paddle;
+        var row = await db.FeatureSettings.SingleOrDefaultAsync(setting => setting.FeatureKey == PaddleSettingKey, ct);
+        var previous = row?.Enabled == true ? OcrEngineNames.Paddle : OcrEngineNames.Tesseract;
+        if (engine == previous) return Result<string>.Ok(engine);
+
+        if (row is null)
+        {
+            row = new FeatureSetting { FeatureKey = PaddleSettingKey };
+            db.FeatureSettings.Add(row);
+        }
+        var actor = current.User?.DisplayName ?? current.UserName;
+        row.Enabled = usePaddle;
+        row.UpdatedBy = actor;
+        row.UpdatedAt = DateTime.UtcNow;
+        await audit.LogAsync(db, AuditAction.Update, "FeatureSetting", PaddleSettingKey,
+            previous, engine, $"{actor} changed the OCR engine to {engine}.", ct);
+        await db.SaveChangesAsync(ct);
+        await audit.AnnounceAsync(RealtimeChannels.Config, "ocr.engine.updated", null,
+            $"OCR engine changed to {engine}");
+        return Result<string>.Ok(engine);
+    }
+
     private static FeatureSettingDto ToDto(FeatureSetting s) =>
         new(s.FeatureKey, s.Enabled, s.UpdatedBy, s.UpdatedAt);
 

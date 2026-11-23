@@ -12,16 +12,10 @@ public sealed record OcrExtraction(string Text, string Method)
 }
 
 /// <summary>
-/// Text out of a stored scan (round 3 — the Hindi OCR gap). Every PDF — typed
-/// or scanned — is rasterized by PDFium at the scan floor resolution and read
-/// by tesseract (hin+eng by default); images go straight to tesseract. The
-/// rendered text of a typed PDF is crisp, so the same path serves both, and
-/// whatever it reads lands in the <c>OcrText</c> column the registry search
-/// reads. If tesseract is not installed the extractor reports "none" instead
-/// of failing the upload.
+/// Renders PDFs with PDFium and reads each image with the selected OCR engine.
 /// </summary>
 public sealed class OcrTextExtractor(
-    IOcrEngine engine,
+    IOcrEngineSelector engines,
     IConfiguration configuration,
     ILogger<OcrTextExtractor> logger)
 {
@@ -41,10 +35,13 @@ public sealed class OcrTextExtractor(
     public async Task<OcrExtraction> ExtractAsync(byte[] blob, string contentType, CancellationToken ct = default)
     {
         if (!Enabled || blob.Length == 0) return new OcrExtraction("", "none");
+        if (contentType != "application/pdf" && !contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+            return new OcrExtraction("", "none");
+        var engine = await engines.GetAsync(ct);
 
         if (contentType == "application/pdf")
         {
-            if (!engine.IsAvailable) return new OcrExtraction("", "none");
+            if (!engine.IsAvailable && engine.Name == OcrEngineNames.Tesseract) return new OcrExtraction("", "none");
 
             var texts = new List<string>();
             foreach (var png in RenderPdfPages(blob))
@@ -55,46 +52,53 @@ public sealed class OcrTextExtractor(
             }
             return texts.Count == 0
                 ? new OcrExtraction("", "none")
-                : new OcrExtraction(string.Join("\n\n", texts), $"tesseract {engine.Languages}");
+                : new OcrExtraction(string.Join("\n\n", texts), $"{engine.Name} {engine.Languages}");
         }
 
-        if (contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase) && engine.IsAvailable)
+        if (engine.IsAvailable || engine.Name == OcrEngineNames.Paddle)
         {
             var text = await engine.RunAsync(blob, ct);
-            return new OcrExtraction(text ?? "", text is null ? "none" : $"tesseract {engine.Languages}");
+            return new OcrExtraction(text ?? "", text is null ? "none" : $"{engine.Name} {engine.Languages}");
         }
 
         return new OcrExtraction("", "none");
     }
 
-    /// <summary>Extracts text for each page of the document individually (1-based page index).</summary>
-    public async Task<Dictionary<int, string>> ExtractPagesAsync(
+    internal async Task<(Dictionary<int, string> Pages, Exception? Error)> ExtractPagesAsync(
         byte[] blob, string contentType, CancellationToken ct = default,
         IReadOnlyDictionary<int, string>? saved = null)
     {
         var result = new Dictionary<int, string>();
-        if (!Enabled || blob.Length == 0) return result;
+        if (!Enabled || blob.Length == 0) return (result, null);
 
-        if (contentType == "application/pdf")
+        try
         {
-            foreach (var (pageNo, image) in RasterizePdf(blob))
+            var engine = await engines.GetAsync(ct);
+            if (contentType == "application/pdf")
             {
-                ct.ThrowIfCancellationRequested();
-                if (saved?.ContainsKey(pageNo) == true) continue;
-                var text = engine.IsAvailable ? await engine.RunAsync(image, ct) : "";
-                result[pageNo] = text?.Trim() ?? "";
+                foreach (var (pageNo, image) in RasterizePdf(blob, skip: page => saved?.ContainsKey(page) == true))
+                {
+                    ct.ThrowIfCancellationRequested();
+                    result[pageNo] = await ReadPageAsync(image);
+                }
             }
-            return result;
-        }
+            else if (contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase) && saved?.ContainsKey(1) != true)
+            {
+                result[1] = await ReadPageAsync(blob);
+            }
 
-        if (contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase) && saved?.ContainsKey(1) != true)
+            async Task<string> ReadPageAsync(byte[] image)
+            {
+                if (!engine.IsAvailable) throw new OcrEngineException(engine.Describe().Note);
+                return (await engine.RunAsync(image, ct))?.Trim() ?? "";
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            var text = engine.IsAvailable ? await engine.RunAsync(blob, ct) : "";
-            result[1] = text?.Trim() ?? "";
-            return result;
+            return (result, ex);
         }
 
-        return result;
+        return (result, null);
     }
 
     /// <summary>Each page as PNG bytes at the OCR render size; empty when PDFium cannot open the bytes.</summary>
@@ -111,12 +115,14 @@ public sealed class OcrTextExtractor(
         }
     }
 
-    internal static IEnumerable<(int PageNo, byte[] Image)> RasterizePdf(byte[] pdf, int limit = int.MaxValue)
+    internal static IEnumerable<(int PageNo, byte[] Image)> RasterizePdf(
+        byte[] pdf, int limit = int.MaxValue, Func<int, bool>? skip = null)
     {
         using var doc = DocLib.Instance.GetDocReader(
             pdf, new Docnet.Core.Models.PageDimensions(RenderWidth, RenderHeight));
         for (var i = 0; i < Math.Min(doc.GetPageCount(), limit); i++)
         {
+            if (skip?.Invoke(i + 1) == true) continue;
             byte[] bytes;
             using (var reader = doc.GetPageReader(i))
             {

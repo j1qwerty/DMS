@@ -7,8 +7,18 @@
  */
 
 import { applyFeatures, getFeatures, type FeatureKey, type Features } from '../../lib/features';
-import { err, ok, type AppConfigInfo, type ConfigApi, type Result } from '../contracts';
+import {
+  err,
+  ok,
+  type AppConfigInfo,
+  type ConfigApi,
+  type OcrEngine,
+  type Result,
+} from '../contracts';
 import { session } from './session';
+import { store } from '../store';
+
+let ocrEngine: OcrEngine = 'tesseract';
 
 export const configService: ConfigApi = {
   async features(): Promise<Features> {
@@ -17,8 +27,7 @@ export const configService: ConfigApi = {
 
   /**
    * Local demo mode: the whole adapter is the demo, so demoMode is always on
-   * and the (simulated) OCR engine is always "available". Feature editing is
-   * open — there is no server environment to lock it with.
+   * and recognition requires an API connection. Feature editing is open.
    */
   async info(): Promise<AppConfigInfo> {
     return {
@@ -28,12 +37,21 @@ export const configService: ConfigApi = {
       demoMode: true,
       ocr: {
         enabled: true,
-        available: true,
-        engine: 'demo',
+        available: false,
+        engine: ocrEngine,
         languages: 'hin+eng',
-        note: 'Demo mode simulates OCR; connect the API for real recognition.',
+        note: 'Connect the API to run OCR on scans.',
       },
     };
+  },
+
+  async updateOcrEngine(engine) {
+    if (session.role() !== 'Admin') return err('Only an admin can change the OCR engine.', 'role');
+    if (engine !== 'tesseract' && engine !== 'paddleocr')
+      return err('Choose Tesseract or PaddleOCR.', 'engine');
+    ocrEngine = engine;
+    store.update(() => {});
+    return ok(engine);
   },
 
   async updateFeatures(patch: Partial<Record<FeatureKey, boolean>>): Promise<Result<Features>> {

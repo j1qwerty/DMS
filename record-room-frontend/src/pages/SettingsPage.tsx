@@ -1,14 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import {
-  CheckCircle,
-  Circle,
-  Lock,
-  Moon,
-  Sliders,
-  Database,
-  TextAa,
-  WarningCircle,
-} from '@phosphor-icons/react';
+import { CheckCircle, Circle, Lock, Moon, Sliders, Database } from '@phosphor-icons/react';
 import { PageHeader } from '../components/ui/PageHeader';
 import { SectionHeader } from '../components/ui/SectionHeader';
 import { Card } from '../components/ui/Card';
@@ -17,11 +8,12 @@ import { useSession } from '../hooks/useService';
 import { useFeatures, applyFeatures, FEATURE_GROUPS, type FeatureKey } from '../lib/features';
 import { service, dataSource } from '../services';
 import type { AppConfigInfo } from '../services/contracts';
+import { OcrEngineCard } from '../admin/OcrEngineCard';
 
 /**
  * Settings, kept intentionally small: the one personal preference that lives
  * in the browser (dark mode), the admin-controlled feature visibility groups,
- * and a read-only deployment card (demo mode, feature-edit lock, OCR engine)
+ * the admin-controlled OCR engine, and a read-only deployment card
  * fed by the environment — the .env file on the server, not the database.
  */
 export function SettingsPage() {
@@ -52,6 +44,11 @@ export function SettingsPage() {
       <section aria-label="Feature visibility">
         <SectionHeader title="Feature visibility" />
         <FeatureVisibilityCard />
+      </section>
+
+      <section aria-label="OCR">
+        <SectionHeader title="OCR" />
+        <OcrEngineCard />
       </section>
 
       <section aria-label="Deployment">
@@ -290,29 +287,6 @@ function DeploymentCard() {
           }
           tone={info?.settingsEditable === false ? 'neutral' : 'success'}
         />
-        <Row
-          icon={<TextAa size={16} />}
-          label="OCR engine"
-          value={
-            info
-              ? info.ocr.available
-                ? `${info.ocr.engine} · ${info.ocr.languages}`
-                : info.ocr.note || 'Unavailable'
-              : '…'
-          }
-          tone={info ? (info.ocr.available ? 'success' : 'danger') : 'neutral'}
-        />
-        {info && !info.ocr.available && (
-          <p className="muted flex items-start gap-2 text-xs leading-5">
-            <WarningCircle
-              size={14}
-              weight="fill"
-              className="mt-0.5 shrink-0 text-[var(--rr-danger)]"
-            />
-            {info.ocr.note} Scans still store fine; their text is simply not extracted until the
-            engine is fixed.
-          </p>
-        )}
       </div>
     </Card>
   );

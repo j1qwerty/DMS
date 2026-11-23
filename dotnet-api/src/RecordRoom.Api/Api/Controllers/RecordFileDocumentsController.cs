@@ -61,6 +61,11 @@ public sealed class RecordFileDocumentsController(IRecordFileDocumentsService do
     }
 
     [Authorize(Policy = "perm:digitization.upload")]
+    [HttpPost("{documentId:long}/ocr")]
+    public async Task<IResult> QueueOcr(int fileId, long documentId, CancellationToken ct) =>
+        ApiResults.FromResult(await documents.QueueOcrAsync(fileId, documentId, ct));
+
+    [Authorize(Policy = "perm:digitization.upload")]
     [HttpPut("{documentId:long}/ocr/{pageNo:int}")]
     public async Task<IResult> SaveOcrPage(int fileId, long documentId, int pageNo, [FromBody] DocumentOcrUpdateInput input, CancellationToken ct) =>
         ApiResults.FromResult(await documents.SaveOcrPageAsync(fileId, documentId, pageNo, input.Text ?? "", ct));

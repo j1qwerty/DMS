@@ -30,11 +30,16 @@ public sealed class OcrTextExtractorTests
         }
 
         public OcrEngineStatus Describe() =>
-            new(available, available, null, [], available ? "Fake engine ready (hin+eng)." : "Fake engine is not available.");
+            new(IsAvailable, IsAvailable, null, [], IsAvailable ? "Fake engine ready (hin+eng)." : "Fake engine is not available.");
     }
 
     private static OcrTextExtractor Extractor(IOcrEngine engine) =>
-        new(engine, new ConfigurationBuilder().Build(), NullLogger<OcrTextExtractor>.Instance);
+        new(new FixedEngine(engine), new ConfigurationBuilder().Build(), NullLogger<OcrTextExtractor>.Instance);
+
+    private sealed class FixedEngine(IOcrEngine engine) : IOcrEngineSelector
+    {
+        public Task<IOcrEngine> GetAsync(CancellationToken ct = default) => Task.FromResult(engine);
+    }
 
     private static byte[] TinyPng() =>
         Convert.FromBase64String(

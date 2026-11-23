@@ -209,6 +209,36 @@ Assert-Equal 200 $flipOn.Status 'an admin can turn feature groups on'
 $afterOn = Invoke-Api -Path '/api/config'
 Assert-True ([bool]$afterOn.Data.features.recordRoom) 'GET /api/config reflects the live switch state'
 
+# ============================================================ OCR engine
+Write-Step 'OCR engine settings'
+$initialEngine = $afterOn.Data.ocr.engine
+$alternative = if ($initialEngine -eq 'paddleocr') { 'tesseract' } else { 'paddleocr' }
+$employeeEngine = Invoke-Api -Method PUT -Path '/api/config/ocr-engine' -Token $employeeToken -Body @{
+    engine = $alternative
+}
+Assert-Equal 403 $employeeEngine.Status 'only admins can change the OCR engine'
+$supervisorEngine = Invoke-Api -Method PUT -Path '/api/config/ocr-engine' -Token $supervisorToken -Body @{
+    engine = $alternative
+}
+Assert-Equal 403 $supervisorEngine.Status 'a supervisor cannot change the OCR engine'
+$invalidEngine = Invoke-Api -Method PUT -Path '/api/config/ocr-engine' -Token $admin -Body @{
+    engine = 'unsupported'
+}
+Assert-Equal 400 $invalidEngine.Status 'unknown OCR engines are rejected'
+try {
+    $switchEngine = Invoke-Api -Method PUT -Path '/api/config/ocr-engine' -Token $admin -Body @{
+        engine = $alternative
+    }
+    Assert-Equal 200 $switchEngine.Status 'an admin can switch OCR engines'
+    $liveEngine = Invoke-Api -Path '/api/config'
+    Assert-Equal $alternative $liveEngine.Data.ocr.engine 'config returns the selected engine'
+} finally {
+    $restoreEngine = Invoke-Api -Method PUT -Path '/api/config/ocr-engine' -Token $admin -Body @{
+        engine = $initialEngine
+    }
+    Assert-Equal 200 $restoreEngine.Status 'the initial OCR engine is restored'
+}
+
 # ============================================================ permissions matrix
 Write-Step 'Editable permission matrix (§3.7)'
 $empMatrix = Invoke-Api -Path '/api/permissions/matrix' -Token $employeeToken
@@ -855,6 +885,11 @@ if (-not $SkipDestructive) {
     Assert-True ([bool]$uploaded.success) 'a scan version is uploaded'
     $scanId = $uploaded.data.id
     Assert-True ($scanId -gt 0) 'the upload returns the stored version id'
+    $ocrPath = "/api/files/$newFileId/documents/$scanId/ocr"
+    $pageCorrection = Invoke-Api -Method PUT -Path "$ocrPath/1" -Token $admin -Body @{ text = 'Saved OCR smoke text' }
+    Assert-Equal 200 $pageCorrection.Status 'OCR corrections are saved against a stored version'
+    $ocrMap = Invoke-Api -Path $ocrPath -Token $admin
+    Assert-Equal 'Saved OCR smoke text' $ocrMap.Data.data.'1' 'the saved version OCR is returned'
 
     $empDelete = Invoke-Api -Method DELETE -Path "/api/files/$newFileId/documents/$scanId" -Token $employeeToken
     Assert-Equal 403 $empDelete.Status 'an employee cannot delete a scan version'

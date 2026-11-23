@@ -35,6 +35,7 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <None Update="Fixtures\mixed-hindi-english.png" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

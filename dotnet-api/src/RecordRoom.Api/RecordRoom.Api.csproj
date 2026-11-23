@@ -45,6 +45,8 @@
        (TesseractOcrEngine looks them up next to the DLL first). -->
   <ItemGroup>
     <Content Include="..\..\tessdata\**\*.traineddata" CopyToOutputDirectory="PreserveNewest" LinkBase="tessdata" />
+    <None Update="ocr-worker\paddle_worker.py;ocr-worker\requirements.txt"
+          CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

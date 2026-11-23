@@ -16,6 +16,7 @@ import 'react-pdf/dist/Page/TextLayer.css';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { Badge } from '../ui/Badge';
 import { useFlash, useQuery, useService } from '../../hooks/useService';
+import { dataSource } from '../../services';
 import { usePageKeys } from '../../hooks/usePageKeys';
 import { Button } from '../ui/Button';
 import { cn } from '../../lib/utils';
@@ -101,6 +102,7 @@ export function PageOcrViewer({
   const [results, setResults] = useState<SearchHit[] | null>(null);
   const [editingText, setEditingText] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [queuing, setQueuing] = useState(false);
   const {
     data: docOcrMap,
     loading: ocrLoading,
@@ -181,7 +183,8 @@ export function PageOcrViewer({
     [currentPage, numPages, pdfTextOf],
     { page: 0, text: '' },
   );
-  const pageText = docOcrMap[currentPage] ?? (embedded.page === currentPage ? embedded.text : '');
+  const savedText = docOcrMap[currentPage]?.trim();
+  const pageText = savedText || (embedded.page === currentPage ? embedded.text : '');
   const stepPage = (delta: number) =>
     setCurrentPage((page) => Math.max(1, Math.min(numPages, page + delta)));
   usePageKeys(stepPage, numPages > 1 && editingText === null && !saving);
@@ -213,11 +216,25 @@ export function PageOcrViewer({
   const copyAll = async () => {
     const pages = [];
     for (let page = 1; page <= numPages; page += 1) {
-      const text = docOcrMap[page] ?? (await pdfTextOf(page));
+      const text = docOcrMap[page]?.trim() || (await pdfTextOf(page));
       if (text.trim()) pages.push(`Page ${page}\n${text.trim()}`);
     }
     if (pages.length > 0) await copyText(pages.join('\n\n'));
     else danger('No text is available to copy.');
+  };
+
+  const rerunOcr = async () => {
+    if (!attachment) return;
+    setQueuing(true);
+    try {
+      const result = await service.files.rerunDocumentOcr(attachment.fileId, attachment.id);
+      if (result.ok) success('OCR queued for this PDF. Saved text will refresh when it finishes.');
+      else danger(result.error);
+    } catch {
+      danger('Could not queue OCR for this PDF.');
+    } finally {
+      setQueuing(false);
+    }
   };
 
   const runSearch = async () => {
@@ -398,6 +415,16 @@ export function PageOcrViewer({
               Copy all text
             </Button>
           )}
+          {editMode && canEdit && attachment && dataSource === 'api' && (
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={queuing}
+              onClick={() => void rerunOcr()}
+            >
+              Re-run OCR
+            </Button>
+          )}
           {fullPreviewHref && (
             <Link
               to={fullPreviewHref}
@@ -576,7 +603,8 @@ export function PageOcrViewer({
             >
               <div className="flex items-center justify-between gap-2 border-b border-base px-3 py-2.5">
                 <p className="flex items-center gap-1.5 text-xs font-semibold">
-                  <TextAa size={14} className="text-accent" /> OCR text · page {currentPage}
+                  <TextAa size={14} className="text-accent" />
+                  {pageText && !savedText ? 'PDF text' : 'OCR text'} · page {currentPage}
                 </p>
                 <div className="flex items-center gap-1">
                   {pageText && (

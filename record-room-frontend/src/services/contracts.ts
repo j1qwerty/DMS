@@ -236,6 +236,7 @@ export interface FilesApi {
   deleteDocument(fileId: string, documentId: string): Promise<Result<true>>;
   documentBlob(fileId: string, documentId: string): Promise<Blob>;
   documentOcr(fileId: string, documentId: string): Promise<Record<number, string>>;
+  rerunDocumentOcr(fileId: string, documentId: string): Promise<Result<true>>;
   saveDocumentOcr(
     fileId: string,
     documentId: string,
@@ -699,10 +700,12 @@ export interface MediaApi {
 // ------------------------------------------------------------ feature config
 
 /** OCR engine status as `GET /api/config` reports it — one honest line for the OCR screen. */
+export type OcrEngine = 'tesseract' | 'paddleocr';
+
 export interface OcrStatusInfo {
   enabled: boolean;
   available: boolean;
-  engine: string;
+  engine: OcrEngine;
   languages: string;
   note: string;
 }
@@ -725,6 +728,7 @@ export interface AppConfigInfo {
 export interface ConfigApi {
   features(): Promise<Features>;
   updateFeatures(patch: Partial<Record<FeatureKey, boolean>>): Promise<Result<Features>>;
+  updateOcrEngine(engine: OcrEngine): Promise<Result<OcrEngine>>;
   /** Deployment facts: demo mode, the feature-edit lock and the OCR engine status. */
   info(): Promise<AppConfigInfo>;
 }

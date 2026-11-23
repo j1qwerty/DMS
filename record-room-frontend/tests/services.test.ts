@@ -604,7 +604,6 @@ describe('dashboard', () => {
   });
 });
 
-
 // ------------------------------------------------------------- scan studio (§3.4/§3.5)
 
 describe('scan studio: order, corrections, deliverable PDF', () => {
@@ -679,7 +678,6 @@ describe('scan studio: order, corrections, deliverable PDF', () => {
   });
 });
 
-
 // ------------------------------------------------- registry search over OCR text (§3.1)
 
 describe('registry search covers the OCR text of digitized pages', () => {
@@ -690,7 +688,8 @@ describe('registry search covers the OCR text of digitized pages', () => {
     expect(ocrOnly.length).toBeGreaterThanOrEqual(1);
     // The token appears in no metadata field of the flagged rows.
     for (const file of ocrOnly) {
-      const haystack = `${file.subject} ${file.department} ${file.location} ${file.fileNumber}`.toLowerCase();
+      const haystack =
+        `${file.subject} ${file.department} ${file.location} ${file.fileNumber}`.toLowerCase();
       expect(haystack).not.toContain('record programme');
     }
   });
@@ -703,16 +702,25 @@ describe('registry search covers the OCR text of digitized pages', () => {
 
   it('loads and saves OCR text per page for stored documents', async () => {
     const file = (await filesService.list({ pageSize: 1 })).items[0];
-    const docs = await filesService.listDocuments(file.id);
-    const docId = docs[0]?.id ?? 'doc-1';
-    const ocrMap = await filesService.documentOcr(file.id, docId);
-    expect(typeof ocrMap).toBe('object');
-    expect(ocrMap[1]).toBeDefined();
+    const pdf = (name: string) =>
+      new File(['%PDF-1.4\n/Type /Pages /Count 1\n%%EOF'], name, {
+        type: 'application/pdf',
+      });
+    const first = await filesService.uploadDocument(file.id, pdf('first.pdf'));
+    const second = await filesService.uploadDocument(file.id, pdf('second.pdf'));
+    if (!first.ok || !second.ok) throw new Error('Could not create the two document versions.');
+    expect(await filesService.documentOcr(file.id, first.value.id)).toEqual({});
 
-    const saved = await filesService.saveDocumentOcr(file.id, docId, 1, 'Corrected text page 1');
+    const saved = await filesService.saveDocumentOcr(
+      file.id,
+      first.value.id,
+      1,
+      'Corrected text page 1',
+    );
     expect(saved.ok).toBe(true);
 
-    const reloaded = await filesService.documentOcr(file.id, docId);
+    const reloaded = await filesService.documentOcr(file.id, first.value.id);
     expect(reloaded[1]).toBe('Corrected text page 1');
+    expect(await filesService.documentOcr(file.id, second.value.id)).toEqual({});
   });
 });

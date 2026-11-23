@@ -11,6 +11,9 @@ using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using QuestPDF.Fluent;
+using QuestPDF.Helpers;
+using QuestPDF.Infrastructure;
 using RecordRoom.Api.Application;
 using RecordRoom.Api.Application.Contracts;
 using RecordRoom.Api.Application.Services;
@@ -65,6 +68,24 @@ public sealed class Round4FlowTests
     {
         public Task PublishAsync(string channel, string action, string? entityId, string summary, string actor) =>
             Task.CompletedTask;
+    }
+
+    private sealed class TestEngine : IOcrEngine, IOcrEngineSelector
+    {
+        public int Calls { get; private set; }
+        public bool Fail { get; set; }
+        public string Name => OcrEngineNames.Paddle;
+        public string Languages => "hin+eng";
+        public bool IsAvailable => true;
+        public OcrEngineStatus Describe() => new(true, true, null, [], "Test engine.");
+        public Task<IOcrEngine> GetAsync(CancellationToken ct = default) => Task.FromResult<IOcrEngine>(this);
+
+        public Task<string?> RunAsync(byte[] imageBytes, CancellationToken ct = default)
+        {
+            Calls++;
+            if (Fail) throw new OcrEngineException("Test recognition failure.");
+            return Task.FromResult<string?>("भारत Audit Report");
+        }
     }
 
     private sealed class FakeOcr : IOcrService
@@ -130,6 +151,10 @@ public sealed class Round4FlowTests
         public ICustodyService Custody { get; }
         public IFileScansService Scans { get; }
         public IScanStudioService Studio { get; }
+        public IFeatureSettingsService Settings { get; }
+        public IRecordFileDocumentsService Documents { get; }
+        public IOcrService ManualOcr { get; }
+        public ScanProcessingJobs Jobs { get; }
 
         /// <summary>
         /// Plays the Hangfire worker in tests: ScanProcessingJobs resolves
@@ -137,7 +162,7 @@ public sealed class Round4FlowTests
         /// </summary>
         private readonly ServiceProvider _provider;
 
-        public Harness(IOcrService? ocr = null)
+        public Harness(IOcrService? ocr = null, TestEngine? engine = null)
         {
             Connection.Open();
             var options = new DbContextOptionsBuilder<AppDbContext>()
@@ -162,6 +187,13 @@ public sealed class Round4FlowTests
             var store = new PrivateDocumentStore(configuration, new TestEnvironment(StoreRoot));
             var flags = new FeatureFlags(configuration);
             var fileRefs = new FileRefs(Db, flags);
+            var extractor = new OcrTextExtractor(engine ?? new TestEngine(), configuration,
+                NullLogger<OcrTextExtractor>.Instance);
+            Settings = new FeatureSettingsService(Db, audit, User, flags);
+            ManualOcr = new OcrService(Db, audit, User, store, extractor);
+            var backgroundJobs = new BackgroundJobClient(new MemoryStorage());
+            Documents = new RecordFileDocumentsService(Db, store, audit, User,
+                NullLogger<RecordFileDocumentsService>.Instance, backgroundJobs);
 
             // The scan pipeline OCRs in the background: uploads enqueue through
             // a real job client (memory storage, no worker) and the tests call
@@ -171,15 +203,18 @@ public sealed class Round4FlowTests
                 .AddSingleton<AppDbContext>(Db)
                 .AddSingleton<IOcrService>(ocr ?? new FakeOcr())
                 .AddSingleton<IAuditWriter>(audit)
+                .AddSingleton<IPrivateDocumentStore>(store)
+                .AddSingleton(extractor)
                 .AddSingleton<IConfiguration>(configuration)
                 .BuildServiceProvider();
+            Jobs = new ScanProcessingJobs(_provider, NullLogger<ScanProcessingJobs>.Instance);
 
             Files = new FilesService(Db, audit, User, store, flags, configuration,
                 NullLogger<FilesService>.Instance);
             Issues = new IssuesService(Db, audit, User, fileRefs);
             Custody = new CustodyService(Db, audit, User);
             Scans = new FileScansService(Db, audit, User, store, fileRefs, configuration,
-                NullLogger<FileScansService>.Instance, new BackgroundJobClient(new MemoryStorage()));
+                NullLogger<FileScansService>.Instance, backgroundJobs);
             Studio = new ScanStudioService(Db, audit, User, store, new FakeEnhancer(), fileRefs,
                 new ConsoleLogger<ScanStudioService>());
         }
@@ -415,6 +450,87 @@ public sealed class Round4FlowTests
     }
 
     // ------------------------------------------------------------- digitization
+
+    [Fact]
+    public async Task Ocr_setting_switches_engines_and_persists_with_an_audit_entry()
+    {
+        using var h = new Harness();
+        var configuration = new ConfigurationBuilder().Build();
+        var tesseract = new TesseractOcrEngine(configuration, NullLogger<TesseractOcrEngine>.Instance);
+        using var paddle = new PaddleOcrEngine(configuration, NullLogger<PaddleOcrEngine>.Instance);
+        var selector = new OcrEngineSelector(h.Settings, tesseract, paddle);
+
+        Assert.Same(tesseract, await selector.GetAsync());
+        Assert.False((await h.Settings.SetOcrEngineAsync("unknown")).IsSuccess);
+        Assert.True((await h.Settings.SetOcrEngineAsync(OcrEngineNames.Paddle)).IsSuccess);
+        h.Db.ChangeTracker.Clear();
+        Assert.Same(paddle, await selector.GetAsync());
+        Assert.Contains(await h.Db.Audit.ToListAsync(), row =>
+            row.Entity == "FeatureSetting" && row.After == OcrEngineNames.Paddle);
+        Assert.True((await h.Settings.SetOcrEngineAsync(OcrEngineNames.Tesseract)).IsSuccess);
+        Assert.Same(tesseract, await selector.GetAsync());
+    }
+
+    [Fact]
+    public async Task Document_OCR_is_versioned_and_preserves_corrections_during_background_processing()
+    {
+        var engine = new TestEngine();
+        using var h = new Harness(engine: engine);
+        var file = await h.CreateFileAsync("RF-00001037");
+        QuestPDF.Settings.License = LicenseType.Community;
+        var pdf = Document.Create(container =>
+        {
+            foreach (var number in new[] { 1, 2 })
+                container.Page(page => { page.Size(PageSizes.A5); page.Content().Text($"Page {number}"); });
+        }).GeneratePdf();
+        using var input = new MemoryStream(pdf);
+        var upload = new FormFile(input, 0, pdf.Length, "document", "office.pdf")
+        {
+            Headers = new HeaderDictionary(), ContentType = "application/pdf"
+        };
+        var stored = await h.Documents.UploadAsync(file.Id, upload, importToStudio: true);
+        Assert.True(stored.IsSuccess);
+        Assert.True(stored.Value.StudioImportPending);
+        Assert.Empty((await h.Documents.GetOcrAsync(file.Id, stored.Value.Id))!);
+        Assert.Equal(0, engine.Calls);
+
+        Assert.True((await h.Documents.SaveOcrPageAsync(file.Id, stored.Value.Id, 1, "Corrected page one")).IsSuccess);
+        await h.Jobs.ExtractDocumentOcrAsync(stored.Value.Id);
+        h.Db.ChangeTracker.Clear();
+        var map = await h.Documents.GetOcrAsync(file.Id, stored.Value.Id);
+        Assert.Equal("Corrected page one", map![1]);
+        Assert.Equal("भारत Audit Report", map[2]);
+        Assert.Equal(2, await h.Db.ScanPages.CountAsync());
+        Assert.Equal(1, engine.Calls);
+
+        await h.Jobs.ExtractDocumentOcrAsync(stored.Value.Id);
+        Assert.Equal(1, engine.Calls);
+        engine.Fail = true;
+        await Assert.ThrowsAsync<InvalidOperationException>(() => h.Jobs.ReextractDocumentOcrAsync(stored.Value.Id));
+        Assert.Equal(map.ToArray(), (await h.Documents.GetOcrAsync(file.Id, stored.Value.Id))!.ToArray());
+    }
+
+    [Fact]
+    public async Task Manual_OCR_keeps_scan_text_when_the_selected_engine_fails()
+    {
+        var engine = new TestEngine { Fail = true };
+        using var h = new Harness(engine: engine);
+        var file = await h.CreateFileAsync("RF-00001038");
+        var scan = await h.Scans.AddAsync(file.Id, new ScanAddInput("scan.png", 1, "A4"));
+        Assert.True((await h.Scans.AddDocumentAsync(scan.Value.Id, PngFile("scan.png"))).IsSuccess);
+        var row = await h.Db.ScanPages.FindAsync(scan.Value.Id);
+        row!.OcrText = "Saved Hindi and English text";
+        await h.Db.SaveChangesAsync();
+
+        var failed = await h.ManualOcr.RunAsync(scan.Value.Id);
+        Assert.False(failed.IsSuccess);
+        Assert.Equal("Saved Hindi and English text", row.OcrText);
+        engine.Fail = false;
+        var successful = await h.ManualOcr.RunAsync(scan.Value.Id);
+        Assert.True(successful.IsSuccess);
+        Assert.Equal("paddleocr hin+eng", successful.Value.Method);
+        Assert.Equal("भारत Audit Report", row.OcrText);
+    }
 
     [Fact]
     public async Task Digitization_UploadStoresBytesAndOcr_ThenReview()

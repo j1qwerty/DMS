@@ -7,12 +7,12 @@ namespace RecordRoom.Api.Infrastructure.Ocr;
 
 /// <summary>
 /// One OCR pass over an image: the tesseract CLI behind a small interface so
-/// the orchestration can be unit-tested without a binary. Tesseract is the
-/// only mainstream engine with real Devanagari models, which is why the Hindi
-/// scan path depends on it.
+/// the orchestration can run either local recognition engine.
 /// </summary>
 public interface IOcrEngine
 {
+    string Name => OcrEngineNames.Tesseract;
+
     /// <summary>True when the engine is configured and the binary was found.</summary>
     bool IsAvailable { get; }
 
