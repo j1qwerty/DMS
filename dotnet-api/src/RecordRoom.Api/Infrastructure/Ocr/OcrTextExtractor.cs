@@ -68,24 +68,26 @@ public sealed class OcrTextExtractor(
     }
 
     /// <summary>Extracts text for each page of the document individually (1-based page index).</summary>
-    public async Task<Dictionary<int, string>> ExtractPagesAsync(byte[] blob, string contentType, CancellationToken ct = default)
+    public async Task<Dictionary<int, string>> ExtractPagesAsync(
+        byte[] blob, string contentType, CancellationToken ct = default,
+        IReadOnlyDictionary<int, string>? saved = null)
     {
         var result = new Dictionary<int, string>();
         if (!Enabled || blob.Length == 0) return result;
 
         if (contentType == "application/pdf")
         {
-            var pages = RenderPdfPages(blob);
-            for (var i = 0; i < pages.Count; i++)
+            foreach (var (pageNo, image) in RasterizePdf(blob))
             {
                 ct.ThrowIfCancellationRequested();
-                var text = engine.IsAvailable ? await engine.RunAsync(pages[i], ct) : "";
-                result[i + 1] = text?.Trim() ?? "";
+                if (saved?.ContainsKey(pageNo) == true) continue;
+                var text = engine.IsAvailable ? await engine.RunAsync(image, ct) : "";
+                result[pageNo] = text?.Trim() ?? "";
             }
             return result;
         }
 
-        if (contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+        if (contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase) && saved?.ContainsKey(1) != true)
         {
             var text = engine.IsAvailable ? await engine.RunAsync(blob, ct) : "";
             result[1] = text?.Trim() ?? "";
@@ -100,38 +102,32 @@ public sealed class OcrTextExtractor(
     {
         try
         {
-            using var doc = DocLib.Instance.GetDocReader(
-                pdf, new Docnet.Core.Models.PageDimensions(RenderWidth, RenderHeight));
-            var pages = new List<byte[]>();
-            for (var i = 0; i < Math.Min(doc.GetPageCount(), MaxPdfPages); i++)
-            {
-                using var reader = doc.GetPageReader(i);
-                // Docnet hands back B-G-R-A, four bytes per pixel; reading it as
-                // three-channel data sheared every row and gave tesseract garbage.
-                var raw = reader.GetImage();
-                var handle = System.Runtime.InteropServices.GCHandle.Alloc(
-                    raw, System.Runtime.InteropServices.GCHandleType.Pinned);
-                try
-                {
-                    using var wrapped = Mat.FromPixelData(
-                        reader.GetPageHeight(), reader.GetPageWidth(), MatType.CV_8UC4,
-                        handle.AddrOfPinnedObject());
-                    using var bgr = new Mat();
-                    Cv2.CvtColor(wrapped, bgr, ColorConversionCodes.BGRA2BGR);
-                    Cv2.ImEncode(".png", bgr, out var bytes);
-                    pages.Add(bytes);
-                }
-                finally
-                {
-                    handle.Free();
-                }
-            }
-            return pages;
+            return RasterizePdf(pdf, MaxPdfPages).Select(page => page.Image).ToList();
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "PDFium could not rasterize this document for OCR.");
             return [];
+        }
+    }
+
+    internal static IEnumerable<(int PageNo, byte[] Image)> RasterizePdf(byte[] pdf, int limit = int.MaxValue)
+    {
+        using var doc = DocLib.Instance.GetDocReader(
+            pdf, new Docnet.Core.Models.PageDimensions(RenderWidth, RenderHeight));
+        for (var i = 0; i < Math.Min(doc.GetPageCount(), limit); i++)
+        {
+            byte[] bytes;
+            using (var reader = doc.GetPageReader(i))
+            {
+                var raw = reader.GetImage();
+                using var wrapped = Mat.FromPixelData(
+                    reader.GetPageHeight(), reader.GetPageWidth(), MatType.CV_8UC4, raw);
+                using var bgr = new Mat();
+                Cv2.CvtColor(wrapped, bgr, ColorConversionCodes.BGRA2BGR);
+                Cv2.ImEncode(".png", bgr, out bytes);
+            }
+            yield return (i + 1, bytes);
         }
     }
 }

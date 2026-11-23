@@ -8,8 +8,8 @@
  * as a background queue (the API OCRs in the background too), so the grid
  * stays usable while pages land.
  */
-import { useCallback, useEffect, useRef, useState, lazy, Suspense, type ChangeEvent } from 'react';
-import { useParams } from 'react-router-dom';
+import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   ArrowClockwise,
   ArrowCounterClockwise,
@@ -41,6 +41,8 @@ import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { PageImageViewer } from '../components/files/PageImageViewer';
 import { service } from '../services';
 import { useFlash, useSession } from '../hooks/useService';
+import { isTyping, usePageKeys } from '../hooks/usePageKeys';
+import { realtime } from '../services/realtime';
 import { documentAcceptAttribute } from '../lib/document';
 import { extractPdfPagesToImages } from '../lib/pdf-unpack';
 import { cn } from '../lib/utils';
@@ -51,13 +53,8 @@ import {
   getStudioDraft,
   setStudioDraft,
   computeNextVersionName,
+  documentVersionKey,
 } from '../lib/studioDraft';
-
-const PdfDocumentViewer = lazy(() =>
-  import('../components/files/PdfDocumentViewer').then((module) => ({
-    default: module.PdfDocumentViewer,
-  })),
-);
 
 const ENHANCEMENTS = ['deskew', 'despeckle', 'binarize', 'crop', 'contrast'] as const;
 
@@ -72,6 +69,8 @@ const STATUS_DOT: Record<string, string> = {
 
 export function ScanStudioPage() {
   const { fileId } = useParams<{ fileId: string }>();
+  const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
   const { allowed } = useSession();
   const { success, danger } = useFlash();
   const canUploadPages = allowed('digitization.upload');
@@ -94,15 +93,24 @@ export function ScanStudioPage() {
   const [orderDirty, setOrderDirty] = useState(false);
 
   // The full-screen preview a card click opens.
-  const [lightboxId, setLightboxId] = useState<string | null>(null);
+  const lightboxId = params.get('page');
+  const setLightboxId = useCallback(
+    (id: string | null) => {
+      setParams(
+        (current) => {
+          const next = new URLSearchParams(current);
+          if (id) next.set('page', id);
+          else next.delete('page');
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setParams],
+  );
   const [showOcr, setShowOcr] = useState(false);
   const [ocrBusy, setOcrBusy] = useState(false);
   const [compareUrl, setCompareUrl] = useState<string | null>(null);
-
-  const [versionPreview, setVersionPreview] = useState<{
-    version: UnifiedDocumentVersion;
-    url: string;
-  } | null>(null);
 
   const [deleteTarget, setDeleteTarget] = useState<FileScan | null>(null);
   const [confirmUnpack, setConfirmUnpack] = useState<UnifiedDocumentVersion | null>(null);
@@ -179,7 +187,15 @@ export function ScanStudioPage() {
 
   // While the API's background OCR pass is running on any page, refresh the
   // grid so the status dots flip to their final colour on their own.
-  const hasProcessing = scans.some((scan) => scan.status === 'Processing');
+  const hasProcessing =
+    scans.some((scan) => scan.status === 'Processing') ||
+    documents.some((document) => document.studioImportPending);
+  useEffect(() => {
+    void realtime.join(['digitization']);
+    return realtime.subscribe((notification) => {
+      if (notification.action === 'document.ocr.processed') void reload();
+    });
+  }, [reload]);
   useEffect(() => {
     if (!hasProcessing) return;
     const timer = window.setInterval(() => void reload(), 3000);
@@ -255,10 +271,8 @@ export function ScanStudioPage() {
   };
 
   /**
-   * Adds pages as a background queue: images upload directly; multi-page PDFs
-   * are unpacked client-side into per-page images first. The grid refreshes
-   * in between so pages appear as they land, and the API's own OCR pass runs
-   * in the background on top of that — the queue only tracks the uploads.
+   * Upload images as individual scans and PDFs as stored versions. The backend
+   * processes PDF pages and OCR after the upload returns.
    */
   const addPages = async (files: File[]) => {
     if (files.length === 0 || !fileId || queueBusy.current) return;
@@ -268,35 +282,16 @@ export function ScanStudioPage() {
       let pageNo = scans.reduce((max, row) => Math.max(max, row.pageNo), 0);
       const failures: string[] = [];
       let added = 0;
+      let queuedPdfs = 0;
 
       for (const [index, upload] of files.entries()) {
         setQueue({ done: index, total: files.length, label: upload.name });
         const isPdf =
           upload.type === 'application/pdf' || upload.name.toLowerCase().endsWith('.pdf');
         if (isPdf) {
-          try {
-            const extracted = await extractPdfPagesToImages(upload, upload.name);
-            for (const pageFile of extracted) {
-              pageNo += 1;
-              const meta = await service.digitization.add(fileId, {
-                pageNo,
-                filename: pageFile.name,
-                documentSize: 'A4',
-                note: `Extracted from ${upload.name}.`,
-              });
-              if (meta.ok) {
-                const withDoc = await service.digitization.addDocument(meta.value.id, pageFile);
-                if (withDoc.ok) added += 1;
-                else failures.push(`${pageFile.name}: ${withDoc.error}`);
-              } else {
-                failures.push(`${pageFile.name}: ${meta.error}`);
-              }
-            }
-          } catch (e) {
-            failures.push(
-              `${upload.name}: ${e instanceof Error ? e.message : 'Could not extract PDF pages.'}`,
-            );
-          }
+          const result = await service.files.uploadDocument(fileId, upload, true);
+          if (result.ok) queuedPdfs += 1;
+          else failures.push(`${upload.name}: ${result.error}`);
         } else {
           pageNo += 1;
           const meta = await service.digitization.add(fileId, {
@@ -321,6 +316,9 @@ export function ScanStudioPage() {
 
       await reload();
       if (failures.length > 0) setError(failures.slice(0, 4).join(' · '));
+      if (queuedPdfs > 0) {
+        success(`${queuedPdfs} PDF(s) uploaded. Studio pages and OCR are processing.`);
+      }
       if (added > 0) {
         touchDraft(scans.length + added);
         success(`${added} page(s) added — text extraction and OCR finish in the background.`);
@@ -341,7 +339,7 @@ export function ScanStudioPage() {
     if (!fileId) return;
     setConfirmUnpack(null);
 
-    if (draft?.sourceVersionId === version.id && scans.length > 0) {
+    if (draft?.sourceVersionId === documentVersionKey(version) && scans.length > 0) {
       success(`Pages from ${version.filename} are already open in the studio grid.`);
       return;
     }
@@ -349,18 +347,19 @@ export function ScanStudioPage() {
     setBusy(true);
     setError('');
     try {
-      // Clear the previous working pages so the new version's pages do not
-      // append to a stale workspace.
-      for (const scan of scans) {
-        await service.digitization.remove(scan.id);
-      }
-
       const blob =
         version.source === 'document'
           ? await service.files.documentBlob(fileId, version.id)
           : await service.digitization.pdfBlob(version.id);
 
       const extracted = await extractPdfPagesToImages(blob, version.filename);
+      if (extracted.length === 0) throw new Error('This document has no pages to import.');
+      // Clear the previous working pages so the new version's pages do not
+      // append to a stale workspace.
+      for (const scan of scans) {
+        await service.digitization.remove(scan.id);
+      }
+
       let pageNo = 0;
       let count = 0;
       for (const pageFile of extracted) {
@@ -379,7 +378,7 @@ export function ScanStudioPage() {
 
       const nextName = computeNextVersionName(version.filename, derivatives, documents);
       const newDraft: StudioDraftState = {
-        sourceVersionId: version.id,
+        sourceVersionId: documentVersionKey(version),
         sourceFilename: version.filename,
         draftFilename: nextName,
         pageCount: count,
@@ -397,44 +396,6 @@ export function ScanStudioPage() {
       setBusy(false);
     }
   };
-
-  const openVersionPreview = useCallback(
-    async (version: UnifiedDocumentVersion) => {
-      if (!fileId) return;
-      try {
-        const blob =
-          version.source === 'document'
-            ? await service.files.documentBlob(fileId, version.id)
-            : await service.digitization.pdfBlob(version.id);
-        setVersionPreview((prev) => {
-          if (prev) URL.revokeObjectURL(prev.url);
-          return { version, url: URL.createObjectURL(blob) };
-        });
-      } catch (e) {
-        setError(e instanceof Error ? e.message : 'Could not load PDF preview.');
-      }
-    },
-    [fileId],
-  );
-
-  const closeVersionPreview = useCallback(() => {
-    setVersionPreview((prev) => {
-      if (prev) URL.revokeObjectURL(prev.url);
-      return null;
-    });
-  }, []);
-
-  // Left/right arrows switch the stored version being previewed.
-  const stepVersionPreview = useCallback(
-    (delta: number) => {
-      if (!versionPreview) return;
-      const index = unifiedVersions.findIndex((v) => v.id === versionPreview.version.id);
-      const next = index + delta;
-      if (next < 0 || next >= unifiedVersions.length) return;
-      void openVersionPreview(unifiedVersions[next]);
-    },
-    [versionPreview, unifiedVersions, openVersionPreview],
-  );
 
   const executeBuildPdf = async (name: string, remarks: string) => {
     if (!fileId) return;
@@ -481,78 +442,32 @@ export function ScanStudioPage() {
   };
   const stepLightbox = useCallback(
     (delta: number) => {
-      setLightboxId((currentId) => {
-        if (!currentId) return null;
-        const index = scans.findIndex((s) => s.id === currentId);
-        if (index < 0) return currentId;
-        const next = index + delta;
-        if (next < 0 || next >= scans.length) return currentId;
-        return scans[next].id;
-      });
-      setShowOcr(false);
+      const next = scans[lightboxIndex + delta];
+      if (next) setLightboxId(next.id);
     },
-    [scans],
+    [lightboxIndex, scans, setLightboxId],
   );
 
   const patch = (scanId: string, updater: (page: FileScan) => FileScan) =>
     setScans((rows) => rows.map((row) => (row.id === scanId ? updater(row) : row)));
 
-  // Prevent background page from scrolling while full screen preview or lightbox is open
-  useEffect(() => {
-    if (lightboxScan || versionPreview) {
-      const original = document.body.style.overflow;
-      document.body.style.overflow = 'hidden';
-      return () => {
-        document.body.style.overflow = original;
-      };
-    }
-  }, [lightboxScan, versionPreview]);
+  usePageKeys(stepLightbox, lightboxScan !== null && scans.length > 1);
 
-  // Keyboard navigation for studio (Left/Right arrows, Escape)
   useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      const target = event.target;
+    if (!lightboxScan) return;
+    const onEscape = (event: KeyboardEvent) => {
       if (
-        target instanceof HTMLInputElement ||
-        target instanceof HTMLTextAreaElement ||
-        target instanceof HTMLSelectElement
+        event.key === 'Escape' &&
+        !event.defaultPrevented &&
+        !isTyping(event.target) &&
+        !document.querySelector('[aria-modal="true"]')
       ) {
-        return;
-      }
-
-      if (event.key === 'Escape') {
-        if (lightboxScan) {
-          event.preventDefault();
-          setLightboxId(null);
-        } else if (versionPreview) {
-          event.preventDefault();
-          closeVersionPreview();
-        }
-        return;
-      }
-
-      if (event.key === 'ArrowLeft') {
-        if (lightboxScan) {
-          event.preventDefault();
-          stepLightbox(-1);
-        } else if (versionPreview) {
-          event.preventDefault();
-          stepVersionPreview(-1);
-        }
-      } else if (event.key === 'ArrowRight') {
-        if (lightboxScan) {
-          event.preventDefault();
-          stepLightbox(1);
-        } else if (versionPreview) {
-          event.preventDefault();
-          stepVersionPreview(1);
-        }
+        setLightboxId(null);
       }
     };
-
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [lightboxScan, versionPreview, closeVersionPreview, stepLightbox, stepVersionPreview]);
+    window.addEventListener('keydown', onEscape);
+    return () => window.removeEventListener('keydown', onEscape);
+  }, [lightboxScan, setLightboxId]);
 
   const lightboxRotate = async (degrees: 90 | 270) => {
     if (!lightboxScan) return;
@@ -696,392 +611,402 @@ export function ScanStudioPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
-        {/* ------------------------------------------------ main studio area */}
-        <div className="space-y-4">
-          {/* Toolbar: workspace state on the left, the three actions on the right. */}
-          <div className="flex flex-col gap-3 rounded-xl border border-base bg-[var(--rr-surface)] p-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="min-w-0">
-              <p className="flex items-center gap-2 text-sm font-semibold">
-                Workspace
-                <span className="muted font-normal">{scans.length} page(s)</span>
-                {draft && <Badge tone="warning">draft · {draft.draftFilename}</Badge>}
-              </p>
-              <p className="muted mt-0.5 text-xs">
-                {reorderMode
-                  ? 'Drag the cards into the right order, then save.'
-                  : 'Click a page to open it large; hover a card for the expand icon.'}
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              {canUploadPages && (
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  icon={<Plus size={15} />}
-                  onClick={() => uploadRef.current?.click()}
-                  disabled={queue !== null}
-                >
-                  Add pages
-                </Button>
-              )}
-              {scans.length > 1 && (
-                <Button
-                  size="sm"
-                  variant={reorderMode ? 'primary' : 'secondary'}
-                  icon={<ArrowsDownUp size={15} />}
-                  onClick={() => {
-                    setReorderMode((on) => !on);
-                    if (reorderMode && orderDirty) setOrderDirty(false);
-                    if (!reorderMode) setLightboxId(null);
-                    // Leaving reorder with unsaved moves restores stored order.
-                    if (reorderMode) void reload();
-                  }}
-                  className={cn(reorderMode && 'shadow-sm')}
-                  title="Toggle drag-and-drop reordering"
-                >
-                  {reorderMode ? 'Done reordering' : 'Reorder'}
-                </Button>
-              )}
-              {reorderMode && (
-                <Button
-                  size="sm"
-                  icon={<FloppyDisk size={15} />}
-                  disabled={!orderDirty || busy}
-                  onClick={saveOrder}
-                >
-                  Save order
-                </Button>
-              )}
-              <Button
-                size="sm"
-                icon={<FilePdf size={15} />}
-                disabled={busy || queue !== null || scans.length === 0}
-                onClick={() => setBuildingPdf(true)}
-                title="Build a deliverable PDF from the workspace pages"
-              >
-                Build PDF
-              </Button>
-            </div>
-          </div>
-
-          {/* Background queue chip: upload progress only — extraction and OCR
-              continue in the background without blocking the grid. */}
-          {queue && (
-            <div className="flex items-center gap-3 rounded-xl border border-base bg-[var(--rr-bg)] p-3">
-              <Spinner size={16} className="animate-spin text-accent" />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-xs font-semibold">
-                  Adding pages — {queue.done + 1} of {queue.total}
-                  <span className="muted font-normal"> · {queue.label}</span>
+      {!lightboxId && (
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
+          {/* ------------------------------------------------ main studio area */}
+          <div className="space-y-4">
+            {/* Toolbar: workspace state on the left, the three actions on the right. */}
+            <div className="flex flex-col gap-3 rounded-xl border border-base bg-[var(--rr-surface)] p-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <p className="flex items-center gap-2 text-sm font-semibold">
+                  Workspace
+                  <span className="muted font-normal">{scans.length} page(s)</span>
+                  {draft && <Badge tone="warning">draft · {draft.draftFilename}</Badge>}
                 </p>
-                <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--rr-surface-2)]">
-                  <div
-                    className="h-full rounded-full bg-[var(--rr-accent)] transition-all"
-                    style={{ width: `${Math.round((queue.done / queue.total) * 100)}%` }}
-                  />
-                </div>
+                <p className="muted mt-0.5 text-xs">
+                  {reorderMode
+                    ? 'Drag the cards into the right order, then save.'
+                    : 'Click a page to open it large; hover a card for the expand icon.'}
+                </p>
               </div>
-              <span className="muted text-[11px]">runs in the background</span>
-            </div>
-          )}
-
-          {hasProcessing && !queue && (
-            <div className="flex items-center gap-2.5 rounded-xl border border-base bg-[var(--rr-bg)] p-3 text-xs">
-              <Spinner size={15} className="animate-spin text-amber-500" />
-              <p className="font-medium">
-                {scans.filter((scan) => scan.status === 'Processing').length} page(s) are being
-                OCR-processed in the background — their text arrives here on its own.
-              </p>
-            </div>
-          )}
-
-          <Card>
-            {scans.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-base p-8 text-center">
-                <FilePdf size={28} className="mx-auto text-accent" />
-                <p className="mt-3 text-sm font-semibold">No pages in the workspace</p>
-                <p className="muted mx-auto mt-1 max-w-md text-xs leading-5">
-                  Add images or multi-page PDFs — a PDF is unpacked into pages automatically, and
-                  every page's OCR runs in the background. Or load any stored version from the right
-                  to edit its pages.
-                </p>
+              <div className="flex flex-wrap items-center gap-2">
                 {canUploadPages && (
                   <Button
                     size="sm"
-                    className="mt-4"
+                    variant="secondary"
                     icon={<Plus size={15} />}
                     onClick={() => uploadRef.current?.click()}
                     disabled={queue !== null}
                   >
-                    Add scanned pages
+                    Add pages
                   </Button>
                 )}
-              </div>
-            ) : (
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                {scans.map((scan, index) => (
-                  <div
-                    key={scan.id}
-                    draggable={reorderMode}
-                    onDragStart={() => (dragId.current = scan.id)}
-                    onDragOver={(event) => event.preventDefault()}
-                    onDrop={() => {
-                      if (reorderMode && dragId.current && dragId.current !== scan.id)
-                        move(dragId.current, scan.id);
-                      dragId.current = null;
+                {scans.length > 1 && (
+                  <Button
+                    size="sm"
+                    variant={reorderMode ? 'primary' : 'secondary'}
+                    icon={<ArrowsDownUp size={15} />}
+                    onClick={() => {
+                      setReorderMode((on) => !on);
+                      if (reorderMode && orderDirty) setOrderDirty(false);
+                      if (!reorderMode) setLightboxId(null);
+                      // Leaving reorder with unsaved moves restores stored order.
+                      if (reorderMode) void reload();
                     }}
-                    className={cn(
-                      'group relative overflow-hidden rounded-xl border bg-[var(--rr-bg)] transition',
-                      reorderMode
-                        ? 'cursor-grab border-base active:cursor-grabbing hover:border-[var(--rr-accent)]'
-                        : 'cursor-pointer border-base hover:border-[var(--rr-accent)] hover:shadow-md',
-                    )}
-                    onClick={() => openLightbox(scan)}
+                    className={cn(reorderMode && 'shadow-sm')}
+                    title="Toggle drag-and-drop reordering"
                   >
-                    <div className="grid aspect-[3/4] place-items-center overflow-hidden bg-[var(--rr-surface-2)]">
-                      {previews[scan.id] ? (
-                        <img
-                          src={previews[scan.id]}
-                          alt={`Page ${scan.pageNo}`}
-                          className="max-h-full max-w-full object-contain"
-                          style={
-                            scan.enhancement?.startsWith('rotated 90') ||
-                            scan.enhancement?.startsWith('rotated 270')
-                              ? { transform: 'rotate(90deg)' }
-                              : undefined
-                          }
-                        />
-                      ) : (
-                        <div className="flex flex-col items-center gap-1.5 p-3 text-center">
-                          <FilePdf size={26} className="text-accent" />
-                          <span className="muted text-xs font-semibold">Page {scan.pageNo}</span>
-                          <span className="muted break-all text-[10px]">{scan.filename}</span>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Number + status — glanceable without opening anything. */}
-                    <div className="pointer-events-none absolute left-2 top-2 rounded-md bg-[var(--rr-surface)]/90 px-1.5 py-0.5 text-[11px] font-bold backdrop-blur">
-                      {reorderMode ? `#${index + 1}` : `Page ${scan.pageNo}`}
-                    </div>
-                    <div className="pointer-events-none absolute right-2 top-2 flex items-center gap-1.5 rounded-md bg-[var(--rr-surface)]/90 px-1.5 py-0.5 backdrop-blur">
-                      <span
-                        className={cn(
-                          'size-2 rounded-full',
-                          STATUS_DOT[scan.status] ?? 'bg-slate-400',
-                        )}
-                        title={scan.status}
-                      />
-                      <span className="muted text-[10px] font-semibold">
-                        {scan.status === 'Processing' ? 'OCR…' : `v${scan.version}`}
-                      </span>
-                    </div>
-
-                    {/* Hover: the expand icon — the one affordance on the card. */}
-                    {!reorderMode && (
-                      <div className="absolute inset-0 hidden items-center justify-center bg-slate-950/0 transition group-hover:bg-slate-950/10 sm:flex">
-                        <span className="grid size-11 translate-y-2 place-items-center rounded-full bg-[var(--rr-surface)] text-[var(--rr-text)] opacity-0 shadow-lg transition group-hover:translate-y-0 group-hover:opacity-100">
-                          <ArrowsOut size={19} />
-                        </span>
-                      </div>
-                    )}
-
-                    {reorderMode && (
-                      <div className="absolute bottom-2 right-2 rounded-md bg-[var(--rr-surface)]/90 px-1.5 py-0.5 text-[10px] font-semibold text-[var(--rr-muted)] backdrop-blur">
-                        drag to reorder
-                      </div>
-                    )}
-                  </div>
-                ))}
+                    {reorderMode ? 'Done reordering' : 'Reorder'}
+                  </Button>
+                )}
+                {reorderMode && (
+                  <Button
+                    size="sm"
+                    icon={<FloppyDisk size={15} />}
+                    disabled={!orderDirty || busy}
+                    onClick={saveOrder}
+                  >
+                    Save order
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  icon={<FilePdf size={15} />}
+                  disabled={busy || queue !== null || scans.length === 0}
+                  onClick={() => setBuildingPdf(true)}
+                  title="Build a deliverable PDF from the workspace pages"
+                >
+                  Build PDF
+                </Button>
               </div>
-            )}
-          </Card>
-        </div>
-
-        {/* ------------------------------------------------- versions sidebar */}
-        <div className="space-y-4">
-          <Card>
-            <div className="mb-3 flex items-center justify-between border-b border-base pb-3">
-              <div>
-                <p className="text-sm font-semibold">Document versions</p>
-                <p className="muted mt-0.5 text-xs">
-                  {unifiedVersions.length} version(s) · latest on top
-                </p>
-              </div>
-              <FilePdf size={20} className="text-accent" />
             </div>
 
-            {Boolean(draft) && (
-              <div className="mb-3 rounded-xl border-2 border-dashed border-amber-400 bg-amber-50/60 p-3 dark:border-amber-600/50 dark:bg-amber-950/20">
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div className="min-w-0 flex-1">
-                    <span className="block truncate text-xs font-semibold text-amber-900 dark:text-amber-200">
-                      {draft?.draftFilename ?? defaultBuildName}
-                    </span>
-                    <p className="mt-1 text-[11px] text-amber-800 dark:text-amber-300">
-                      Studio workspace · {scans.length} page(s)
-                      {orderDirty ? ' · unsaved order' : ''}
-                    </p>
+            {/* Background queue chip: upload progress only — extraction and OCR
+              continue in the background without blocking the grid. */}
+            {queue && (
+              <div className="flex items-center gap-3 rounded-xl border border-base bg-[var(--rr-bg)] p-3">
+                <Spinner size={16} className="animate-spin text-accent" />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-xs font-semibold">
+                    Adding pages — {queue.done + 1} of {queue.total}
+                    <span className="muted font-normal"> · {queue.label}</span>
+                  </p>
+                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--rr-surface-2)]">
+                    <div
+                      className="h-full rounded-full bg-[var(--rr-accent)] transition-all"
+                      style={{ width: `${Math.round((queue.done / queue.total) * 100)}%` }}
+                    />
                   </div>
-                  <Badge tone="warning">Unsaved draft</Badge>
                 </div>
-                <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-amber-200/60 pt-2.5 dark:border-amber-800/60">
-                  <Button
-                    size="sm"
-                    icon={<FilePdf size={13} />}
-                    onClick={() => setBuildingPdf(true)}
-                    disabled={busy || scans.length === 0}
-                    className="!h-7 !px-2 text-[11px]"
-                  >
-                    Build deliverable PDF
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => setConfirmDiscard(true)}
-                    disabled={busy}
-                    className="!h-7 !px-2 text-[11px] text-amber-900 hover:bg-amber-100 dark:text-amber-200 dark:hover:bg-amber-900/50"
-                  >
-                    Discard draft
-                  </Button>
-                </div>
+                <span className="muted text-[11px]">runs in the background</span>
               </div>
             )}
 
-            {unifiedVersions.length === 0 && scans.length === 0 && !draft ? (
-              <p className="muted py-4 text-center text-xs">No PDF versions registered yet.</p>
-            ) : (
-              <div className="space-y-3">
-                {unifiedVersions.map((version, index) => {
-                  const isCurrent = index === 0;
-                  const isPending = version.status === 'Pending approval';
-                  return (
-                    <div
-                      key={version.id}
-                      className={cn(
-                        'rounded-xl border p-3 transition',
-                        versionPreview?.version.id === version.id
-                          ? 'border-[var(--rr-accent)] bg-accent-soft/30'
-                          : 'border-base bg-[var(--rr-surface)]',
-                      )}
+            {hasProcessing && !queue && (
+              <div className="flex items-center gap-2.5 rounded-xl border border-base bg-[var(--rr-bg)] p-3 text-xs">
+                <Spinner size={15} className="animate-spin text-amber-500" />
+                <p className="font-medium">
+                  {scans.filter((scan) => scan.status === 'Processing').length} page(s) are being
+                  OCR-processed in the background — their text arrives here on its own.
+                </p>
+              </div>
+            )}
+
+            <Card>
+              {scans.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-base p-8 text-center">
+                  <FilePdf size={28} className="mx-auto text-accent" />
+                  <p className="mt-3 text-sm font-semibold">No pages in the workspace</p>
+                  <p className="muted mx-auto mt-1 max-w-md text-xs leading-5">
+                    Add images or multi-page PDFs — a PDF is unpacked into pages automatically, and
+                    every page's OCR runs in the background. Or load any stored version from the
+                    right to edit its pages.
+                  </p>
+                  {canUploadPages && (
+                    <Button
+                      size="sm"
+                      className="mt-4"
+                      icon={<Plus size={15} />}
+                      onClick={() => uploadRef.current?.click()}
+                      disabled={queue !== null}
                     >
-                      <div className="flex flex-wrap items-start justify-between gap-2">
-                        <div className="min-w-0 flex-1">
-                          <span className="block truncate text-xs font-semibold">
-                            {version.filename}
-                          </span>
-                          <p className="muted mt-1 text-[11px]">
-                            {version.versionLabel} ·{' '}
-                            {new Date(version.updatedAt).toLocaleDateString()}
-                            {version.pageCount ? ` · ${version.pageCount} page(s)` : ''}
-                            {version.sizeBytes
-                              ? ` · ${Math.max(1, Math.round(version.sizeBytes / 1024))} KB`
-                              : ''}
-                          </p>
-                        </div>
-                        <div className="flex flex-col items-end gap-1">
-                          {isCurrent && <Badge tone="success">Current version</Badge>}
-                          <Badge
-                            tone={
-                              version.status === 'Approved'
-                                ? 'success'
-                                : version.status === 'Rejected'
-                                  ? 'danger'
-                                  : 'warning'
-                            }
-                          >
-                            {version.status}
-                          </Badge>
-                        </div>
-                      </div>
-
-                      {version.reviewNote && (
-                        <p className="muted mt-1.5 rounded bg-[var(--rr-bg)] p-2 text-[10px]">
-                          Note: {version.reviewNote}
-                        </p>
+                      Add scanned pages
+                    </Button>
+                  )}
+                </div>
+              ) : (
+                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                  {scans.map((scan, index) => (
+                    <div
+                      key={scan.id}
+                      draggable={reorderMode}
+                      onDragStart={() => (dragId.current = scan.id)}
+                      onDragOver={(event) => event.preventDefault()}
+                      onDrop={() => {
+                        if (reorderMode && dragId.current && dragId.current !== scan.id)
+                          move(dragId.current, scan.id);
+                        dragId.current = null;
+                      }}
+                      className={cn(
+                        'group relative overflow-hidden rounded-xl border bg-[var(--rr-bg)] transition',
+                        reorderMode
+                          ? 'cursor-grab border-base active:cursor-grabbing hover:border-[var(--rr-accent)]'
+                          : 'cursor-pointer border-base hover:border-[var(--rr-accent)] hover:shadow-md',
                       )}
-
-                      <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-base pt-2.5">
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          onClick={() => void openVersionPreview(version)}
-                          disabled={busy}
-                          className="!h-7 !px-2 text-[11px]"
-                        >
-                          Preview
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          icon={<PencilSimple size={13} />}
-                          onClick={() => {
-                            if (scans.length > 0 && draft?.sourceVersionId !== version.id)
-                              setConfirmUnpack(version);
-                            else void unpackVersionIntoStudio(version);
-                          }}
-                          disabled={busy}
-                          className="!h-7 !px-2 text-[11px]"
-                          title="Load this PDF's pages into the studio grid"
-                        >
-                          Edit in studio
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          icon={<DownloadSimple size={13} />}
-                          className="!h-7 !px-2 text-[11px]"
-                          onClick={async () => {
-                            const blob =
-                              version.source === 'document'
-                                ? await service.files.documentBlob(fileId!, version.id)
-                                : await service.digitization.pdfBlob(version.id);
-                            const url = URL.createObjectURL(blob);
-                            const a = document.createElement('a');
-                            a.href = url;
-                            a.download = version.filename;
-                            a.click();
-                            URL.revokeObjectURL(url);
-                          }}
-                        >
-                          Download
-                        </Button>
-                        {canReview && version.rawDeriv && isPending && (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => void reviewPdf(version.rawDeriv!, 'Approved')}
-                              className="focus-ring ml-auto inline-flex h-7 items-center gap-1 rounded-md bg-[var(--rr-success)] px-2 text-[11px] font-semibold text-white"
-                            >
-                              <CheckCircle size={12} /> Approve
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setRejectingPdf(version.rawDeriv!)}
-                              className="focus-ring inline-flex h-7 items-center gap-1 rounded-md bg-[color-mix(in_srgb,var(--rr-danger)_10%,transparent)] px-2 text-[11px] font-semibold text-[var(--rr-danger)]"
-                            >
-                              <XCircle size={12} /> Reject
-                            </button>
-                          </>
+                      onClick={() => openLightbox(scan)}
+                    >
+                      <div className="grid aspect-[3/4] place-items-center overflow-hidden bg-[var(--rr-surface-2)]">
+                        {previews[scan.id] ? (
+                          <img
+                            src={previews[scan.id]}
+                            alt={`Page ${scan.pageNo}`}
+                            className="max-h-full max-w-full object-contain"
+                            style={
+                              scan.enhancement?.startsWith('rotated 90') ||
+                              scan.enhancement?.startsWith('rotated 270')
+                                ? { transform: 'rotate(90deg)' }
+                                : undefined
+                            }
+                          />
+                        ) : (
+                          <div className="flex flex-col items-center gap-1.5 p-3 text-center">
+                            <FilePdf size={26} className="text-accent" />
+                            <span className="muted text-xs font-semibold">Page {scan.pageNo}</span>
+                            <span className="muted break-all text-[10px]">{scan.filename}</span>
+                          </div>
                         )}
                       </div>
+
+                      {/* Number + status — glanceable without opening anything. */}
+                      <div className="pointer-events-none absolute left-2 top-2 rounded-md bg-[var(--rr-surface)]/90 px-1.5 py-0.5 text-[11px] font-bold backdrop-blur">
+                        {reorderMode ? `#${index + 1}` : `Page ${scan.pageNo}`}
+                      </div>
+                      <div className="pointer-events-none absolute right-2 top-2 flex items-center gap-1.5 rounded-md bg-[var(--rr-surface)]/90 px-1.5 py-0.5 backdrop-blur">
+                        <span
+                          className={cn(
+                            'size-2 rounded-full',
+                            STATUS_DOT[scan.status] ?? 'bg-slate-400',
+                          )}
+                          title={scan.status}
+                        />
+                        <span className="muted text-[10px] font-semibold">
+                          {scan.status === 'Processing' ? 'OCR…' : `v${scan.version}`}
+                        </span>
+                      </div>
+
+                      {/* Hover: the expand icon — the one affordance on the card. */}
+                      {!reorderMode && (
+                        <div className="absolute inset-0 hidden items-center justify-center bg-slate-950/0 transition group-hover:bg-slate-950/10 sm:flex">
+                          <span className="grid size-11 translate-y-2 place-items-center rounded-full bg-[var(--rr-surface)] text-[var(--rr-text)] opacity-0 shadow-lg transition group-hover:translate-y-0 group-hover:opacity-100">
+                            <ArrowsOut size={19} />
+                          </span>
+                        </div>
+                      )}
+
+                      {reorderMode && (
+                        <div className="absolute bottom-2 right-2 rounded-md bg-[var(--rr-surface)]/90 px-1.5 py-0.5 text-[10px] font-semibold text-[var(--rr-muted)] backdrop-blur">
+                          drag to reorder
+                        </div>
+                      )}
                     </div>
-                  );
-                })}
+                  ))}
+                </div>
+              )}
+            </Card>
+          </div>
+
+          {/* ------------------------------------------------- versions sidebar */}
+          <div className="space-y-4">
+            <Card>
+              <div className="mb-3 flex items-center justify-between border-b border-base pb-3">
+                <div>
+                  <p className="text-sm font-semibold">Document versions</p>
+                  <p className="muted mt-0.5 text-xs">
+                    {unifiedVersions.length} version(s) · latest on top
+                  </p>
+                </div>
+                <FilePdf size={20} className="text-accent" />
               </div>
-            )}
-          </Card>
+
+              {Boolean(draft) && (
+                <div className="mb-3 rounded-xl border-2 border-dashed border-amber-400 bg-amber-50/60 p-3 dark:border-amber-600/50 dark:bg-amber-950/20">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <span className="block truncate text-xs font-semibold text-amber-900 dark:text-amber-200">
+                        {draft?.draftFilename ?? defaultBuildName}
+                      </span>
+                      <p className="mt-1 text-[11px] text-amber-800 dark:text-amber-300">
+                        Studio workspace · {scans.length} page(s)
+                        {orderDirty ? ' · unsaved order' : ''}
+                      </p>
+                    </div>
+                    <Badge tone="warning">Unsaved draft</Badge>
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-amber-200/60 pt-2.5 dark:border-amber-800/60">
+                    <Button
+                      size="sm"
+                      icon={<FilePdf size={13} />}
+                      onClick={() => setBuildingPdf(true)}
+                      disabled={busy || scans.length === 0}
+                      className="!h-7 !px-2 text-[11px]"
+                    >
+                      Build deliverable PDF
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setConfirmDiscard(true)}
+                      disabled={busy}
+                      className="!h-7 !px-2 text-[11px] text-amber-900 hover:bg-amber-100 dark:text-amber-200 dark:hover:bg-amber-900/50"
+                    >
+                      Discard draft
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {unifiedVersions.length === 0 && scans.length === 0 && !draft ? (
+                <p className="muted py-4 text-center text-xs">No PDF versions registered yet.</p>
+              ) : (
+                <div className="space-y-3">
+                  {unifiedVersions.map((version, index) => {
+                    const isCurrent = index === 0;
+                    const isPending = version.status === 'Pending approval';
+                    return (
+                      <div
+                        key={documentVersionKey(version)}
+                        className={cn(
+                          'rounded-xl border p-3 transition',
+                          params.get('source') === documentVersionKey(version)
+                            ? 'border-[var(--rr-accent)] bg-accent-soft/30'
+                            : 'border-base bg-[var(--rr-surface)]',
+                        )}
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <span className="block truncate text-xs font-semibold">
+                              {version.filename}
+                            </span>
+                            <p className="muted mt-1 text-[11px]">
+                              {version.versionLabel} ·{' '}
+                              {new Date(version.updatedAt).toLocaleDateString()}
+                              {version.pageCount ? ` · ${version.pageCount} page(s)` : ''}
+                              {version.sizeBytes
+                                ? ` · ${Math.max(1, Math.round(version.sizeBytes / 1024))} KB`
+                                : ''}
+                            </p>
+                          </div>
+                          <div className="flex flex-col items-end gap-1">
+                            {isCurrent && <Badge tone="success">Current version</Badge>}
+                            <Badge
+                              tone={
+                                version.status === 'Approved'
+                                  ? 'success'
+                                  : version.status === 'Rejected'
+                                    ? 'danger'
+                                    : 'warning'
+                              }
+                            >
+                              {version.status}
+                            </Badge>
+                          </div>
+                        </div>
+
+                        {version.reviewNote && (
+                          <p className="muted mt-1.5 rounded bg-[var(--rr-bg)] p-2 text-[10px]">
+                            Note: {version.reviewNote}
+                          </p>
+                        )}
+
+                        <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-base pt-2.5">
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() =>
+                              navigate(
+                                `/files/${fileId}/preview?v=${encodeURIComponent(documentVersionKey(version))}&from=studio`,
+                              )
+                            }
+                            disabled={busy}
+                            className="!h-7 !px-2 text-[11px]"
+                          >
+                            Preview
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            icon={<PencilSimple size={13} />}
+                            onClick={() => {
+                              if (
+                                scans.length > 0 &&
+                                draft?.sourceVersionId !== documentVersionKey(version)
+                              )
+                                setConfirmUnpack(version);
+                              else void unpackVersionIntoStudio(version);
+                            }}
+                            disabled={busy}
+                            className="!h-7 !px-2 text-[11px]"
+                            title="Load this PDF's pages into the studio grid"
+                          >
+                            Edit in studio
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            icon={<DownloadSimple size={13} />}
+                            className="!h-7 !px-2 text-[11px]"
+                            onClick={async () => {
+                              const blob =
+                                version.source === 'document'
+                                  ? await service.files.documentBlob(fileId!, version.id)
+                                  : await service.digitization.pdfBlob(version.id);
+                              const url = URL.createObjectURL(blob);
+                              const a = document.createElement('a');
+                              a.href = url;
+                              a.download = version.filename;
+                              a.click();
+                              URL.revokeObjectURL(url);
+                            }}
+                          >
+                            Download
+                          </Button>
+                          {canReview && version.rawDeriv && isPending && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => void reviewPdf(version.rawDeriv!, 'Approved')}
+                                className="focus-ring ml-auto inline-flex h-7 items-center gap-1 rounded-md bg-[var(--rr-success)] px-2 text-[11px] font-semibold text-white"
+                              >
+                                <CheckCircle size={12} /> Approve
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setRejectingPdf(version.rawDeriv!)}
+                                className="focus-ring inline-flex h-7 items-center gap-1 rounded-md bg-[color-mix(in_srgb,var(--rr-danger)_10%,transparent)] px-2 text-[11px] font-semibold text-[var(--rr-danger)]"
+                              >
+                                <XCircle size={12} /> Reject
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </Card>
+          </div>
         </div>
-      </div>
+      )}
+      {lightboxId && !lightboxScan && (
+        <Button size="sm" variant="secondary" onClick={() => setLightboxId(null)}>
+          Back to Studio
+        </Button>
+      )}
 
       {/* ------------------------------------------------ dedicated full-page preview */}
       {lightboxScan && (
-        <div
-          className="fixed inset-0 z-[60] flex flex-col bg-slate-950 text-white"
-          role="dialog"
-          aria-modal="true"
-        >
+        <div className="flex min-h-[calc(100dvh-15rem)] flex-col overflow-hidden rounded-xl bg-slate-950 text-white">
           {/* Header bar: back to grid + page identity + pager + close */}
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-slate-950/95 px-4 py-2.5">
             <div className="flex items-center gap-3">
@@ -1148,7 +1073,7 @@ export function ScanStudioPage() {
           </div>
 
           {/* Body: page canvas + optional OCR panel */}
-          <div className="flex min-h-0 flex-1 overflow-hidden">
+          <div className="flex min-h-[55dvh] flex-1 overflow-hidden">
             {/* The page image canvas with zoom & fit controls */}
             <div className="relative flex min-w-0 flex-1 items-stretch">
               {previews[lightboxScan.id] ? (
@@ -1352,74 +1277,6 @@ export function ScanStudioPage() {
             >
               <Trash size={15} />
             </button>
-          </div>
-        </div>
-      )}
-
-      {/* Version preview overlay (stored PDFs read in their own reader). */}
-      {versionPreview && (
-        <div
-          className="fixed inset-0 z-[60] flex flex-col bg-slate-950/90 p-3"
-          role="dialog"
-          aria-modal="true"
-          onKeyDown={(event) => {
-            if (event.key === 'ArrowLeft') {
-              event.preventDefault();
-              stepVersionPreview(-1);
-            } else if (event.key === 'ArrowRight') {
-              event.preventDefault();
-              stepVersionPreview(1);
-            }
-          }}
-        >
-          <div className="flex items-center justify-between gap-3 pb-3 text-white">
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold">{versionPreview.version.filename}</p>
-              <p className="muted mt-0.5 text-xs text-white/70">
-                {versionPreview.version.versionLabel} ·{' '}
-                {new Date(versionPreview.version.updatedAt).toLocaleString()}
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button
-                size="sm"
-                variant="secondary"
-                icon={<PencilSimple size={14} />}
-                onClick={() => {
-                  const version = versionPreview.version;
-                  closeVersionPreview();
-                  if (scans.length > 0 && draft?.sourceVersionId !== version.id)
-                    setConfirmUnpack(version);
-                  else void unpackVersionIntoStudio(version);
-                }}
-                disabled={busy}
-              >
-                Edit in studio
-              </Button>
-              <button
-                type="button"
-                onClick={closeVersionPreview}
-                className="focus-ring grid size-10 place-items-center rounded-lg hover:bg-white/10"
-                aria-label="Close preview"
-              >
-                <X size={20} />
-              </button>
-            </div>
-          </div>
-          <div className="min-h-0 flex-1 overflow-hidden rounded-xl bg-white">
-            <Suspense
-              fallback={
-                <div className="grid h-full place-items-center text-sm muted">
-                  Loading PDF reader…
-                </div>
-              }
-            >
-              <PdfDocumentViewer
-                src={versionPreview.url}
-                filename={versionPreview.version.filename}
-                heightClassName="h-full"
-              />
-            </Suspense>
           </div>
         </div>
       )}

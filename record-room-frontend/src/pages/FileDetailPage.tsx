@@ -45,7 +45,11 @@ import {
   UploadMapModal,
 } from '../components/files/FileActionModals';
 import { ScanStudioPage } from './ScanStudioPage';
-import { getStudioDraft, type UnifiedDocumentVersion } from '../lib/studioDraft';
+import {
+  documentVersionKey,
+  getStudioDraft,
+  type UnifiedDocumentVersion,
+} from '../lib/studioDraft';
 import { useFlash, useQuery, useService, useSession } from '../hooks/useService';
 import { useFeatures } from '../lib/features';
 import { buildPayload } from '../lib/barcode';
@@ -70,7 +74,7 @@ const EMPTY_MAPS: MapUpload[] = [];
 const EMPTY_ISSUE_PAGE: Page<IssueRecord> = { items: [], total: 0, page: 1, pageSize: 500 };
 
 type Dialog = 'upload' | 'mapUpload' | 'move' | 'deleteFile' | null;
-type TabKey = 'scan' | 'details' | 'ocr' | 'studio' | 'map';
+type TabKey = 'preview' | 'scan' | 'details' | 'ocr' | 'studio' | 'map';
 
 /** One pending destructive action, confirmed through the shared dialog. */
 type PendingRemoval =
@@ -88,18 +92,21 @@ export function FileDetailPage() {
   const { barcode } = useFeatures();
   const { success, danger } = useFlash();
 
-  const tab: TabKey = pathname.endsWith('/studio')
-    ? 'studio'
-    : pathname.endsWith('/map')
-      ? 'map'
-      : pathname.endsWith('/details')
-        ? 'details'
-        : pathname.endsWith('/ocr')
-          ? 'ocr'
-          : 'scan';
+  const tab: TabKey = pathname.endsWith('/preview')
+    ? 'preview'
+    : pathname.endsWith('/studio')
+      ? 'studio'
+      : pathname.endsWith('/map')
+        ? 'map'
+        : pathname.endsWith('/details')
+          ? 'details'
+          : pathname.endsWith('/ocr')
+            ? 'ocr'
+            : 'scan';
 
   const canEdit = allowed('files.edit');
   const canStudio = allowed('studio.use');
+  const canUploadDocument = allowed('digitization.upload');
   const canUploadMap = canEdit || allowed('digitization.upload');
   const canCompress = allowed('digitization.upload');
   // The API gates every document-version delete on files.edit (destructive
@@ -131,12 +138,14 @@ export function FileDetailPage() {
     () => service.files.listDocuments(fileId),
     [fileId],
     EMPTY_DOCS,
+    ['files'],
   );
 
   const { data: deliverables, reload: reloadDeliverables } = useQuery(
     () => (fileId ? service.digitization.listPdfs(fileId) : Promise.resolve([])),
     [fileId],
     [] as DocumentDerivative[],
+    ['digitization'],
   );
 
   const { data: scanPages } = useQuery(
@@ -230,11 +239,22 @@ export function FileDetailPage() {
   ].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 
   const picked = params.get('v');
-  const selectedVersion = allVersions.find((v) => v.id === picked) ?? allVersions[0];
+  const selectedVersion =
+    allVersions.find((v) => documentVersionKey(v) === picked) ??
+    allVersions.find((v) => v.id === picked) ??
+    allVersions[0];
   const selectedMap =
     maps.find((row) => row.id === picked) ?? maps.find((row) => row.hasDocument) ?? maps[0];
 
-  const pick = (id: string) => setParams({ v: id }, { replace: true });
+  const pick = (id: string) =>
+    setParams(
+      (previous) => {
+        const next = new URLSearchParams(previous);
+        next.set('v', id);
+        return next;
+      },
+      { replace: true },
+    );
 
   const doneAction = (msg: string) => {
     setDialog(null);
@@ -371,6 +391,97 @@ export function FileDetailPage() {
     reloadMovements();
   };
 
+  const base = `/files/${file.id}`;
+  const selectedQuery = selectedVersion
+    ? `?v=${encodeURIComponent(documentVersionKey(selectedVersion))}`
+    : '';
+  const versionSelect = (workspace = false) => (
+    <label className="flex min-w-0 items-center gap-2 text-xs font-semibold">
+      Version
+      <select
+        value={
+          workspace && picked === 'workspace'
+            ? 'workspace'
+            : selectedVersion
+              ? documentVersionKey(selectedVersion)
+              : 'workspace'
+        }
+        onChange={(event) => pick(event.target.value)}
+        className="focus-ring h-9 min-w-0 max-w-full rounded-lg border border-base bg-[var(--rr-bg)] px-2.5 text-xs outline-none sm:max-w-md"
+      >
+        {allVersions.map((version) => (
+          <option key={documentVersionKey(version)} value={documentVersionKey(version)}>
+            {version.filename} · {version.versionLabel}
+          </option>
+        ))}
+        {workspace && scanPages.length > 0 && <option value="workspace">Studio workspace</option>}
+      </select>
+    </label>
+  );
+
+  const renderVersion = (version: UnifiedDocumentVersion) => (
+    <PageOcrViewer
+      key={`${file.id}/${documentVersionKey(version)}`}
+      docKey={documentVersionKey(version)}
+      load={() =>
+        version.source === 'document'
+          ? service.files.documentBlob(file.id, version.id)
+          : service.digitization.pdfBlob(version.id)
+      }
+      filename={version.filename}
+      attachment={version.source === 'document' ? { fileId: file.id, id: version.id } : undefined}
+      meta={
+        <>
+          <Badge tone={version.source === 'document' ? 'info' : 'neutral'}>
+            {version.source === 'document' ? 'Scan PDF' : 'Built PDF'}
+          </Badge>
+          {version.source === 'derivative' && version.status !== 'Approved' && (
+            <Badge tone={version.status === 'Rejected' ? 'danger' : 'warning'}>
+              {version.status}
+            </Badge>
+          )}
+          <span className="muted text-xs">
+            {version.versionLabel}
+            {version.sizeBytes ? ` · ${formatDocumentSize(version.sizeBytes)}` : ''}
+            {version.pageCount ? ` · ${describePageCount(version.pageCount)}` : ''}
+          </span>
+        </>
+      }
+      showOcr={ocrOpen || tab === 'ocr'}
+      onToggleOcr={tab === 'ocr' ? undefined : setOcrOpen}
+      ocrWidth={tab === 'scan' ? 'lg:w-[340px]' : 'lg:w-[min(36%,420px)]'}
+      canEdit={allowed('digitization.upload')}
+      editMode={tab === 'ocr'}
+      ocrTabHref={tab === 'ocr' ? undefined : `${base}/ocr${selectedQuery}`}
+      fullPreviewHref={tab === 'preview' ? undefined : `${base}/preview${selectedQuery}`}
+    />
+  );
+
+  if (tab === 'preview') {
+    const fromStudio = params.get('from') === 'studio' && canStudio;
+    return (
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Link
+            className="focus-ring rounded text-sm font-semibold text-accent"
+            to={fromStudio ? `${base}/studio` : `${base}/scan${selectedQuery}`}
+          >
+            {fromStudio ? '← Back to Studio' : '← Back to document'}
+          </Link>
+          {selectedVersion && versionSelect()}
+        </div>
+        {selectedVersion ? (
+          renderVersion(selectedVersion)
+        ) : (
+          <EmptyState
+            title="No document to preview"
+            description="Upload a PDF from the Document tab."
+          />
+        )}
+      </div>
+    );
+  }
+
   // Segmented tab control: one glanceable row, active tab filled, counts on
   // the tabs that have them.
   const tabLink = (
@@ -460,14 +571,14 @@ export function FileDetailPage() {
       {/* Unified Tab Row */}
       <div className="no-scrollbar flex gap-1 overflow-x-auto rounded-xl border border-base bg-[var(--rr-bg)] p-1.5">
         {tabLink(
-          `/files/${file.id}/scan`,
+          `${base}/scan${selectedQuery}`,
           'Document',
           docs.length + deliverables.length,
           FileText,
           tab === 'scan',
         )}
         {tabLink(`/files/${file.id}/details`, 'Details', undefined, InfoIcon, tab === 'details')}
-        {tabLink(`/files/${file.id}/ocr`, 'OCR', scanPages.length, TextAaIcon, tab === 'ocr')}
+        {tabLink(`${base}/ocr${selectedQuery}`, 'OCR', undefined, TextAaIcon, tab === 'ocr')}
         {canStudio &&
           tabLink(
             `/files/${file.id}/studio`,
@@ -487,100 +598,25 @@ export function FileDetailPage() {
             ocrOpen ? 'lg:grid-cols-[minmax(0,1fr)]' : 'lg:grid-cols-[minmax(0,1fr)_320px]',
           )}
         >
-          {/* OCR open: the version picker moves to a sleek dropdown on top of the
-              preview, and the right-hand version sidebar leaves — the preview
-              gets wider and the OCR panel opens on its right without shrinking. */}
-          {ocrOpen && (
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-base bg-[var(--rr-surface)] p-2.5 shadow-sm">
-              <div className="flex min-w-0 flex-1 items-center gap-2">
-                <span className="whitespace-nowrap text-xs font-semibold text-[var(--rr-muted)]">
-                  Version:
-                </span>
-                <select
-                  id="preview-version"
-                  value={selectedVersion?.id ?? ''}
-                  onChange={(event) => pick(event.target.value)}
-                  className="focus-ring h-8 max-w-md rounded-lg border border-base bg-[var(--rr-bg)] px-2.5 text-xs font-semibold outline-none"
-                  aria-label="Select document version"
+          {ocrOpen && selectedVersion && (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-base bg-[var(--rr-surface)] p-2.5">
+              {versionSelect()}
+              {canUploadDocument && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => setDialog('upload')}
+                  icon={<UploadSimple size={14} />}
                 >
-                  {allVersions.map((version, index) => (
-                    <option key={version.id} value={version.id}>
-                      {index === 0 ? '★ Current · ' : ''}
-                      {version.filename} ({version.versionLabel}
-                      {version.pageCount ? ` · ${version.pageCount}p` : ''})
-                    </option>
-                  ))}
-                </select>
-                {(() => {
-                  const draft = getStudioDraft(file.id);
-                  if (!draft) return null;
-                  return (
-                    <button
-                      type="button"
-                      onClick={() => navigate(`/files/${file.id}/studio`)}
-                      className="focus-ring inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-900 transition hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200"
-                      title="Open draft in studio"
-                    >
-                      <Badge tone="warning">Studio draft</Badge>
-                      <span className="hidden sm:inline">Edit in studio →</span>
-                    </button>
-                  );
-                })()}
-              </div>
-              <div className="flex items-center gap-2">
-                {canEdit && (
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    className="!h-8 !px-2.5 text-xs"
-                    onClick={() => setDialog('upload')}
-                    icon={<UploadSimple size={14} />}
-                  >
-                    Upload PDF
-                  </Button>
-                )}
-              </div>
+                  Upload PDF
+                </Button>
+              )}
             </div>
           )}
 
-          {/* Main Viewer Area (Full Height & Page-size Responsive) */}
           <div className="min-w-0">
             {selectedVersion ? (
-              <PageOcrViewer
-                docKey={selectedVersion.id}
-                load={() =>
-                  selectedVersion.source === 'document'
-                    ? service.files.documentBlob(file.id, selectedVersion.id)
-                    : service.digitization.pdfBlob(selectedVersion.id)
-                }
-                filename={selectedVersion.filename}
-                meta={
-                  <>
-                    <Badge tone={selectedVersion.source === 'document' ? 'info' : 'neutral'}>
-                      {selectedVersion.source === 'document' ? 'Scan PDF' : 'Built PDF'}
-                    </Badge>
-                    {selectedVersion.source === 'derivative' &&
-                      selectedVersion.status !== 'Approved' && (
-                        <Badge tone={selectedVersion.status === 'Rejected' ? 'danger' : 'warning'}>
-                          {selectedVersion.status}
-                        </Badge>
-                      )}
-                    <span className="muted text-xs">
-                      {selectedVersion.versionLabel}
-                      {selectedVersion.sizeBytes
-                        ? ` · ${formatDocumentSize(selectedVersion.sizeBytes)}`
-                        : ''}
-                      {selectedVersion.pageCount
-                        ? ` · ${describePageCount(selectedVersion.pageCount)}`
-                        : ''}
-                    </span>
-                  </>
-                }
-                scanPages={scanPages}
-                fileId={file.id}
-                showOcr={ocrOpen}
-                onToggleOcr={setOcrOpen}
-              />
+              renderVersion(selectedVersion)
             ) : (
               <Card>
                 <EmptyState
@@ -588,7 +624,7 @@ export function FileDetailPage() {
                   description="Upload a full-PDF scan for this document, or open Edit in studio to scan pages and build a deliverable PDF."
                   action={
                     <div className="flex flex-wrap gap-2">
-                      {canEdit && (
+                      {canUploadDocument && (
                         <Button
                           size="sm"
                           onClick={() => setDialog('upload')}
@@ -623,7 +659,7 @@ export function FileDetailPage() {
                     <p className="text-sm font-semibold">Document versions</p>
                     <p className="muted text-xs">{allVersions.length} stored version(s)</p>
                   </div>
-                  {canEdit && (
+                  {canUploadDocument && (
                     <Button
                       size="sm"
                       variant="secondary"
@@ -675,12 +711,14 @@ export function FileDetailPage() {
                 ) : (
                   <ul className="divide-y divide-[var(--rr-border)]">
                     {allVersions.map((version, index) => {
-                      const isSelected = selectedVersion?.id === version.id;
+                      const versionKey = documentVersionKey(version);
+                      const isSelected =
+                        selectedVersion && documentVersionKey(selectedVersion) === versionKey;
                       const isCurrent = index === 0;
 
                       return (
                         <li
-                          key={version.id}
+                          key={versionKey}
                           className={cn(
                             'rounded-xl p-3 transition',
                             isSelected
@@ -691,7 +729,7 @@ export function FileDetailPage() {
                           <div className="flex items-start justify-between gap-2">
                             <button
                               type="button"
-                              onClick={() => pick(version.id)}
+                              onClick={() => pick(versionKey)}
                               className="min-w-0 flex-1 text-left focus:outline-none"
                             >
                               <div className="flex flex-wrap items-center gap-1.5">
@@ -769,7 +807,11 @@ export function FileDetailPage() {
                                   size="sm"
                                   variant="ghost"
                                   className="!h-7 !px-2 text-[11px]"
-                                  onClick={() => navigate(`/files/${file.id}/studio`)}
+                                  onClick={() =>
+                                    navigate(
+                                      `${base}/studio?source=${encodeURIComponent(versionKey)}`,
+                                    )
+                                  }
                                   title="Open this file in studio"
                                 >
                                   Edit in studio
@@ -1086,7 +1128,20 @@ export function FileDetailPage() {
       )}
 
       {/* TAB 3: OCR text of the scanned pages */}
-      {tab === 'ocr' && <OcrPanel fileId={file.id} />}
+      {tab === 'ocr' && (
+        <div className="space-y-3">
+          {(allVersions.length > 0 || scanPages.length > 0) && (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-base bg-[var(--rr-surface)] p-2.5">
+              {versionSelect(true)}
+            </div>
+          )}
+          {selectedVersion && picked !== 'workspace' ? (
+            renderVersion(selectedVersion)
+          ) : (
+            <OcrPanel key={file.id} pages={scanPages} />
+          )}
+        </div>
+      )}
 
       {/* TAB 4: Edit in studio */}
       {tab === 'studio' && (

@@ -159,6 +159,7 @@ export function App() {
             <Route path="/files/:fileId" element={<FileDetailPage />} />
             <Route path="/files/:fileId/details" element={<FileDetailPage />} />
             <Route path="/files/:fileId/scan" element={<FileDetailPage />} />
+            <Route path="/files/:fileId/preview" element={<FileDetailPage />} />
             <Route path="/files/:fileId/ocr" element={<FileDetailPage />} />
             <Route path="/files/:fileId/studio" element={guarded(FileDetailPage, 'studio.use')} />
             <Route path="/files/:fileId/map" element={<FileDetailPage />} />

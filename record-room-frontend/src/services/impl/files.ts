@@ -18,7 +18,6 @@ import {
   getLocalDocumentOcr,
   listLocalRecordDocuments,
   localRecordDocumentBlob,
-  setLocalDocumentOcr,
   setLocalDocumentOcrPage,
 } from './document-storage';
 
@@ -455,7 +454,7 @@ export const filesService: FilesApi = {
     return listLocalRecordDocuments(fileId);
   },
 
-  async uploadDocument(fileId, file) {
+  async uploadDocument(fileId, file, importToStudio) {
     const record = await filesService.get(fileId);
     if (!record) return err('File not found.', 'fileId');
     const result = await addLocalRecordDocument(fileId, record.fileBarcode, file);
@@ -471,6 +470,11 @@ export const filesService: FilesApi = {
         }),
       );
     }
+    if (result.ok && importToStudio && typeof document !== 'undefined') {
+      void importLocalPdf(fileId, file, record.documentSize ?? 'A4').catch((error: unknown) => {
+        console.error('Could not import PDF pages into Studio.', error);
+      });
+    }
     return result;
   },
 
@@ -479,36 +483,18 @@ export const filesService: FilesApi = {
   },
 
   async documentOcr(fileId, documentId) {
-    const cached = getLocalDocumentOcr(documentId);
-    if (cached) return cached;
-
-    const file = await filesService.get(fileId);
     const docs = await filesService.listDocuments(fileId);
-    const targetDoc = docs.find((d) => d.id === documentId);
-    const pageCount = targetDoc?.pageCount ?? 8;
-    const map: Record<number, string> = {};
-
-    // Populate from known matching scan pages if any
-    const scans = file
-      ? store
-          .getState()
-          .scanPages.filter((row) => row.fileBarcode === file.fileBarcode && row.ocrText?.trim())
-      : [];
-    for (let p = 1; p <= pageCount; p++) {
-      const match = scans.find((s) => (s.pageIndex ?? s.pageNo) === p);
-      map[p] =
-        match?.ocrText?.trim() ||
-        (targetDoc
-          ? `Page ${p} of ${targetDoc.filename} (${file?.fileNumber ?? 'record'}).`
-          : `Page ${p}.`);
-    }
-
-    setLocalDocumentOcr(documentId, map);
-    return map;
+    return docs.some((doc) => doc.id === documentId) ? (getLocalDocumentOcr(documentId) ?? {}) : {};
   },
 
-  async saveDocumentOcr(_fileId, documentId, pageNo, text) {
+  async saveDocumentOcr(fileId, documentId, pageNo, text) {
+    const doc = (await filesService.listDocuments(fileId)).find((row) => row.id === documentId);
+    if (!doc) return err('Document not found.', 'documentId');
+    if (pageNo < 1 || (doc.pageCount && pageNo > doc.pageCount)) {
+      return err('Page is outside this document.', 'pageNo');
+    }
     setLocalDocumentOcrPage(documentId, pageNo, text);
+    store.update(() => {});
     return ok(true);
   },
 
@@ -578,3 +564,17 @@ export const filesService: FilesApi = {
     return ok(true);
   },
 };
+
+async function importLocalPdf(fileId: string, file: File, documentSize: string) {
+  const [{ extractPdfPagesToImages }, { scansService }] = await Promise.all([
+    import('../../lib/pdf-unpack'),
+    import('./scans'),
+  ]);
+  const pages = await extractPdfPagesToImages(file, file.name);
+  for (const image of pages) {
+    const scans = await scansService.list(fileId);
+    const pageNo = scans.reduce((max, row) => Math.max(max, row.pageNo), 0) + 1;
+    const row = await scansService.add(fileId, { pageNo, filename: image.name, documentSize });
+    if (row.ok) await scansService.addDocument(row.value.id, image);
+  }
+}

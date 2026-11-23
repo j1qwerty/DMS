@@ -1207,6 +1207,19 @@ namespace RecordRoom.Api.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
+                    b.Property<bool>("ImportToStudio")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("OcrPagesJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("OcrProcessedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("OcrRevision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("int");
+
                     b.Property<string>("OriginalFileName")
                         .IsRequired()
                         .HasMaxLength(255)

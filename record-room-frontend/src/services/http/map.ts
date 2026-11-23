@@ -449,6 +449,7 @@ export function toRecordFileDocument(dto: Record<string, unknown>): RecordFileDo
     uploadedAt: str(dto.uploadedAt),
     uploadedBy: str(dto.uploadedBy),
     pageCount: dto.pageCount == null ? undefined : num(dto.pageCount),
+    studioImportPending: dto.studioImportPending === true,
   };
 }
 

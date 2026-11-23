@@ -351,6 +351,9 @@ app.UseAuthorization();
 app.MapControllers();
 app.MapHub<RecordRoomHub>("/hubs/recordroom");
 
+app.Services.GetRequiredService<IBackgroundJobClient>().Enqueue<ScanProcessingJobs>(
+    job => job.QueueUnprocessedDocumentsAsync(0, CancellationToken.None));
+
 // ------------------------------------------------------------------ scheduling
 // Guarded by configuration: a test run or a read-only replica should not start
 // sweeping the registry behind the operator's back. The worker itself is

@@ -27,8 +27,9 @@ public sealed class RecordFileDocumentsController(IRecordFileDocumentsService do
     [Consumes("multipart/form-data")]
     [RequestSizeLimit(50331648)]
     [RequestFormLimits(MultipartBodyLengthLimit = 50331648)]
-    public async Task<IResult> Upload(int fileId, [FromForm] IFormFile? document, CancellationToken ct) =>
-        ApiResults.FromResult(await documents.UploadAsync(fileId, document, ct));
+    public async Task<IResult> Upload(int fileId, [FromForm] IFormFile? document, CancellationToken ct,
+        [FromQuery] bool importToStudio = false) =>
+        ApiResults.FromResult(await documents.UploadAsync(fileId, document, ct, importToStudio));
 
     [HttpGet("{documentId:long}/content")]
     public async Task<IActionResult> Content(int fileId, long documentId, [FromQuery] bool download = false, CancellationToken ct = default)

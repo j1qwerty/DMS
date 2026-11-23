@@ -459,10 +459,11 @@ export const httpFilesService: FilesApi = {
     return list(await get<Dto[]>(`/api/files/${fileId}/documents`), toRecordFileDocument);
   },
 
-  async uploadDocument(fileId, file) {
+  async uploadDocument(fileId, file, importToStudio) {
     const body = new FormData();
     body.append('document', file, file.name);
-    const result = await attemptForm<Dto>(`/api/files/${fileId}/documents`, body);
+    const suffix = importToStudio ? '?importToStudio=true' : '';
+    const result = await attemptForm<Dto>(`/api/files/${fileId}/documents${suffix}`, body);
     return result.ok ? ok(toRecordFileDocument(result.value)) : result;
   },
 

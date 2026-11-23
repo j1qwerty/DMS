@@ -449,6 +449,7 @@ export interface RecordFileDocument {
   uploadedBy: string;
   /** Pages in a stored PDF; absent when the count is unknown. */
   pageCount?: number;
+  studioImportPending?: boolean;
 }
 
 // ------------------------------------------------------------------- barcodes

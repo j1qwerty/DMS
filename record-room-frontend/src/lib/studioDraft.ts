@@ -60,3 +60,7 @@ export interface UnifiedDocumentVersion {
   rawDoc?: RecordFileDocument;
   rawDeriv?: DocumentDerivative;
 }
+
+export function documentVersionKey(version: Pick<UnifiedDocumentVersion, 'source' | 'id'>): string {
+  return `${version.source}:${version.id}`;
+}

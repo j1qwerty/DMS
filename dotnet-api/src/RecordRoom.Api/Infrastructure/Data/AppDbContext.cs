@@ -231,6 +231,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         b.Entity<RecordFileDocument>(e =>
         {
             e.ToTable("RecordFileDocuments");
+            e.Property(x => x.OcrRevision).IsConcurrencyToken();
             e.Property(x => x.OriginalFileName).HasMaxLength(255);
             e.Property(x => x.StorageKey).HasMaxLength(80);
             e.Property(x => x.ContentType).HasMaxLength(100);

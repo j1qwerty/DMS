@@ -449,7 +449,7 @@ public sealed record MapUploadInput(string FileBarcode, int PageNo, string FileN
 public sealed record RecordFileDocumentDto(
     long Id, int FileId, string FileBarcode, int Version, string FileName,
     string ContentType, long SizeBytes, string Sha256, DateTime UploadedAt, string UploadedBy,
-    int? PageCount = null);
+    int? PageCount = null, bool StudioImportPending = false);
 
 // Bulk ------------------------------------------------------------------------
 

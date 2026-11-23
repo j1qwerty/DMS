@@ -16,7 +16,6 @@ import { DropZone } from './DropZone';
 import { useQuery, useService } from '../../hooks/useService';
 import { useFeatures } from '../../lib/features';
 import { pdfAcceptAttribute, validateDocumentFile, validatePdfFile } from '../../lib/document';
-import { dataSource } from '../../services';
 import type { MapUpload, RecordFile, Room } from '../../types';
 
 export type FileActionKind = 'upload' | 'move' | 'mapUpload';
@@ -114,10 +113,6 @@ export function UploadFileModal({ file, onClose, onDone }: ActionContext) {
               ok: true,
               message: 'stored — OCR is processing in the background',
             });
-            // Trigger OCR generation in background for local demo
-            if (dataSource === 'local') {
-              void service.files.documentOcr(file.id, result.value.id);
-            }
           } else {
             done.push({ name: scan.name, ok: false, message: result.error });
           }

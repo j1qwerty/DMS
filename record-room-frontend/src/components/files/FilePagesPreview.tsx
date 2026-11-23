@@ -14,6 +14,7 @@ import { Button } from '../ui/Button';
 import { StatusBadge } from '../ui/Flash';
 import { DocumentViewer } from './DocumentViewer';
 import { useFlash, useQuery, useService } from '../../hooks/useService';
+import { isTyping } from '../../hooks/usePageKeys';
 import { changeKindOf } from '../../lib/reviewGroup';
 import type { DocumentDerivative, FileScan } from '../../types';
 import { cn } from '../../lib/utils';
@@ -150,13 +151,28 @@ export function FilePagesPreview({
   useEffect(() => {
     if (!zoomed) return;
     const onKey = (event: KeyboardEvent) => {
+      if (
+        isTyping(event.target) ||
+        event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.shiftKey
+      )
+        return;
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+        event.preventDefault();
+        const adjacent =
+          event.key === 'ArrowLeft' ? prevPage(pages, zoomed) : nextPage(pages, zoomed);
+        if (adjacent) setZoomed(adjacent);
+        return;
+      }
       if (event.key !== 'Escape') return;
       event.stopPropagation();
       setZoomed(null);
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [zoomed]);
+  }, [pages, zoomed]);
 
   const visible = mode === 'changed' ? pendingPages : pages;
 

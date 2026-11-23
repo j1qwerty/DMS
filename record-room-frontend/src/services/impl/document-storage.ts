@@ -288,10 +288,6 @@ export function getLocalDocumentOcr(documentId: string): Record<number, string> 
   return documentOcrCache.get(documentId) ?? null;
 }
 
-export function setLocalDocumentOcr(documentId: string, ocrMap: Record<number, string>): void {
-  documentOcrCache.set(documentId, ocrMap);
-}
-
 export function setLocalDocumentOcrPage(documentId: string, pageNo: number, text: string): void {
   const existing = documentOcrCache.get(documentId) ?? {};
   existing[pageNo] = text;
@@ -302,6 +298,7 @@ export async function clearLocalDocumentStorage(): Promise<void> {
   blobs.clear();
   recordDocuments.clear();
   derivativeBytes.clear();
+  documentOcrCache.clear();
   await idbClear();
 }
 

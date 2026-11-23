@@ -1,4 +1,5 @@
 using Hangfire;
+using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using RecordRoom.Api.Application;
@@ -7,7 +8,6 @@ using RecordRoom.Api.Domain;
 using RecordRoom.Api.Infrastructure.Auth;
 using RecordRoom.Api.Infrastructure.Data;
 using RecordRoom.Api.Infrastructure.Jobs;
-using RecordRoom.Api.Infrastructure.Ocr;
 using RecordRoom.Api.Infrastructure.Realtime;
 
 namespace RecordRoom.Api.Application.Services;
@@ -15,7 +15,7 @@ namespace RecordRoom.Api.Application.Services;
 public interface IRecordFileDocumentsService
 {
     Task<RecordFileDocumentDto[]?> ListAsync(int fileId, CancellationToken ct = default);
-    Task<Result<RecordFileDocumentDto>> UploadAsync(int fileId, IFormFile? document, CancellationToken ct = default);
+    Task<Result<RecordFileDocumentDto>> UploadAsync(int fileId, IFormFile? document, CancellationToken ct = default, bool importToStudio = false);
     Task<PrivateDocumentContent?> OpenAsync(int fileId, long documentId, CancellationToken ct = default);
     Task<Result<bool>> DeleteAsync(int fileId, long documentId, CancellationToken ct = default);
     Task<Dictionary<int, string>?> GetOcrAsync(int fileId, long documentId, CancellationToken ct = default);
@@ -26,11 +26,10 @@ public interface IRecordFileDocumentsService
 public sealed class RecordFileDocumentsService(
     AppDbContext db, IPrivateDocumentStore documentStore, IAuditWriter audit,
     ICurrentUserAccessor current, ILogger<RecordFileDocumentsService> logger,
-    Hangfire.IBackgroundJobClient backgroundJobs,
-    OcrTextExtractor extractor) : IRecordFileDocumentsService
+    IBackgroundJobClient backgroundJobs) : IRecordFileDocumentsService
 {
     private static RecordFileDocumentDto ToDto(RecordFileDocument d, string barcode) =>
-        new(d.Id, d.RecordFileId, barcode, d.Version, d.OriginalFileName, d.ContentType, d.SizeBytes, d.Sha256, d.UploadedAt, d.UploadedBy, d.PageCount);
+        new(d.Id, d.RecordFileId, barcode, d.Version, d.OriginalFileName, d.ContentType, d.SizeBytes, d.Sha256, d.UploadedAt, d.UploadedBy, d.PageCount, d.ImportToStudio);
 
     public async Task<RecordFileDocumentDto[]?> ListAsync(int fileId, CancellationToken ct = default)
     {
@@ -42,7 +41,7 @@ public sealed class RecordFileDocumentsService(
         return rows.Select(d => ToDto(d, file.Barcode)).ToArray();
     }
 
-    public async Task<Result<RecordFileDocumentDto>> UploadAsync(int fileId, IFormFile? document, CancellationToken ct = default)
+    public async Task<Result<RecordFileDocumentDto>> UploadAsync(int fileId, IFormFile? document, CancellationToken ct = default, bool importToStudio = false)
     {
         var file = await db.Files.AsNoTracking().FirstOrDefaultAsync(f => f.Id == fileId, ct);
         if (file is null) return Result<RecordFileDocumentDto>.Fail("Record not found.", "fileId");
@@ -56,7 +55,8 @@ public sealed class RecordFileDocumentsService(
             RecordFileId = fileId, Version = version, OriginalFileName = stored.OriginalFileName,
             StorageKey = stored.StorageKey, ContentType = stored.ContentType, SizeBytes = stored.SizeBytes,
             Sha256 = stored.Sha256, UploadedAt = DateTime.UtcNow, UploadedBy = current.UserName,
-            PageCount = stored.PageCount
+            PageCount = stored.PageCount,
+            ImportToStudio = importToStudio && stored.ContentType == "application/pdf"
         };
         db.FileDocuments.Add(row);
         await audit.LogAsync(db, AuditAction.Create, "RecordFileDocument", "pending", "-",
@@ -70,9 +70,16 @@ public sealed class RecordFileDocumentsService(
             return Result<RecordFileDocumentDto>.Fail("This record was updated by another upload. Please retry.", "document");
         }
         catch { await TryDeleteAsync(stored.StorageKey); throw; }
+        try
+        {
+            backgroundJobs.Enqueue<ScanProcessingJobs>(job => job.ExtractDocumentOcrAsync(row.Id, CancellationToken.None));
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Could not queue processing for document {DocumentId}.", row.Id);
+        }
         await audit.AnnounceAsync(RealtimeChannels.Files, "file.document.uploaded", fileId.ToString(),
             $"{stored.OriginalFileName} uploaded as version {version}");
-        backgroundJobs.Enqueue<ScanProcessingJobs>(job => job.ExtractDocumentOcrAsync(row.Id, CancellationToken.None));
         return Result<RecordFileDocumentDto>.Ok(ToDto(row, file.Barcode));
     }
 
@@ -82,50 +89,54 @@ public sealed class RecordFileDocumentsService(
             .FirstOrDefaultAsync(d => d.Id == documentId && d.RecordFileId == fileId, ct);
         if (row is null) return null;
 
-        var cached = await documentStore.ReadOcrAsync(row.StorageKey, ct);
-        if (!string.IsNullOrWhiteSpace(cached))
-        {
-            try
-            {
-                var map = System.Text.Json.JsonSerializer.Deserialize<Dictionary<int, string>>(cached);
-                if (map is not null) return map;
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "Could not deserialize OCR cache for document {DocumentId}.", documentId);
-            }
-        }
-
-        await using var stream = await documentStore.OpenReadAsync(row.StorageKey, ct);
-        if (stream is null) return new Dictionary<int, string>();
-        using var ms = new MemoryStream();
-        await stream.CopyToAsync(ms, ct);
-        var bytes = ms.ToArray();
-
-        var pages = await extractor.ExtractPagesAsync(bytes, row.ContentType, ct);
-        try
-        {
-            var json = System.Text.Json.JsonSerializer.Serialize(pages);
-            await documentStore.SaveOcrAsync(row.StorageKey, json, ct);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Could not persist OCR cache for document {DocumentId}.", documentId);
-        }
-        return pages;
+        return await ReadSavedOcrAsync(row, documentStore, logger, ct);
     }
 
     public async Task<Result<bool>> SaveOcrPageAsync(int fileId, long documentId, int pageNo, string text, CancellationToken ct = default)
     {
-        var row = await db.FileDocuments.AsNoTracking()
+        var row = await db.FileDocuments
             .FirstOrDefaultAsync(d => d.Id == documentId && d.RecordFileId == fileId, ct);
         if (row is null) return Result<bool>.Fail("Document not found.", "documentId");
+        if (pageNo < 1 || pageNo > (row.PageCount ?? (row.ContentType == "application/pdf" ? int.MaxValue : 1)))
+            return Result<bool>.Fail("Page is outside this document.", "pageNo");
 
-        var pages = await GetOcrAsync(fileId, documentId, ct) ?? new Dictionary<int, string>();
-        pages[pageNo] = text;
-        var json = System.Text.Json.JsonSerializer.Serialize(pages);
-        await documentStore.SaveOcrAsync(row.StorageKey, json, ct);
-        return Result<bool>.Ok(true);
+        while (db.Entry(row).State != EntityState.Detached)
+        {
+            var pages = await ReadSavedOcrAsync(row, documentStore, logger, ct);
+            pages[pageNo] = text;
+            row.OcrPagesJson = JsonSerializer.Serialize(pages);
+            row.OcrRevision++;
+            try
+            {
+                await db.SaveChangesAsync(ct);
+                await audit.AnnounceAsync(RealtimeChannels.Digitization, "document.ocr.updated",
+                    row.Id.ToString(), $"OCR correction saved for {row.OriginalFileName}");
+                return Result<bool>.Ok(true);
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                await db.Entry(row).ReloadAsync(ct);
+            }
+        }
+        return Result<bool>.Fail("Document not found.", "documentId");
+    }
+
+    internal static async Task<Dictionary<int, string>> ReadSavedOcrAsync(
+        RecordFileDocument row, IPrivateDocumentStore store, ILogger logger, CancellationToken ct)
+    {
+        if (row.OcrPagesJson is { } json)
+            return JsonSerializer.Deserialize<Dictionary<int, string>>(json) ?? [];
+
+        try
+        {
+            var legacy = await store.ReadOcrAsync(row.StorageKey, ct);
+            return legacy is null ? [] : JsonSerializer.Deserialize<Dictionary<int, string>>(legacy) ?? [];
+        }
+        catch (Exception ex) when (ex is JsonException or IOException)
+        {
+            logger.LogWarning(ex, "Could not read legacy OCR for document {DocumentId}.", row.Id);
+            return [];
+        }
     }
 
     public async Task<PrivateDocumentContent?> OpenAsync(int fileId, long documentId, CancellationToken ct = default)

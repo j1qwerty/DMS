@@ -68,6 +68,10 @@ public class RecordFileDocument
     public required string Sha256 { get; set; }
     /// <summary>Pages in the stored PDF; null for images or an unreadable page tree.</summary>
     public int? PageCount { get; set; }
+    public string? OcrPagesJson { get; set; }
+    public DateTime? OcrProcessedAt { get; set; }
+    public int OcrRevision { get; set; }
+    public bool ImportToStudio { get; set; }
     public DateTime UploadedAt { get; set; } = DateTime.UtcNow;
     public required string UploadedBy { get; set; }
     public RecordFile? RecordFile { get; set; }

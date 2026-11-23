@@ -1,3 +1,5 @@
+using System.Text.Json;
+using Hangfire;
 using Microsoft.EntityFrameworkCore;
 using RecordRoom.Api.Application.Contracts;
 using RecordRoom.Api.Application.Services;
@@ -87,46 +89,148 @@ public class ScanProcessingJobs(
             scanId, page.Status, text.Length);
     }
 
-    /// <summary>
-    /// Background extraction of all pages of an uploaded file document (RecordFileDocument).
-    /// Stores the extracted page dictionary as JSON cache in PrivateDocumentStore.
-    /// </summary>
-    [Hangfire.DisableConcurrentExecution(timeoutInSeconds: 600)]
+    /// <summary>Queues unfinished attachments, including those created before database OCR.</summary>
+    public async Task QueueUnprocessedDocumentsAsync(long afterId, CancellationToken ct = default)
+    {
+        using var scope = services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var jobs = scope.ServiceProvider.GetRequiredService<IBackgroundJobClient>();
+        var ids = await db.FileDocuments.AsNoTracking()
+            .Where(d => d.Id > afterId && (d.OcrProcessedAt == null || d.ImportToStudio))
+            .OrderBy(d => d.Id).Select(d => d.Id).Take(100).ToArrayAsync(ct);
+        foreach (var id in ids)
+            jobs.Enqueue<ScanProcessingJobs>(job => job.ExtractDocumentOcrAsync(id, CancellationToken.None));
+        if (ids.Length == 100)
+        {
+            var lastId = ids[^1];
+            jobs.Enqueue<ScanProcessingJobs>(job => job.QueueUnprocessedDocumentsAsync(lastId, CancellationToken.None));
+        }
+    }
+
+    [DisableConcurrentExecution(timeoutInSeconds: 600)]
     public async Task ExtractDocumentOcrAsync(long documentId, CancellationToken ct = default)
     {
         using var scope = services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var documentStore = scope.ServiceProvider.GetRequiredService<IPrivateDocumentStore>();
+        var store = scope.ServiceProvider.GetRequiredService<IPrivateDocumentStore>();
         var extractor = scope.ServiceProvider.GetRequiredService<OcrTextExtractor>();
         var audit = scope.ServiceProvider.GetRequiredService<IAuditWriter>();
-
         var doc = await db.FileDocuments.Include(d => d.RecordFile).FirstOrDefaultAsync(d => d.Id == documentId, ct);
-        if (doc is null || string.IsNullOrWhiteSpace(doc.StorageKey)) return;
+        if (doc?.RecordFile is not { } file || (doc.OcrProcessedAt is not null && !doc.ImportToStudio)) return;
 
-        var existing = await documentStore.ReadOcrAsync(doc.StorageKey, ct);
-        if (!string.IsNullOrWhiteSpace(existing)) return;
-
-        await using var stream = await documentStore.OpenReadAsync(doc.StorageKey, ct);
-        if (stream is null) return;
-        using var ms = new MemoryStream();
-        await stream.CopyToAsync(ms, ct);
-        var bytes = ms.ToArray();
-
-        var pages = await extractor.ExtractPagesAsync(bytes, doc.ContentType, ct);
-        if (pages.Count > 0)
+        var saved = await RecordFileDocumentsService.ReadSavedOcrAsync(doc, store, logger, ct);
+        await using var stream = await store.OpenReadAsync(doc.StorageKey, ct);
+        if (stream is null)
         {
-            var json = System.Text.Json.JsonSerializer.Serialize(pages);
-            await documentStore.SaveOcrAsync(doc.StorageKey, json, ct);
-            logger.LogInformation("Background OCR finished for document {DocumentId} ({Count} pages).", documentId, pages.Count);
+            logger.LogWarning("Stored content is missing for document {DocumentId}.", documentId);
+            return;
+        }
+        using var buffer = new MemoryStream();
+        await stream.CopyToAsync(buffer, ct);
+        var bytes = buffer.ToArray();
+
+        Dictionary<int, string>? extracted = null;
+        Exception? extractionError = null;
+        if (doc.OcrProcessedAt is null)
+        {
+            try
+            {
+                extracted = await extractor.ExtractPagesAsync(bytes, doc.ContentType, ct, saved);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                extractionError = ex;
+                logger.LogWarning(ex, "OCR failed for document {DocumentId}.", documentId);
+            }
+        }
+
+        var studioPages = new List<(int Page, StoredDocument Document)>();
+        var committed = false;
+        try
+        {
+            if (doc.ImportToStudio)
+            {
+                foreach (var (page, image) in OcrTextExtractor.RasterizePdf(bytes))
+                {
+                    ct.ThrowIfCancellationRequested();
+                    var name = $"{Path.GetFileNameWithoutExtension(doc.OriginalFileName)}-page-{page}.png";
+                    var result = await store.SaveBytesAsync(image, name, "image/png", ct);
+                    if (!result.IsSuccess) throw new IOException($"Could not store page {page} of document {documentId}.");
+                    studioPages.Add((page, result.Value));
+                }
+                if (studioPages.Count == 0) throw new IOException($"Document {documentId} has no readable pages.");
+            }
+
+            while (db.Entry(doc).State != EntityState.Detached)
+            {
+                var pages = await RecordFileDocumentsService.ReadSavedOcrAsync(doc, store, logger, ct);
+                if (extracted is not null)
+                    foreach (var (page, text) in extracted)
+                        pages.TryAdd(page, text);
+
+                if (doc.ImportToStudio && studioPages.Count > 0)
+                {
+                    var siblings = db.ScanPages.Where(d => d.Barcode == file.Barcode);
+                    var nextPage = await siblings.MaxAsync(row => (int?)row.PageNo, ct) ?? 0;
+                    var order = await siblings.MaxAsync(row => (int?)row.OrderIndex, ct) ?? 0;
+                    foreach (var (page, stored) in studioPages)
+                    {
+                        db.ScanPages.Add(new FileScanPage
+                        {
+                            Barcode = file.Barcode, FileName = stored.OriginalFileName,
+                            PageNo = ++nextPage, OrderIndex = ++order, DocumentSize = file.DocumentSize,
+                            Status = PageStatus.PendingReview, Note = $"Imported from {doc.OriginalFileName}",
+                            UploadedAt = doc.UploadedAt, UploadedBy = doc.UploadedBy,
+                            StorageKey = stored.StorageKey, ContentType = stored.ContentType,
+                            SizeBytes = stored.SizeBytes, Sha256 = stored.Sha256, OcrText = pages.GetValueOrDefault(page)
+                        });
+                    }
+                    await audit.LogAsync(db, AuditAction.Create, "FileScanPage", doc.Id.ToString(),
+                        "-", $"{studioPages.Count} pages from {doc.OriginalFileName}",
+                        $"Imported PDF pages uploaded by {doc.UploadedBy} into Studio for {file.Barcode}", ct);
+                    doc.ImportToStudio = false;
+                }
+
+                doc.OcrPagesJson = JsonSerializer.Serialize(pages);
+                if (extracted is not null) doc.OcrProcessedAt = DateTime.UtcNow;
+                doc.OcrRevision++;
+                try
+                {
+                    await db.SaveChangesAsync(ct);
+                    committed = true;
+                    break;
+                }
+                catch (DbUpdateConcurrencyException)
+                {
+                    foreach (var entry in db.ChangeTracker.Entries().Where(e => e.State == EntityState.Added).ToList())
+                        entry.State = EntityState.Detached;
+                    await db.Entry(doc).ReloadAsync(ct);
+                }
+            }
+        }
+        finally
+        {
+            if (!committed)
+            {
+                foreach (var (_, stored) in studioPages)
+                    await store.DeleteAsync(stored.StorageKey, CancellationToken.None);
+            }
+        }
+
+        if (committed)
+        {
             try
             {
                 await audit.AnnounceAsync(RealtimeChannels.Digitization, "document.ocr.processed",
-                    doc.Id.ToString(), $"Document OCR ready for {doc.OriginalFileName}");
+                    doc.Id.ToString(), $"Document processed: {doc.OriginalFileName}");
             }
             catch (Exception ex)
             {
-                logger.LogWarning(ex, "Could not announce OCR completion for document {DocumentId}.", documentId);
+                logger.LogWarning(ex, "Could not announce processing for document {DocumentId}.", documentId);
             }
         }
+
+        if (extractionError is not null)
+            throw new InvalidOperationException($"OCR failed for document {documentId}.", extractionError);
     }
 }

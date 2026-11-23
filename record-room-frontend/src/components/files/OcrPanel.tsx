@@ -1,642 +1,226 @@
-import { useEffect, useMemo, useState, Suspense } from 'react';
-import {
-  ArrowClockwise,
-  ArrowLeft,
-  ArrowRight,
-  Check,
-  Copy,
-  MagnifyingGlass,
-  PencilSimple,
-  Spinner,
-  TextAa,
-  X,
-} from '@phosphor-icons/react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
+import { ArrowLeft, ArrowRight, Copy } from '@phosphor-icons/react';
 import { Document, Page } from 'react-pdf';
-import { Badge } from '../ui/Badge';
+import { usePageKeys } from '../../hooks/usePageKeys';
+import { useFlash, useService, useSession } from '../../hooks/useService';
+import { authoritativeScanRows } from '../../lib/scanMerge';
+import type { FileScan } from '../../types';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { EmptyState } from '../ui/EmptyState';
-import { TextInput } from '../ui/Field';
-import { useFlash, useQuery, useService, useSession } from '../../hooks/useService';
-import { authoritativeScanRows } from '../../lib/scanMerge';
-import { extractPdfPagesToImages } from '../../lib/pdf-unpack';
-import type { DocumentDerivative, FileScan, RecordFileDocument } from '../../types';
-import type { OcrStatusInfo } from '../../services/contracts';
+import { StatusBadge } from '../ui/Flash';
 
 const PDF_OPTIONS = {
   cMapUrl: '/cmaps/',
   standardFontDataUrl: '/standard_fonts/',
   wasmUrl: '/wasm/',
-  verbosity: 0,
-} as const;
+};
 
-interface UnifiedOcrVersion {
-  id: string;
-  source: 'document' | 'derivative' | 'scans';
-  filename: string;
-  versionLabel: string;
-  pageCount: number;
-}
-
-export function OcrPanel({ fileId }: { fileId: string }) {
-  const service = useService();
-  const { allowed } = useSession();
-  const { success, danger } = useFlash();
-  const canEditOcr = allowed('digitization.upload');
-  const [search, setSearch] = useState('');
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState('');
-  const [ocrStatus, setOcrStatus] = useState<OcrStatusInfo | null>(null);
-  const [savingOcr, setSavingOcr] = useState(false);
-
-  const {
-    data: pages,
-    loading: scansLoading,
-    reload: reloadScans,
-  } = useQuery(() => service.digitization.list(fileId), [fileId], [] as FileScan[], [
-    'digitization',
-  ]);
-
-  const { data: docs } = useQuery(
-    () => service.files.listDocuments(fileId),
-    [fileId],
-    [] as RecordFileDocument[],
-    ['files'],
-  );
-
-  const { data: derivatives } = useQuery(
-    () => service.digitization.listPdfs(fileId),
-    [fileId],
-    [] as DocumentDerivative[],
-    ['digitization'],
-  );
-
-  const [unpacking, setUnpacking] = useState(false);
-
-  // Versions available for OCR
-  const allVersions = useMemo(() => {
-    const list: UnifiedOcrVersion[] = [];
-    for (const doc of docs) {
-      list.push({
-        id: doc.id,
-        source: 'document',
-        filename: doc.filename,
-        versionLabel: `v${doc.version}`,
-        pageCount: doc.pageCount ?? 1,
-      });
-    }
-    for (const deriv of derivatives) {
-      list.push({
-        id: deriv.id,
-        source: 'derivative',
-        filename: deriv.filename,
-        versionLabel: `Build ${deriv.id}`,
-        pageCount: deriv.pageCount,
-      });
-    }
-    if (pages.length > 0) {
-      list.push({
-        id: 'studio-workspace',
-        source: 'scans',
-        filename: 'Studio Workspace Scans',
-        versionLabel: `${pages.length} page(s)`,
-        pageCount: pages.length,
-      });
-    }
-    return list;
-  }, [docs, derivatives, pages]);
-
-  const [selectedVersionId, setSelectedVersionId] = useState<string>('');
-  const activeVersion = allVersions.find((v) => v.id === selectedVersionId) ?? allVersions[0];
-
-  // Engine status
-  useEffect(() => {
-    void service.config
-      .info()
-      .then((info) => setOcrStatus(info.ocr))
-      .catch(() => setOcrStatus(null));
-  }, [service]);
-
-  // Current page for active version
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
-  const [numPdfPages, setNumPdfPages] = useState(0);
-  const [versionOcrMap, setVersionOcrMap] = useState<Record<number, string>>({});
-  const [loadingVersion, setLoadingVersion] = useState(false);
-
-  const [prevVersionKey, setPrevVersionKey] = useState(activeVersion?.id);
-  if (activeVersion?.id !== prevVersionKey) {
-    setPrevVersionKey(activeVersion?.id);
-    setCurrentPage(1);
-    setPdfBlobUrl(null);
-    setVersionOcrMap({});
-    if (activeVersion && activeVersion.source !== 'scans') {
-      setLoadingVersion(true);
-    }
-  }
-
-  // When active version changes, load its blob and its stored OCR map
-  useEffect(() => {
-    if (!activeVersion || activeVersion.source === 'scans') {
-      return;
-    }
-    let live = true;
-    let url: string | null = null;
-
-    const loadBlob =
-      activeVersion.source === 'document'
-        ? service.files.documentBlob(fileId, activeVersion.id)
-        : service.digitization.pdfBlob(activeVersion.id);
-
-    const loadOcr =
-      activeVersion.source === 'document'
-        ? service.files.documentOcr(fileId, activeVersion.id)
-        : Promise.resolve({});
-
-    void Promise.all([loadBlob, loadOcr])
-      .then(([blob, ocr]) => {
-        if (!live) return;
-        url = URL.createObjectURL(blob);
-        setPdfBlobUrl(url);
-        if (ocr && Object.keys(ocr).length > 0) {
-          setVersionOcrMap(ocr);
-        } else {
-          setVersionOcrMap({});
-        }
-      })
-      .catch(() => {
-        if (live) danger('Could not load version for OCR.');
-      })
-      .finally(() => {
-        if (live) setLoadingVersion(false);
-      });
-
-    return () => {
-      live = false;
-      if (url) URL.revokeObjectURL(url);
-    };
-  }, [activeVersion, fileId, service, danger]);
-
-  // Workspace scans mapping (when activeVersion is 'scans' or fallback)
-  const scanned = useMemo(
+export function OcrPanel({ pages }: { pages: FileScan[] }) {
+  const scans = useMemo(
     () => authoritativeScanRows(pages).filter((page) => page.hasDocument || page.ocrText?.trim()),
     [pages],
   );
+  const [position, setPosition] = useState(0);
+  const index = Math.min(position, scans.length - 1);
+  const page = scans[index];
+  const step = (delta: number) =>
+    setPosition(Math.max(0, Math.min(scans.length - 1, index + delta)));
+  const [editing, setEditing] = useState(false);
+  usePageKeys(step, scans.length > 1 && !editing);
 
-  const selectedScan =
-    activeVersion?.source === 'scans' ? (scanned[currentPage - 1] ?? scanned[0]) : null;
+  if (!page)
+    return <EmptyState title="No scans to review" description="Open Studio to add pages." />;
 
-  // Scan blob for workspace scans
-  const selectedScanId = selectedScan?.id;
-  const selectedScanHasDoc = selectedScan?.hasDocument;
-  const [scanPreviewUrl, setScanPreviewUrl] = useState<string | null>(null);
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        <Button
+          variant="secondary"
+          size="sm"
+          icon={<ArrowLeft size={15} />}
+          aria-label="Previous page"
+          disabled={index === 0 || editing}
+          onClick={() => step(-1)}
+        />
+        <span className="text-xs font-semibold">
+          {index + 1} / {scans.length}
+        </span>
+        <Button
+          variant="secondary"
+          size="sm"
+          icon={<ArrowRight size={15} />}
+          aria-label="Next page"
+          disabled={index === scans.length - 1 || editing}
+          onClick={() => step(1)}
+        />
+      </div>
+      <WorkspacePage key={page.id} page={page} scans={scans} onEditing={setEditing} />
+    </div>
+  );
+}
 
-  const [prevScanId, setPrevScanId] = useState(selectedScanId);
-  if (selectedScanId !== prevScanId) {
-    setPrevScanId(selectedScanId);
-    setScanPreviewUrl(null);
-  }
+function WorkspacePage({
+  page,
+  scans,
+  onEditing,
+}: {
+  page: FileScan;
+  scans: FileScan[];
+  onEditing: (editing: boolean) => void;
+}) {
+  const service = useService();
+  const { allowed } = useSession();
+  const { success, danger } = useFlash();
+  const [draft, setDraft] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [preview, setPreview] = useState<{ url: string; pdf: boolean } | null>(null);
+  const [failed, setFailed] = useState(false);
+  const canEdit = allowed('digitization.upload');
 
   useEffect(() => {
-    if (!selectedScanId || !selectedScanHasDoc) {
-      return;
-    }
+    if (!page.hasDocument) return;
     let live = true;
     let url: string | null = null;
-    service.digitization
-      .scanBlob(selectedScanId)
+    void service.digitization
+      .scanBlob(page.id, page.hasProcessed ? 'processed' : 'original')
       .then((blob) => {
         if (!live) return;
         url = URL.createObjectURL(blob);
-        setScanPreviewUrl(url);
+        setPreview({ url, pdf: blob.type === 'application/pdf' });
       })
       .catch(() => {
-        if (live) setScanPreviewUrl(null);
+        if (live) setFailed(true);
       });
     return () => {
       live = false;
       if (url) URL.revokeObjectURL(url);
     };
-  }, [selectedScanId, selectedScanHasDoc, service]);
+  }, [page.id, page.hasDocument, page.hasProcessed, service]);
 
-  const totalPages =
-    activeVersion?.source === 'scans'
-      ? scanned.length
-      : Math.max(numPdfPages, activeVersion?.pageCount ?? 1);
+  const edit = (text: string | null) => {
+    setDraft(text);
+    onEditing(text !== null);
+  };
 
-  // Left/right arrow keys navigate pages while panel is open
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
-      if (
-        event.target instanceof HTMLInputElement ||
-        event.target instanceof HTMLTextAreaElement ||
-        event.target instanceof HTMLSelectElement
-      ) {
-        return;
-      }
-      if (editing) return;
-      event.preventDefault();
-      if (event.key === 'ArrowLeft') {
-        setCurrentPage((p) => Math.max(1, p - 1));
-        setEditing(false);
-      } else {
-        setCurrentPage((p) => Math.min(totalPages, p + 1));
-        setEditing(false);
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [totalPages, editing]);
-
-  const currentOcrText =
-    activeVersion?.source === 'scans'
-      ? (selectedScan?.ocrText ?? '')
-      : (versionOcrMap[currentPage] ?? '');
-
-  const saveOcrCorrection = async () => {
-    setSavingOcr(true);
+  const save = async () => {
+    if (draft === null) return;
+    setSaving(true);
     try {
-      if (activeVersion?.source === 'document') {
-        const res = await service.files.saveDocumentOcr(
-          fileId,
-          activeVersion.id,
-          currentPage,
-          draft,
-        );
-        if (res.ok) {
-          setVersionOcrMap((prev) => ({ ...prev, [currentPage]: draft }));
-          success(`OCR text saved for page ${currentPage}.`);
-          setEditing(false);
-        } else {
-          danger(res.error);
-        }
-      } else if (selectedScan) {
-        const res = await service.digitization.saveOcrText(selectedScan.id, draft);
-        if (res.ok) {
-          success(`OCR text saved for page ${selectedScan.pageNo}.`);
-          setEditing(false);
-          reloadScans();
-        } else {
-          danger(res.error);
-        }
-      }
+      const result = await service.digitization.saveOcrText(page.id, draft);
+      if (result.ok) {
+        edit(null);
+        success(`OCR text saved for page ${page.pageNo}.`);
+      } else danger(result.error);
+    } catch {
+      danger('Could not save the OCR correction.');
     } finally {
-      setSavingOcr(false);
+      setSaving(false);
     }
   };
 
-  const copyCurrentPage = async () => {
+  const copy = async (text: string) => {
     try {
-      await navigator.clipboard.writeText(currentOcrText);
-      success(`Page ${currentPage} text copied.`);
+      await navigator.clipboard.writeText(text);
+      success('Text copied.');
     } catch {
       danger('Clipboard access blocked.');
     }
   };
 
-  const copyAllPages = async () => {
-    if (activeVersion?.source === 'scans') {
-      const text = scanned
-        .map((p) => `--- Page ${p.pageNo} (v${p.version}) ---\n${p.ocrText ?? ''}`)
-        .join('\n\n');
-      try {
-        await navigator.clipboard.writeText(text);
-        success('OCR text of all pages copied.');
-      } catch {
-        danger('Clipboard access blocked.');
-      }
-    } else {
-      const entries = Object.entries(versionOcrMap).sort(([a], [b]) => Number(a) - Number(b));
-      const text = entries.map(([p, t]) => `--- Page ${p} ---\n${t}`).join('\n\n');
-      try {
-        await navigator.clipboard.writeText(text);
-        success('OCR text of all pages copied.');
-      } catch {
-        danger('Clipboard access blocked.');
-      }
-    }
-  };
-
-  const unpackAttachedPdf = async () => {
-    const targetDoc = docs[0];
-    const targetDeriv = derivatives[0];
-    if (!targetDoc && !targetDeriv) return;
-
-    setUnpacking(true);
-    try {
-      let blob: Blob;
-      let filename: string;
-      if (targetDoc) {
-        blob = await service.files.documentBlob(fileId, targetDoc.id);
-        filename = targetDoc.filename;
-      } else {
-        blob = await service.digitization.pdfBlob(targetDeriv.id);
-        filename = targetDeriv.filename;
-      }
-      const extracted = await extractPdfPagesToImages(blob, filename);
-      let pageNo = 0;
-      for (const pageFile of extracted) {
-        pageNo += 1;
-        const added = await service.digitization.add(fileId, {
-          pageNo,
-          filename: pageFile.name,
-          documentSize: 'A4',
-          note: `Extracted from ${filename}`,
-        });
-        if (added.ok) {
-          await service.digitization.addDocument(added.value.id, pageFile);
-        }
-      }
-      success(`Extracted ${extracted.length} page(s) from ${filename}. OCR is running.`);
-      reloadScans();
-    } catch (err) {
-      danger(err instanceof Error ? err.message : 'Could not extract PDF pages.');
-    } finally {
-      setUnpacking(false);
-    }
-  };
-
-  if (!scansLoading && allVersions.length === 0) {
-    return (
-      <Card>
-        <EmptyState
-          title="No documents or scans yet"
-          description="Upload a PDF document to view and manage OCR text."
-        />
-      </Card>
-    );
-  }
-
   return (
-    <div className="space-y-4">
-      {/* Top Bar: Version Selection + OCR status + Search */}
-      <div className="flex flex-col gap-3 rounded-xl border border-base bg-[var(--rr-surface)] p-3 lg:flex-row lg:items-center lg:justify-between shadow-sm">
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-[var(--rr-muted)]">Version:</span>
-            <select
-              value={activeVersion?.id ?? ''}
-              onChange={(e) => {
-                setSelectedVersionId(e.target.value);
-                setEditing(false);
-              }}
-              className="focus-ring h-8 max-w-sm rounded-lg border border-base bg-[var(--rr-bg)] px-2.5 text-xs font-semibold outline-none"
-              aria-label="Select document version for OCR"
-            >
-              {allVersions.map((ver, idx) => (
-                <option key={ver.id} value={ver.id}>
-                  {idx === 0 ? '★ Current · ' : ''}
-                  {ver.filename} ({ver.versionLabel})
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="flex items-center gap-2 text-xs">
-            {ocrStatus && !ocrStatus.available && <Badge tone="danger">OCR engine offline</Badge>}
-            <span className="muted hidden sm:inline text-[11px]">
-              {ocrStatus?.available
-                ? `${ocrStatus.engine} · ${ocrStatus.languages}`
-                : (ocrStatus?.note ?? 'OCR engine ready')}
-            </span>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="w-full sm:w-48">
-            <div className="relative">
-              <MagnifyingGlass
-                size={14}
-                className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--rr-muted)]"
-              />
-              <TextInput
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search OCR text…"
-                aria-label="Search OCR text"
-                className="!h-8 !pl-8 text-xs"
-              />
-            </div>
-          </div>
-          <Button
-            size="sm"
-            variant="ghost"
-            icon={<Copy size={14} />}
-            onClick={() => void copyAllPages()}
-          >
-            Copy all
-          </Button>
-          {docs.length > 0 && pages.length === 0 && canEditOcr && (
-            <Button
-              size="sm"
-              variant="secondary"
-              icon={<ArrowClockwise size={14} />}
-              disabled={unpacking}
-              onClick={() => void unpackAttachedPdf()}
-            >
-              {unpacking ? 'Unpacking…' : 'Unpack for Studio'}
-            </Button>
+    <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(290px,36%)]">
+      <Card padding={false} className="min-w-0 overflow-hidden">
+        <div className="border-b border-base px-4 py-3 text-sm font-semibold">{page.filename}</div>
+        <div className="flex min-h-72 justify-center overflow-auto bg-[var(--rr-surface-2)] p-3 lg:h-[calc(100dvh-20rem)]">
+          {preview?.pdf ? (
+            <Suspense fallback={<p className="muted text-sm">Loading preview…</p>}>
+              <Document file={preview.url} options={PDF_OPTIONS}>
+                <Page
+                  pageNumber={page.pageIndex ?? 1}
+                  width={540}
+                  renderTextLayer={false}
+                  renderAnnotationLayer={false}
+                />
+              </Document>
+            </Suspense>
+          ) : preview ? (
+            <img
+              src={preview.url}
+              alt={page.filename}
+              className="max-w-full self-start object-contain"
+            />
+          ) : (
+            <p className="muted self-center text-sm">
+              {failed || !page.hasDocument ? 'Preview unavailable.' : 'Loading preview…'}
+            </p>
           )}
         </div>
-      </div>
-
-      {/* Main Body: Preview on Left, Page Selection on Top + OCR on Right */}
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1.8fr)]">
-        {/* Left Side: Page Preview */}
-        <Card padding={false} className="overflow-hidden flex flex-col">
-          <div className="flex items-center justify-between border-b border-base px-4 py-2.5">
-            <span className="text-sm font-semibold">Preview · Page {currentPage}</span>
-            <span className="muted text-xs">
-              {activeVersion?.filename} ({activeVersion?.versionLabel})
-            </span>
-          </div>
-
-          <div className="grid min-h-[520px] h-[64vh] place-items-center overflow-auto bg-[var(--rr-bg)] p-3">
-            {loadingVersion ? (
-              <div className="flex flex-col items-center gap-2 text-xs muted">
-                <Spinner size={24} className="animate-spin text-accent" />
-                <span>Loading preview…</span>
-              </div>
-            ) : pdfBlobUrl ? (
-              <Suspense
-                fallback={
-                  <div className="flex items-center justify-center text-xs muted">
-                    Loading page…
-                  </div>
+      </Card>
+      <Card padding={false} className="min-w-0 overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-base px-4 py-2.5">
+          <p className="text-sm font-semibold">OCR text · page {page.pageNo}</p>
+          <StatusBadge status={page.status} />
+        </div>
+        <div className="space-y-3 p-4">
+          <div className="flex flex-wrap gap-2">
+            {!!page.ocrText?.trim() && (
+              <Button
+                size="sm"
+                variant="ghost"
+                icon={<Copy size={14} />}
+                onClick={() => void copy(page.ocrText ?? '')}
+              >
+                Copy
+              </Button>
+            )}
+            {scans.some((scan) => scan.ocrText?.trim()) && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() =>
+                  void copy(
+                    scans.map((scan) => `Page ${scan.pageNo}\n${scan.ocrText ?? ''}`).join('\n\n'),
+                  )
                 }
               >
-                <Document
-                  file={pdfBlobUrl}
-                  options={PDF_OPTIONS}
-                  onLoadSuccess={(pdf) => setNumPdfPages(pdf.numPages)}
-                  loading={
-                    <div className="flex items-center justify-center text-xs muted">
-                      Loading PDF…
-                    </div>
-                  }
-                >
-                  <Page
-                    key={`${activeVersion?.id}-${currentPage}`}
-                    pageNumber={currentPage}
-                    scale={0.9}
-                    renderTextLayer={false}
-                    renderAnnotationLayer={false}
-                    className="mx-auto rounded shadow-sm"
-                  />
-                </Document>
-              </Suspense>
-            ) : scanPreviewUrl ? (
-              <img
-                src={scanPreviewUrl}
-                alt={`Page ${currentPage}`}
-                className="max-h-full max-w-full rounded-lg object-contain shadow-sm"
-              />
-            ) : (
-              <div className="flex flex-col items-center gap-2 text-center text-xs muted">
-                <TextAa size={28} className="text-[var(--rr-muted)]" />
-                <span>No preview image for this page.</span>
-              </div>
+                Copy all
+              </Button>
+            )}
+            {canEdit && draft === null && (
+              <Button size="sm" variant="secondary" onClick={() => edit(page.ocrText ?? '')}>
+                Edit text
+              </Button>
             )}
           </div>
-        </Card>
-
-        {/* Right Side: Page Selector on Top + OCR Text Card */}
-        <div className="space-y-3 flex flex-col">
-          {/* Page Selection Bar on top with Prev/Next buttons and keyboard arrow hint */}
-          <div className="flex items-center justify-between gap-2 rounded-xl border border-base bg-[var(--rr-surface)] p-2.5 shadow-sm">
-            <Button
-              size="sm"
-              variant="secondary"
-              icon={<ArrowLeft size={13} />}
-              disabled={currentPage <= 1}
-              onClick={() => {
-                setCurrentPage((p) => Math.max(1, p - 1));
-                setEditing(false);
-              }}
-              title="Previous page (Left arrow)"
-            >
-              Previous page
-            </Button>
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-semibold">
-                Page {currentPage} of {totalPages}
-              </span>
-              <span className="muted hidden sm:inline text-[11px]">(← / → arrow keys)</span>
-            </div>
-            <Button
-              size="sm"
-              variant="secondary"
-              icon={<ArrowRight size={13} />}
-              disabled={currentPage >= totalPages}
-              onClick={() => {
-                setCurrentPage((p) => Math.min(totalPages, p + 1));
-                setEditing(false);
-              }}
-              title="Next page (Right arrow)"
-            >
-              Next page
-            </Button>
-          </div>
-
-          {/* OCR text card */}
-          <Card padding={false} className="overflow-hidden flex-1 flex flex-col">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-base px-4 py-2.5">
-              <span className="text-sm font-semibold">OCR text · page {currentPage}</span>
-              <div className="flex flex-wrap items-center gap-2">
-                {currentOcrText.trim() && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    icon={<Copy size={14} />}
-                    onClick={() => void copyCurrentPage()}
-                  >
-                    Copy
-                  </Button>
-                )}
-                {canEditOcr && (
-                  <>
-                    {editing ? (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        icon={<X size={14} />}
-                        onClick={() => setEditing(false)}
-                      >
-                        Cancel
-                      </Button>
-                    ) : (
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        icon={<PencilSimple size={14} />}
-                        onClick={() => {
-                          setEditing(true);
-                          setDraft(currentOcrText);
-                        }}
-                      >
-                        Edit text
-                      </Button>
-                    )}
-                  </>
-                )}
+          {draft !== null ? (
+            <>
+              <textarea
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+                rows={14}
+                aria-label="OCR correction"
+                className="focus-ring w-full rounded-lg border border-base bg-[var(--rr-bg)] p-3 text-sm"
+              />
+              <div className="flex justify-end gap-2">
+                <Button size="sm" variant="ghost" disabled={saving} onClick={() => edit(null)}>
+                  Cancel
+                </Button>
+                <Button size="sm" disabled={saving} onClick={() => void save()}>
+                  {saving ? 'Saving…' : 'Save correction'}
+                </Button>
               </div>
-            </div>
-
-            <div className="p-4 flex-1 flex flex-col">
-              {editing ? (
-                <div className="space-y-3 flex-1 flex flex-col">
-                  <textarea
-                    value={draft}
-                    onChange={(event) => setDraft(event.target.value)}
-                    rows={16}
-                    aria-label={`OCR text of page ${currentPage}`}
-                    className="focus-ring flex-1 w-full rounded-lg border border-base bg-[var(--rr-bg)] p-3 font-mono text-[13px] leading-6 outline-none"
-                  />
-                  <div className="flex justify-end">
-                    <Button
-                      size="sm"
-                      icon={<Check size={15} />}
-                      disabled={savingOcr}
-                      onClick={() => void saveOcrCorrection()}
-                    >
-                      {savingOcr ? 'Saving…' : 'Save correction'}
-                    </Button>
-                  </div>
-                </div>
-              ) : currentOcrText.trim() ? (
-                <div className="flex-1 overflow-y-auto max-h-[55vh] rounded-lg bg-[var(--rr-bg)] p-4 font-mono text-[13px] leading-6 whitespace-pre-wrap break-words">
-                  {currentOcrText}
-                </div>
-              ) : (
-                <div className="flex flex-1 flex-col items-center justify-center gap-3 py-16 text-center">
-                  <TextAa size={32} className="text-[var(--rr-muted)]" />
-                  <p className="muted text-sm font-medium">
-                    No OCR text recorded for page {currentPage}.
-                  </p>
-                  <p className="muted text-xs max-w-sm">
-                    OCR runs in the background upon document upload. Once generated or edited, it is
-                    permanently saved in the database.
-                  </p>
-                  {canEditOcr && (
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      icon={<PencilSimple size={14} />}
-                      onClick={() => {
-                        setEditing(true);
-                        setDraft('');
-                      }}
-                    >
-                      Enter page text manually
-                    </Button>
-                  )}
-                </div>
-              )}
-            </div>
-          </Card>
+            </>
+          ) : (
+            <p className="max-h-[56vh] overflow-auto whitespace-pre-wrap break-words text-sm leading-6">
+              {page.ocrText?.trim() ||
+                (page.status === 'Processing'
+                  ? 'OCR is processing.'
+                  : 'No saved text for this page.')}
+            </p>
+          )}
         </div>
-      </div>
+      </Card>
     </div>
   );
 }
