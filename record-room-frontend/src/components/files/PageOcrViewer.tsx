@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Copy,
@@ -15,7 +15,7 @@ import 'react-pdf/dist/Page/TextLayer.css';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { Badge } from '../ui/Badge';
 import { StatusBadge } from '../ui/Flash';
-import { useFlash } from '../../hooks/useService';
+import { useFlash, useService } from '../../hooks/useService';
 import type { FileScan } from '../../types';
 import { authoritativeScanRows } from '../../lib/scanMerge';
 import { cn } from '../../lib/utils';
@@ -90,6 +90,7 @@ export function PageOcrViewer({
   showOcr: boolean;
   onToggleOcr: (open: boolean) => void;
 }) {
+  const service = useService();
   const { success, danger } = useFlash();
 
   const [url, setUrl] = useState<string | null>(null);
@@ -102,6 +103,8 @@ export function PageOcrViewer({
   const [query, setQuery] = useState('');
   const [searching, setSearching] = useState(false);
   const [results, setResults] = useState<SearchHit[] | null>(null);
+  const [docOcrMap, setDocOcrMap] = useState<Record<number, string>>({});
+  const [currentPdfText, setCurrentPdfText] = useState('');
 
   const pdfRef = useRef<PDFDocumentProxy | null>(null);
   const textCache = useRef(new Map<number, string>());
@@ -114,6 +117,7 @@ export function PageOcrViewer({
     setNumPages(0);
     setCurrentPage(1);
     setResults(null);
+    setDocOcrMap({});
   }
 
   // Blob lifecycle: one object URL per docKey, revoked on change/unmount.
@@ -145,6 +149,50 @@ export function PageOcrViewer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docKey, filename]);
 
+  const pdfTextOf = useCallback(async (pageNo: number): Promise<string> => {
+    const cached = textCache.current.get(pageNo);
+    if (cached !== undefined) return cached;
+    const pdf = pdfRef.current;
+    if (!pdf || pageNo < 1 || pageNo > pdf.numPages) return '';
+    try {
+      const page = await pdf.getPage(pageNo);
+      const content = await page.getTextContent();
+      const text = content.items.map((item) => ('str' in item ? item.str : '')).join(' ');
+      textCache.current.set(pageNo, text);
+      return text;
+    } catch {
+      return '';
+    }
+  }, []);
+
+  // Fetch document-level OCR for this specific version from the API / cache
+  useEffect(() => {
+    if (!fileId || !docKey) {
+      return;
+    }
+    let live = true;
+    service.files
+      .documentOcr(fileId, docKey)
+      .then((map) => {
+        if (live && map) setDocOcrMap(map);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [fileId, docKey, service]);
+
+  // Read the PDF text layer of the current page whenever page or document changes
+  useEffect(() => {
+    let live = true;
+    void pdfTextOf(currentPage).then((text) => {
+      if (live) setCurrentPdfText(text.trim());
+    });
+    return () => {
+      live = false;
+    };
+  }, [currentPage, docKey, numPages, pdfTextOf]);
+
   // OCR text per rendered page: one authoritative row per page number — the
   // approved row the file shows as current, else the latest row. A studio
   // draft appended for the same page number must not shadow it (issue 2).
@@ -164,32 +212,20 @@ export function PageOcrViewer({
 
   const scanOfPage = useMemo(() => scanByPage.get(currentPage), [scanByPage, currentPage]);
 
-  const pdfTextOf = async (pageNo: number): Promise<string> => {
-    const cached = textCache.current.get(pageNo);
-    if (cached !== undefined) return cached;
-    const pdf = pdfRef.current;
-    if (!pdf || pageNo < 1 || pageNo > pdf.numPages) return '';
-    try {
-      const page = await pdf.getPage(pageNo);
-      const content = await page.getTextContent();
-      const text = content.items.map((item) => ('str' in item ? item.str : '')).join(' ');
-      textCache.current.set(pageNo, text);
-      return text;
-    } catch {
-      return '';
-    }
-  };
-
   const runSearch = async () => {
     const needle = query.trim().toLowerCase();
     if (!needle) return;
     setSearching(true);
     try {
-      const total = Math.max(numPages, ...(ocrByPage.size ? [...ocrByPage.keys()] : [0]));
+      const total = Math.max(
+        numPages,
+        ...(ocrByPage.size ? [...ocrByPage.keys()] : [0]),
+        ...(Object.keys(docOcrMap).length ? Object.keys(docOcrMap).map(Number) : [0]),
+      );
       const hits: SearchHit[] = [];
       for (let pageNo = 1; pageNo <= total; pageNo += 1) {
         const pdfText = (await pdfTextOf(pageNo)).toLowerCase();
-        const ocrText = (ocrByPage.get(pageNo) ?? '').toLowerCase();
+        const ocrText = (docOcrMap[pageNo] ?? ocrByPage.get(pageNo) ?? '').toLowerCase();
         const inPdf = pdfText.includes(needle);
         const inOcr = ocrText.includes(needle);
         if (!inPdf && !inOcr) continue;
@@ -199,7 +235,9 @@ export function PageOcrViewer({
           page: pageNo,
           source,
           snippet: snippetAround(
-            inPdf ? (textCache.current.get(pageNo) ?? '') : (ocrByPage.get(pageNo) ?? ''),
+            inPdf
+              ? (textCache.current.get(pageNo) ?? '')
+              : (docOcrMap[pageNo] ?? ocrByPage.get(pageNo) ?? ''),
             needle,
           ),
         });
@@ -244,7 +282,12 @@ export function PageOcrViewer({
   }, [numPages]);
 
   const pageLabel = numPages > 0 ? `${currentPage} / ${numPages}` : '—';
-  const ocrTextOfCurrent = ocrByPage.get(currentPage)?.trim() ?? '';
+  // Always prioritize the current previewed document's OCR/text over unrelated workspace scans
+  const ocrTextOfCurrent =
+    docOcrMap[currentPage]?.trim() ||
+    currentPdfText.trim() ||
+    ocrByPage.get(currentPage)?.trim() ||
+    '';
 
   return (
     <div className="overflow-hidden rounded-2xl border border-base bg-[var(--rr-surface)]">
@@ -508,7 +551,7 @@ export function PageOcrViewer({
 
           {/* OCR side panel — open only on request, so the default view is the scan. */}
           {showOcr && (
-            <div className="flex max-h-[60vh] w-full flex-col border-t border-base lg:max-h-none lg:w-80 lg:border-l lg:border-t-0">
+            <div className="flex max-h-[60vh] w-full flex-col border-t border-base lg:max-h-none lg:w-[380px] lg:border-l lg:border-t-0">
               <div className="flex items-center justify-between gap-2 border-b border-base px-3 py-2.5">
                 <p className="flex items-center gap-1.5 text-xs font-semibold">
                   <TextAa size={14} className="text-accent" /> OCR text · page {currentPage}

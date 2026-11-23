@@ -4,6 +4,8 @@ using RecordRoom.Api.Application.Services;
 using RecordRoom.Api.Domain;
 using RecordRoom.Api.Infrastructure.Auth;
 using RecordRoom.Api.Infrastructure.Data;
+using RecordRoom.Api.Infrastructure.Ocr;
+using RecordRoom.Api.Infrastructure.Realtime;
 
 namespace RecordRoom.Api.Infrastructure.Jobs;
 
@@ -83,5 +85,48 @@ public class ScanProcessingJobs(
 
         logger.LogInformation("Background OCR finished for scan {ScanId} ({Status}, {Chars} characters).",
             scanId, page.Status, text.Length);
+    }
+
+    /// <summary>
+    /// Background extraction of all pages of an uploaded file document (RecordFileDocument).
+    /// Stores the extracted page dictionary as JSON cache in PrivateDocumentStore.
+    /// </summary>
+    [Hangfire.DisableConcurrentExecution(timeoutInSeconds: 600)]
+    public async Task ExtractDocumentOcrAsync(long documentId, CancellationToken ct = default)
+    {
+        using var scope = services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var documentStore = scope.ServiceProvider.GetRequiredService<IPrivateDocumentStore>();
+        var extractor = scope.ServiceProvider.GetRequiredService<OcrTextExtractor>();
+        var audit = scope.ServiceProvider.GetRequiredService<IAuditWriter>();
+
+        var doc = await db.FileDocuments.Include(d => d.RecordFile).FirstOrDefaultAsync(d => d.Id == documentId, ct);
+        if (doc is null || string.IsNullOrWhiteSpace(doc.StorageKey)) return;
+
+        var existing = await documentStore.ReadOcrAsync(doc.StorageKey, ct);
+        if (!string.IsNullOrWhiteSpace(existing)) return;
+
+        await using var stream = await documentStore.OpenReadAsync(doc.StorageKey, ct);
+        if (stream is null) return;
+        using var ms = new MemoryStream();
+        await stream.CopyToAsync(ms, ct);
+        var bytes = ms.ToArray();
+
+        var pages = await extractor.ExtractPagesAsync(bytes, doc.ContentType, ct);
+        if (pages.Count > 0)
+        {
+            var json = System.Text.Json.JsonSerializer.Serialize(pages);
+            await documentStore.SaveOcrAsync(doc.StorageKey, json, ct);
+            logger.LogInformation("Background OCR finished for document {DocumentId} ({Count} pages).", documentId, pages.Count);
+            try
+            {
+                await audit.AnnounceAsync(RealtimeChannels.Digitization, "document.ocr.processed",
+                    doc.Id.ToString(), $"Document OCR ready for {doc.OriginalFileName}");
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Could not announce OCR completion for document {DocumentId}.", documentId);
+            }
+        }
     }
 }

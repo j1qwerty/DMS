@@ -371,7 +371,8 @@ export function toId(value: number | string): string {
 }
 
 export function toApiId(value: string, field: string): number {
-  const parsed = Number(value);
+  const stripped = value.replace(/^[a-zA-Z_-]+/, '');
+  const parsed = Number(stripped || value);
   if (!Number.isFinite(parsed)) {
     throw new ApiError(0, `"${value}" is not a valid ${field} id.`);
   }

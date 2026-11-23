@@ -4,7 +4,6 @@ import {
   CheckCircle,
   Info,
   MapPinPlus,
-  Spinner,
   Trash,
   UploadSimple,
   WarningCircle,
@@ -14,10 +13,9 @@ import { Button } from '../ui/Button';
 import { Field, SelectInput, TextInput } from '../ui/Field';
 import { StatusBadge } from '../ui/Flash';
 import { DropZone } from './DropZone';
-import { useFlash, useQuery, useService } from '../../hooks/useService';
+import { useQuery, useService } from '../../hooks/useService';
 import { useFeatures } from '../../lib/features';
 import { pdfAcceptAttribute, validateDocumentFile, validatePdfFile } from '../../lib/document';
-import { extractPdfPagesToImages } from '../../lib/pdf-unpack';
 import { dataSource } from '../../services';
 import type { MapUpload, RecordFile, Room } from '../../types';
 
@@ -82,12 +80,10 @@ function Notice({ tone, children }: { tone: 'danger' | 'info'; children: React.R
  */
 export function UploadFileModal({ file, onClose, onDone }: ActionContext) {
   const service = useService();
-  const { success } = useFlash();
   const [queue, setQueue] = useState<File[]>([]);
   const [results, setResults] = useState<{ name: string; ok: boolean; message: string }[]>([]);
   const [busy, setBusy] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
-  const [unpack, setUnpack] = useState<{ done: number; total: number; label: string } | null>(null);
 
   const issue = queue.length === 0 ? null : queue.map(validatePdfFile).find((error) => error);
 
@@ -116,8 +112,12 @@ export function UploadFileModal({ file, onClose, onDone }: ActionContext) {
             done.push({
               name: scan.name,
               ok: true,
-              message: 'stored — page extraction and OCR are finishing in the background',
+              message: 'stored — OCR is processing in the background',
             });
+            // Trigger OCR generation in background for local demo
+            if (dataSource === 'local') {
+              void service.files.documentOcr(file.id, result.value.id);
+            }
           } else {
             done.push({ name: scan.name, ok: false, message: result.error });
           }
@@ -134,11 +134,11 @@ export function UploadFileModal({ file, onClose, onDone }: ActionContext) {
       if (count > 0) {
         onDone(
           count === 1
-            ? `Scan uploaded to ${file.fileNumber}.`
-            : `${count} scans uploaded to ${file.fileNumber}.`,
+            ? `PDF uploaded to ${file.fileNumber}.`
+            : `${count} PDFs uploaded to ${file.fileNumber}.`,
         );
         setQueue([]);
-        void unpackInBackground(uploaded);
+        onClose();
       }
     } finally {
       setBusy(false);
@@ -146,54 +146,11 @@ export function UploadFileModal({ file, onClose, onDone }: ActionContext) {
     }
   };
 
-  /**
-   * Unpacking used to run inline and block the upload; now it runs as a
-   * background job: every page is registered and its OCR is done by the API's
-   * own background pass (or generated locally, since the demo engine is
-   * simulated). The progress chip in the modal is the only UI while it runs.
-   */
-  const unpackInBackground = async (scans: File[]) => {
-    const total = scans.length;
-    setUnpack({ done: 0, total, label: scans[0]?.name ?? '' });
-    try {
-      for (const [index, scan] of scans.entries()) {
-        setUnpack({ done: index, total, label: scan.name });
-        const existing = await service.digitization.list(file.id);
-        let nextPageNo = existing.reduce((max, row) => Math.max(max, row.pageNo), 0);
-        const extracted = await extractPdfPagesToImages(scan, scan.name);
-        for (const pageFile of extracted) {
-          nextPageNo += 1;
-          const added = await service.digitization.add(file.id, {
-            pageNo: nextPageNo,
-            filename: pageFile.name,
-            documentSize: 'A4',
-            note: `Imported from ${scan.name}`,
-          });
-          if (added.ok) {
-            const withDoc = await service.digitization.addDocument(added.value.id, pageFile);
-            if (withDoc.ok && dataSource === 'local') {
-              // The local demo has no OCR engine: generate and store the page
-              // text now so the OCR surface does not show empty pages.
-              await service.digitization.runOcr(added.value.id);
-            }
-          }
-        }
-      }
-      success(
-        `Uploaded ${scans.length} scan(s) to ${file.fileNumber} — pages and OCR are finishing in the background.`,
-      );
-    } catch (err) {
-      console.warn('Could not extract PDF pages in the background:', err);
-    } finally {
-      setUnpack(null);
-    }
-  };
-
   return (
     <Modal
       open
       onClose={onClose}
-      title="Upload file scan"
+      title="Upload PDF"
       description="Attach the scanned copy of this file as PDF. An existing scan is kept as an earlier version."
       footer={
         <>
@@ -209,33 +166,13 @@ export function UploadFileModal({ file, onClose, onDone }: ActionContext) {
               ? statusMsg || `Uploading ${results.length + 1} of ${queue.length}…`
               : queue.length > 1
                 ? `Upload ${queue.length} PDFs`
-                : 'Upload pdf'}
+                : 'Upload PDF'}
           </Button>
         </>
       }
     >
       <FileSummary file={file} />
 
-      {/* Background unpack progress — page extraction and OCR continue while
-          the upload result is already displayed. */}
-      {unpack && (
-        <div className="mb-4 flex items-center gap-3 rounded-xl border border-base bg-[var(--rr-bg)] p-3">
-          <Spinner size={16} className="animate-spin text-accent" />
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-xs font-semibold">
-              Unpacking pages — {unpack.done + 1} of {unpack.total}
-              <span className="muted font-normal"> · {unpack.label}</span>
-            </p>
-            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--rr-surface-2)]">
-              <div
-                className="h-full rounded-full bg-[var(--rr-accent)] transition-all"
-                style={{ width: `${Math.round((unpack.done / unpack.total) * 100)}%` }}
-              />
-            </div>
-          </div>
-          <span className="muted text-[11px]">runs in the background</span>
-        </div>
-      )}
       <DropZone
         file={queue.length === 1 ? queue[0] : null}
         onFile={(next) => setQueue(next ? [next] : [])}

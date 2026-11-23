@@ -15,8 +15,11 @@ import { session } from './session';
 import {
   addLocalRecordDocument,
   deleteLocalRecordDocument,
+  getLocalDocumentOcr,
   listLocalRecordDocuments,
   localRecordDocumentBlob,
+  setLocalDocumentOcr,
+  setLocalDocumentOcrPage,
 } from './document-storage';
 
 const MAX_POSITION = 100;
@@ -473,6 +476,40 @@ export const filesService: FilesApi = {
 
   async documentBlob(fileId, documentId) {
     return localRecordDocumentBlob(fileId, documentId);
+  },
+
+  async documentOcr(fileId, documentId) {
+    const cached = getLocalDocumentOcr(documentId);
+    if (cached) return cached;
+
+    const file = await filesService.get(fileId);
+    const docs = await filesService.listDocuments(fileId);
+    const targetDoc = docs.find((d) => d.id === documentId);
+    const pageCount = targetDoc?.pageCount ?? 8;
+    const map: Record<number, string> = {};
+
+    // Populate from known matching scan pages if any
+    const scans = file
+      ? store
+          .getState()
+          .scanPages.filter((row) => row.fileBarcode === file.fileBarcode && row.ocrText?.trim())
+      : [];
+    for (let p = 1; p <= pageCount; p++) {
+      const match = scans.find((s) => (s.pageIndex ?? s.pageNo) === p);
+      map[p] =
+        match?.ocrText?.trim() ||
+        (targetDoc
+          ? `Page ${p} of ${targetDoc.filename} (${file?.fileNumber ?? 'record'}).`
+          : `Page ${p}.`);
+    }
+
+    setLocalDocumentOcr(documentId, map);
+    return map;
+  },
+
+  async saveDocumentOcr(_fileId, documentId, pageNo, text) {
+    setLocalDocumentOcrPage(documentId, pageNo, text);
+    return ok(true);
   },
 
   async deleteDocument(fileId, documentId) {

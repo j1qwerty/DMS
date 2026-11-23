@@ -67,6 +67,34 @@ public sealed class OcrTextExtractor(
         return new OcrExtraction("", "none");
     }
 
+    /// <summary>Extracts text for each page of the document individually (1-based page index).</summary>
+    public async Task<Dictionary<int, string>> ExtractPagesAsync(byte[] blob, string contentType, CancellationToken ct = default)
+    {
+        var result = new Dictionary<int, string>();
+        if (!Enabled || blob.Length == 0) return result;
+
+        if (contentType == "application/pdf")
+        {
+            var pages = RenderPdfPages(blob);
+            for (var i = 0; i < pages.Count; i++)
+            {
+                ct.ThrowIfCancellationRequested();
+                var text = engine.IsAvailable ? await engine.RunAsync(pages[i], ct) : "";
+                result[i + 1] = text?.Trim() ?? "";
+            }
+            return result;
+        }
+
+        if (contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+        {
+            var text = engine.IsAvailable ? await engine.RunAsync(blob, ct) : "";
+            result[1] = text?.Trim() ?? "";
+            return result;
+        }
+
+        return result;
+    }
+
     /// <summary>Each page as PNG bytes at the OCR render size; empty when PDFium cannot open the bytes.</summary>
     private List<byte[]> RenderPdfPages(byte[] pdf)
     {

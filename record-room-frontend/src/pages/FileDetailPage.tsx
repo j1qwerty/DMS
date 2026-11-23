@@ -487,30 +487,60 @@ export function FileDetailPage() {
             ocrOpen ? 'lg:grid-cols-[minmax(0,1fr)]' : 'lg:grid-cols-[minmax(0,1fr)_320px]',
           )}
         >
-          {/* OCR open: the version picker moves to a dropdown on top of the
+          {/* OCR open: the version picker moves to a sleek dropdown on top of the
               preview, and the right-hand version sidebar leaves — the preview
-              gets wider and the OCR panel opens on its right. */}
+              gets wider and the OCR panel opens on its right without shrinking. */}
           {ocrOpen && (
-            <Card className="mb-4">
-              <Field
-                label="Preview version"
-                htmlFor="preview-version"
-                hint="Switch the stored scan or built deliverable being previewed."
-              >
-                <SelectInput
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-base bg-[var(--rr-surface)] p-2.5 shadow-sm">
+              <div className="flex min-w-0 flex-1 items-center gap-2">
+                <span className="whitespace-nowrap text-xs font-semibold text-[var(--rr-muted)]">
+                  Version:
+                </span>
+                <select
                   id="preview-version"
                   value={selectedVersion?.id ?? ''}
                   onChange={(event) => pick(event.target.value)}
+                  className="focus-ring h-8 max-w-md rounded-lg border border-base bg-[var(--rr-bg)] px-2.5 text-xs font-semibold outline-none"
+                  aria-label="Select document version"
                 >
                   {allVersions.map((version, index) => (
                     <option key={version.id} value={version.id}>
-                      {index === 0 ? 'Current version · ' : ''}
-                      {version.filename} ({version.versionLabel})
+                      {index === 0 ? '★ Current · ' : ''}
+                      {version.filename} ({version.versionLabel}
+                      {version.pageCount ? ` · ${version.pageCount}p` : ''})
                     </option>
                   ))}
-                </SelectInput>
-              </Field>
-            </Card>
+                </select>
+                {(() => {
+                  const draft = getStudioDraft(file.id);
+                  if (!draft) return null;
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/files/${file.id}/studio`)}
+                      className="focus-ring inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-900 transition hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200"
+                      title="Open draft in studio"
+                    >
+                      <Badge tone="warning">Studio draft</Badge>
+                      <span className="hidden sm:inline">Edit in studio →</span>
+                    </button>
+                  );
+                })()}
+              </div>
+              <div className="flex items-center gap-2">
+                {canEdit && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="!h-8 !px-2.5 text-xs"
+                    onClick={() => setDialog('upload')}
+                    icon={<UploadSimple size={14} />}
+                  >
+                    Upload PDF
+                  </Button>
+                )}
+              </div>
+            </div>
           )}
 
           {/* Main Viewer Area (Full Height & Page-size Responsive) */}
@@ -564,7 +594,7 @@ export function FileDetailPage() {
                           onClick={() => setDialog('upload')}
                           icon={<UploadSimple size={16} />}
                         >
-                          Upload pdf
+                          Upload PDF
                         </Button>
                       )}
                       {canStudio && (
@@ -600,7 +630,7 @@ export function FileDetailPage() {
                       onClick={() => setDialog('upload')}
                       icon={<UploadSimple size={15} />}
                     >
-                      Upload pdf
+                      Upload PDF
                     </Button>
                   )}
                 </div>

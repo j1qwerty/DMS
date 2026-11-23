@@ -231,6 +231,13 @@ export interface FilesApi {
   /** Destructive: removes one stored scan version. Admin-only on the API. */
   deleteDocument(fileId: string, documentId: string): Promise<Result<true>>;
   documentBlob(fileId: string, documentId: string): Promise<Blob>;
+  documentOcr(fileId: string, documentId: string): Promise<Record<number, string>>;
+  saveDocumentOcr(
+    fileId: string,
+    documentId: string,
+    pageNo: number,
+    text: string,
+  ): Promise<Result<boolean>>;
   remove(fileId: string): Promise<Result<true>>;
 }
 

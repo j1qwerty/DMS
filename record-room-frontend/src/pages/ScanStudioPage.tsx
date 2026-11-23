@@ -398,33 +398,43 @@ export function ScanStudioPage() {
     }
   };
 
-  const openVersionPreview = async (version: UnifiedDocumentVersion) => {
-    if (!fileId) return;
-    try {
-      const blob =
-        version.source === 'document'
-          ? await service.files.documentBlob(fileId, version.id)
-          : await service.digitization.pdfBlob(version.id);
-      if (versionPreview) URL.revokeObjectURL(versionPreview.url);
-      setVersionPreview({ version, url: URL.createObjectURL(blob) });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not load PDF preview.');
-    }
-  };
+  const openVersionPreview = useCallback(
+    async (version: UnifiedDocumentVersion) => {
+      if (!fileId) return;
+      try {
+        const blob =
+          version.source === 'document'
+            ? await service.files.documentBlob(fileId, version.id)
+            : await service.digitization.pdfBlob(version.id);
+        setVersionPreview((prev) => {
+          if (prev) URL.revokeObjectURL(prev.url);
+          return { version, url: URL.createObjectURL(blob) };
+        });
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Could not load PDF preview.');
+      }
+    },
+    [fileId],
+  );
 
-  const closeVersionPreview = () => {
-    if (versionPreview) URL.revokeObjectURL(versionPreview.url);
-    setVersionPreview(null);
-  };
+  const closeVersionPreview = useCallback(() => {
+    setVersionPreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev.url);
+      return null;
+    });
+  }, []);
 
   // Left/right arrows switch the stored version being previewed.
-  const stepVersionPreview = (delta: number) => {
-    if (!versionPreview) return;
-    const index = unifiedVersions.findIndex((v) => v.id === versionPreview.version.id);
-    const next = index + delta;
-    if (next < 0 || next >= unifiedVersions.length) return;
-    void openVersionPreview(unifiedVersions[next]);
-  };
+  const stepVersionPreview = useCallback(
+    (delta: number) => {
+      if (!versionPreview) return;
+      const index = unifiedVersions.findIndex((v) => v.id === versionPreview.version.id);
+      const next = index + delta;
+      if (next < 0 || next >= unifiedVersions.length) return;
+      void openVersionPreview(unifiedVersions[next]);
+    },
+    [versionPreview, unifiedVersions, openVersionPreview],
+  );
 
   const executeBuildPdf = async (name: string, remarks: string) => {
     if (!fileId) return;
@@ -469,15 +479,80 @@ export function ScanStudioPage() {
     setLightboxId(scan.id);
     setShowOcr(false);
   };
-  const stepLightbox = (delta: number) => {
-    const next = lightboxIndex + delta;
-    if (next < 0 || next >= scans.length) return;
-    setLightboxId(scans[next].id);
-    setShowOcr(false);
-  };
+  const stepLightbox = useCallback(
+    (delta: number) => {
+      setLightboxId((currentId) => {
+        if (!currentId) return null;
+        const index = scans.findIndex((s) => s.id === currentId);
+        if (index < 0) return currentId;
+        const next = index + delta;
+        if (next < 0 || next >= scans.length) return currentId;
+        return scans[next].id;
+      });
+      setShowOcr(false);
+    },
+    [scans],
+  );
 
   const patch = (scanId: string, updater: (page: FileScan) => FileScan) =>
     setScans((rows) => rows.map((row) => (row.id === scanId ? updater(row) : row)));
+
+  // Prevent background page from scrolling while full screen preview or lightbox is open
+  useEffect(() => {
+    if (lightboxScan || versionPreview) {
+      const original = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+      return () => {
+        document.body.style.overflow = original;
+      };
+    }
+  }, [lightboxScan, versionPreview]);
+
+  // Keyboard navigation for studio (Left/Right arrows, Escape)
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement
+      ) {
+        return;
+      }
+
+      if (event.key === 'Escape') {
+        if (lightboxScan) {
+          event.preventDefault();
+          setLightboxId(null);
+        } else if (versionPreview) {
+          event.preventDefault();
+          closeVersionPreview();
+        }
+        return;
+      }
+
+      if (event.key === 'ArrowLeft') {
+        if (lightboxScan) {
+          event.preventDefault();
+          stepLightbox(-1);
+        } else if (versionPreview) {
+          event.preventDefault();
+          stepVersionPreview(-1);
+        }
+      } else if (event.key === 'ArrowRight') {
+        if (lightboxScan) {
+          event.preventDefault();
+          stepLightbox(1);
+        } else if (versionPreview) {
+          event.preventDefault();
+          stepVersionPreview(1);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [lightboxScan, versionPreview, closeVersionPreview, stepLightbox, stepVersionPreview]);
 
   const lightboxRotate = async (degrees: 90 | 270) => {
     if (!lightboxScan) return;
@@ -1000,117 +1075,95 @@ export function ScanStudioPage() {
         </div>
       </div>
 
-      {/* ------------------------------------------------ full-screen preview */}
+      {/* ------------------------------------------------ dedicated full-page preview */}
       {lightboxScan && (
         <div
-          className="fixed inset-0 z-[60] flex flex-col bg-slate-950/90"
+          className="fixed inset-0 z-[60] flex flex-col bg-slate-950 text-white"
           role="dialog"
           aria-modal="true"
-          onKeyDown={(event) => {
-            if (event.key === 'ArrowLeft') {
-              event.preventDefault();
-              stepLightbox(-1);
-            } else if (event.key === 'ArrowRight') {
-              event.preventDefault();
-              stepLightbox(1);
-            }
-          }}
         >
-          {/* header: identity + status + close */}
-          <div className="flex items-center justify-between gap-3 p-3 text-white">
-            <div className="min-w-0">
-              <p className="flex flex-wrap items-center gap-2 text-sm font-semibold">
-                {lightboxScan.filename}
-                <StatusBadge status={lightboxScan.status} />
-                {lightboxScan.enhancement && <Badge tone="info">{lightboxScan.enhancement}</Badge>}
-              </p>
-              <p className="muted mt-0.5 text-xs text-white/70">
-                Page {lightboxScan.pageNo} · v{lightboxScan.version} · position {lightboxIndex + 1}{' '}
-                of {scans.length}
-                {lightboxScan.dpi ? ` · ${lightboxScan.dpi} DPI` : ''}
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setLightboxId(null)}
-              className="focus-ring grid size-10 shrink-0 place-items-center rounded-lg hover:bg-white/10"
-              aria-label="Close preview"
-            >
-              <X size={20} />
-            </button>
-          </div>
-
-          {/* body: filmstrip + page + OCR panel */}
-          <div className="flex min-h-0 flex-1 gap-2 px-3 pb-3">
-            {/* filmstrip of the other pages */}
-            <div className="hidden w-[92px] shrink-0 space-y-2 overflow-y-auto rounded-xl bg-black/20 p-2 md:block">
-              {scans.map((scan) => (
-                <button
-                  key={scan.id}
-                  type="button"
-                  onClick={() => {
-                    setLightboxId(scan.id);
-                    setShowOcr(false);
-                  }}
-                  className={cn(
-                    'relative block w-full shrink-0 overflow-hidden rounded-lg border transition',
-                    scan.id === lightboxScan.id
-                      ? 'border-[var(--rr-accent)] ring-2 ring-[var(--rr-accent)]'
-                      : 'border-white/20 opacity-70 hover:opacity-100',
+          {/* Header bar: back to grid + page identity + pager + close */}
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-slate-950/95 px-4 py-2.5">
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setLightboxId(null)}
+                className="focus-ring inline-flex items-center gap-1.5 rounded-lg bg-white/10 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-white/20"
+                title="Return to studio grid (Esc)"
+              >
+                ← Back to Studio
+              </button>
+              <div className="min-w-0">
+                <p className="flex flex-wrap items-center gap-2 text-xs font-semibold">
+                  <span className="truncate max-w-xs">{lightboxScan.filename}</span>
+                  <StatusBadge status={lightboxScan.status} />
+                  {lightboxScan.enhancement && (
+                    <Badge tone="info">{lightboxScan.enhancement}</Badge>
                   )}
-                  aria-label={`Open page ${scan.pageNo}`}
-                >
-                  {previews[scan.id] ? (
-                    <img
-                      src={previews[scan.id]}
-                      alt={`Page ${scan.pageNo}`}
-                      className="aspect-[3/4] w-full object-cover"
-                    />
-                  ) : (
-                    <span className="grid aspect-[3/4] w-full place-items-center text-[10px] text-white/70">
-                      {scan.pageNo}
-                    </span>
-                  )}
-                  <span className="absolute bottom-0.5 right-0.5 rounded bg-black/60 px-1 text-[10px] font-bold text-white">
-                    {scan.pageNo}
-                  </span>
-                </button>
-              ))}
+                </p>
+                <p className="muted text-[11px] text-white/60">
+                  Page {lightboxScan.pageNo} · v{lightboxScan.version} · position{' '}
+                  {lightboxIndex + 1} of {scans.length}
+                  {lightboxScan.dpi ? ` · ${lightboxScan.dpi} DPI` : ''}
+                </p>
+              </div>
             </div>
 
-            {/* the page itself, with prev/next */}
-            <div className="flex min-w-0 flex-1 items-stretch gap-1">
+            {/* Center page stepper */}
+            <div className="flex items-center gap-1 rounded-lg border border-white/15 bg-white/5 p-1">
               <button
                 type="button"
                 onClick={() => stepLightbox(-1)}
                 disabled={lightboxIndex <= 0}
-                className="focus-ring my-auto grid size-11 shrink-0 place-items-center self-center rounded-full bg-white/10 text-white disabled:opacity-30"
+                className="focus-ring grid size-7 place-items-center rounded text-white hover:bg-white/15 disabled:opacity-30"
+                title="Previous page (Left arrow)"
                 aria-label="Previous page"
               >
-                <ArrowLeft size={18} />
+                <ArrowLeft size={14} />
               </button>
+              <span className="min-w-24 text-center text-xs font-semibold">
+                Page {lightboxIndex + 1} of {scans.length}
+              </span>
+              <button
+                type="button"
+                onClick={() => stepLightbox(1)}
+                disabled={lightboxIndex >= scans.length - 1}
+                className="focus-ring grid size-7 place-items-center rounded text-white hover:bg-white/15 disabled:opacity-30"
+                title="Next page (Right arrow)"
+                aria-label="Next page"
+              >
+                <ArrowRight size={14} />
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setLightboxId(null)}
+              className="focus-ring grid size-9 place-items-center rounded-lg hover:bg-white/10"
+              aria-label="Close preview (Esc)"
+              title="Close (Esc)"
+            >
+              <X size={18} />
+            </button>
+          </div>
+
+          {/* Body: page canvas + optional OCR panel */}
+          <div className="flex min-h-0 flex-1 overflow-hidden">
+            {/* The page image canvas with zoom & fit controls */}
+            <div className="relative flex min-w-0 flex-1 items-stretch">
               {previews[lightboxScan.id] ? (
                 <PageImageViewer
                   src={previews[lightboxScan.id]}
                   alt={`Page ${lightboxScan.pageNo}`}
                 />
               ) : (
-                <div className="flex flex-1 items-center justify-center rounded-xl bg-white p-8 text-center">
+                <div className="flex flex-1 items-center justify-center bg-slate-900 p-8 text-center">
                   <div className="flex flex-col items-center gap-2 text-center">
-                    <FilePdf size={30} className="text-accent" />
-                    <p className="muted text-xs">No preview for this page</p>
+                    <FilePdf size={36} className="text-accent" />
+                    <p className="text-xs text-white/70">No preview for this page</p>
                   </div>
                 </div>
               )}
-              <button
-                type="button"
-                onClick={() => stepLightbox(1)}
-                disabled={lightboxIndex >= scans.length - 1}
-                className="focus-ring my-auto grid size-11 shrink-0 place-items-center self-center rounded-full bg-white/10 text-white disabled:opacity-30"
-                aria-label="Next page"
-              >
-                <ArrowRight size={18} />
-              </button>
             </div>
 
             {/* OCR on demand — only when asked for */}

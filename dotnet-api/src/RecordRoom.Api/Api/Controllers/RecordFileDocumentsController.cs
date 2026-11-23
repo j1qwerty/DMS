@@ -51,4 +51,18 @@ public sealed class RecordFileDocumentsController(IRecordFileDocumentsService do
     [HttpDelete("{documentId:long}")]
     public async Task<IResult> Delete(int fileId, long documentId, CancellationToken ct) =>
         ApiResults.FromResult(await documents.DeleteAsync(fileId, documentId, ct));
+
+    [HttpGet("{documentId:long}/ocr")]
+    public async Task<IResult> Ocr(int fileId, long documentId, CancellationToken ct)
+    {
+        var map = await documents.GetOcrAsync(fileId, documentId, ct);
+        return map is null ? Results.NotFound() : Results.Ok(ApiResponse<Dictionary<int, string>>.Ok(map));
+    }
+
+    [Authorize(Policy = "perm:digitization.upload")]
+    [HttpPut("{documentId:long}/ocr/{pageNo:int}")]
+    public async Task<IResult> SaveOcrPage(int fileId, long documentId, int pageNo, [FromBody] DocumentOcrUpdateInput input, CancellationToken ct) =>
+        ApiResults.FromResult(await documents.SaveOcrPageAsync(fileId, documentId, pageNo, input.Text ?? "", ct));
 }
+
+public sealed record DocumentOcrUpdateInput(string? Text);

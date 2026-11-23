@@ -27,6 +27,8 @@ public interface IPrivateDocumentStore
     Task<Result<StoredDocument>> SaveBytesAsync(byte[] bytes, string fileName, string contentType, CancellationToken ct = default);
     Task<Stream?> OpenReadAsync(string storageKey, CancellationToken ct = default);
     Task DeleteAsync(string storageKey, CancellationToken ct = default);
+    Task<string?> ReadOcrAsync(string storageKey, CancellationToken ct = default);
+    Task SaveOcrAsync(string storageKey, string ocrJson, CancellationToken ct = default);
 }
 
 /// <summary>Private filesystem storage; generated keys mean uploaded names are never filesystem paths.</summary>
@@ -209,7 +211,29 @@ public sealed class PrivateDocumentStore : IPrivateDocumentStore
     {
         ct.ThrowIfCancellationRequested();
         File.Delete(GetPath(storageKey));
+        TryRemove(GetOcrPath(storageKey));
         return Task.CompletedTask;
+    }
+
+    public async Task<string?> ReadOcrAsync(string storageKey, CancellationToken ct = default)
+    {
+        var path = GetOcrPath(storageKey);
+        if (!File.Exists(path)) return null;
+        return await File.ReadAllTextAsync(path, System.Text.Encoding.UTF8, ct);
+    }
+
+    public async Task SaveOcrAsync(string storageKey, string ocrJson, CancellationToken ct = default)
+    {
+        var path = GetOcrPath(storageKey);
+        await File.WriteAllTextAsync(path, ocrJson, System.Text.Encoding.UTF8, ct);
+    }
+
+    private string GetOcrPath(string key)
+    {
+        var id = Path.GetFileNameWithoutExtension(key);
+        if (!Guid.TryParseExact(id, "N", out _))
+            throw new ArgumentException("Invalid private document storage key.", nameof(key));
+        return Path.Combine(_rootPath, id + ".ocr.json");
     }
 
     private string GetPath(string key)

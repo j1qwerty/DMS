@@ -1,3 +1,4 @@
+using Hangfire;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using RecordRoom.Api.Application;
@@ -5,6 +6,8 @@ using RecordRoom.Api.Application.Contracts;
 using RecordRoom.Api.Domain;
 using RecordRoom.Api.Infrastructure.Auth;
 using RecordRoom.Api.Infrastructure.Data;
+using RecordRoom.Api.Infrastructure.Jobs;
+using RecordRoom.Api.Infrastructure.Ocr;
 using RecordRoom.Api.Infrastructure.Realtime;
 
 namespace RecordRoom.Api.Application.Services;
@@ -15,12 +18,16 @@ public interface IRecordFileDocumentsService
     Task<Result<RecordFileDocumentDto>> UploadAsync(int fileId, IFormFile? document, CancellationToken ct = default);
     Task<PrivateDocumentContent?> OpenAsync(int fileId, long documentId, CancellationToken ct = default);
     Task<Result<bool>> DeleteAsync(int fileId, long documentId, CancellationToken ct = default);
+    Task<Dictionary<int, string>?> GetOcrAsync(int fileId, long documentId, CancellationToken ct = default);
+    Task<Result<bool>> SaveOcrPageAsync(int fileId, long documentId, int pageNo, string text, CancellationToken ct = default);
 }
 
 /// <summary>File-level attachments, versioned independently from page-by-page digitization.</summary>
 public sealed class RecordFileDocumentsService(
     AppDbContext db, IPrivateDocumentStore documentStore, IAuditWriter audit,
-    ICurrentUserAccessor current, ILogger<RecordFileDocumentsService> logger) : IRecordFileDocumentsService
+    ICurrentUserAccessor current, ILogger<RecordFileDocumentsService> logger,
+    Hangfire.IBackgroundJobClient backgroundJobs,
+    OcrTextExtractor extractor) : IRecordFileDocumentsService
 {
     private static RecordFileDocumentDto ToDto(RecordFileDocument d, string barcode) =>
         new(d.Id, d.RecordFileId, barcode, d.Version, d.OriginalFileName, d.ContentType, d.SizeBytes, d.Sha256, d.UploadedAt, d.UploadedBy, d.PageCount);
@@ -65,7 +72,60 @@ public sealed class RecordFileDocumentsService(
         catch { await TryDeleteAsync(stored.StorageKey); throw; }
         await audit.AnnounceAsync(RealtimeChannels.Files, "file.document.uploaded", fileId.ToString(),
             $"{stored.OriginalFileName} uploaded as version {version}");
+        backgroundJobs.Enqueue<ScanProcessingJobs>(job => job.ExtractDocumentOcrAsync(row.Id, CancellationToken.None));
         return Result<RecordFileDocumentDto>.Ok(ToDto(row, file.Barcode));
+    }
+
+    public async Task<Dictionary<int, string>?> GetOcrAsync(int fileId, long documentId, CancellationToken ct = default)
+    {
+        var row = await db.FileDocuments.AsNoTracking()
+            .FirstOrDefaultAsync(d => d.Id == documentId && d.RecordFileId == fileId, ct);
+        if (row is null) return null;
+
+        var cached = await documentStore.ReadOcrAsync(row.StorageKey, ct);
+        if (!string.IsNullOrWhiteSpace(cached))
+        {
+            try
+            {
+                var map = System.Text.Json.JsonSerializer.Deserialize<Dictionary<int, string>>(cached);
+                if (map is not null) return map;
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Could not deserialize OCR cache for document {DocumentId}.", documentId);
+            }
+        }
+
+        await using var stream = await documentStore.OpenReadAsync(row.StorageKey, ct);
+        if (stream is null) return new Dictionary<int, string>();
+        using var ms = new MemoryStream();
+        await stream.CopyToAsync(ms, ct);
+        var bytes = ms.ToArray();
+
+        var pages = await extractor.ExtractPagesAsync(bytes, row.ContentType, ct);
+        try
+        {
+            var json = System.Text.Json.JsonSerializer.Serialize(pages);
+            await documentStore.SaveOcrAsync(row.StorageKey, json, ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not persist OCR cache for document {DocumentId}.", documentId);
+        }
+        return pages;
+    }
+
+    public async Task<Result<bool>> SaveOcrPageAsync(int fileId, long documentId, int pageNo, string text, CancellationToken ct = default)
+    {
+        var row = await db.FileDocuments.AsNoTracking()
+            .FirstOrDefaultAsync(d => d.Id == documentId && d.RecordFileId == fileId, ct);
+        if (row is null) return Result<bool>.Fail("Document not found.", "documentId");
+
+        var pages = await GetOcrAsync(fileId, documentId, ct) ?? new Dictionary<int, string>();
+        pages[pageNo] = text;
+        var json = System.Text.Json.JsonSerializer.Serialize(pages);
+        await documentStore.SaveOcrAsync(row.StorageKey, json, ct);
+        return Result<bool>.Ok(true);
     }
 
     public async Task<PrivateDocumentContent?> OpenAsync(int fileId, long documentId, CancellationToken ct = default)

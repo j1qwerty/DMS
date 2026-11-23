@@ -474,6 +474,28 @@ export const httpFilesService: FilesApi = {
     return getBlob(`/api/files/${fileId}/documents/${documentId}/content`);
   },
 
+  async documentOcr(fileId, documentId) {
+    const raw = await get<Record<string, string>>(
+      `/api/files/${fileId}/documents/${documentId}/ocr`,
+    );
+    if (!raw) return {};
+    const map: Record<number, string> = {};
+    for (const [key, val] of Object.entries(raw)) {
+      const pageNo = Number(key);
+      if (!Number.isNaN(pageNo)) map[pageNo] = val;
+    }
+    return map;
+  },
+
+  async saveDocumentOcr(fileId, documentId, pageNo, text) {
+    const result = await attempt<boolean>(
+      'PUT',
+      `/api/files/${fileId}/documents/${documentId}/ocr/${pageNo}`,
+      { text },
+    );
+    return result.ok ? ok(true) : err(result.error);
+  },
+
   async remove(fileId) {
     return wrapTrue(await attempt<Dto>('DELETE', `/api/files/${fileId}`));
   },

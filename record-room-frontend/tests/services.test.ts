@@ -700,4 +700,19 @@ describe('registry search covers the OCR text of digitized pages', () => {
     expect(result.total).toBeGreaterThanOrEqual(1);
     expect(result.items.every((file) => file.matchedVia === undefined)).toBe(true);
   });
+
+  it('loads and saves OCR text per page for stored documents', async () => {
+    const file = (await filesService.list({ pageSize: 1 })).items[0];
+    const docs = await filesService.listDocuments(file.id);
+    const docId = docs[0]?.id ?? 'doc-1';
+    const ocrMap = await filesService.documentOcr(file.id, docId);
+    expect(typeof ocrMap).toBe('object');
+    expect(ocrMap[1]).toBeDefined();
+
+    const saved = await filesService.saveDocumentOcr(file.id, docId, 1, 'Corrected text page 1');
+    expect(saved.ok).toBe(true);
+
+    const reloaded = await filesService.documentOcr(file.id, docId);
+    expect(reloaded[1]).toBe('Corrected text page 1');
+  });
 });

@@ -278,7 +278,24 @@ export async function deleteLocalRecordDocument(
   );
   blobs.delete(blobKey('record', documentId));
   await idbDelete(blobKey('record', documentId));
+  documentOcrCache.delete(documentId);
   return { filename: row.filename, version: row.version };
+}
+
+const documentOcrCache = new Map<string, Record<number, string>>();
+
+export function getLocalDocumentOcr(documentId: string): Record<number, string> | null {
+  return documentOcrCache.get(documentId) ?? null;
+}
+
+export function setLocalDocumentOcr(documentId: string, ocrMap: Record<number, string>): void {
+  documentOcrCache.set(documentId, ocrMap);
+}
+
+export function setLocalDocumentOcrPage(documentId: string, pageNo: number, text: string): void {
+  const existing = documentOcrCache.get(documentId) ?? {};
+  existing[pageNo] = text;
+  documentOcrCache.set(documentId, existing);
 }
 
 export async function clearLocalDocumentStorage(): Promise<void> {
