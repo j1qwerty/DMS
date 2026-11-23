@@ -451,6 +451,27 @@ public sealed record RecordFileDocumentDto(
     string ContentType, long SizeBytes, string Sha256, DateTime UploadedAt, string UploadedBy,
     int? PageCount = null);
 
+/// <summary>One page of a stored document version with its persisted OCR text.</summary>
+public sealed record DocumentVersionPageDto(
+    long Id,
+    long DocumentId,
+    int PageNo,
+    string OcrText,
+    string OcrMethod,
+    DateTime? OcrRanAt,
+    string? OcrEditedBy,
+    DateTime? OcrEditedAt);
+
+/// <summary>Coverage summary for one document version: how many pages carry text.</summary>
+public sealed record DocumentOcrStatusDto(
+    long DocumentId,
+    int PageCount,
+    int PagesWithText,
+    /// <summary>True while the background extraction/OCR pass is still running.</summary>
+    bool Processing);
+
+public sealed record OcrTextInput(string? Text);
+
 // Bulk ------------------------------------------------------------------------
 
 public sealed record BulkRowDto(int RowNo, string FileBarcode, string Subject, string ShelfBarcode, string Result, string Detail);

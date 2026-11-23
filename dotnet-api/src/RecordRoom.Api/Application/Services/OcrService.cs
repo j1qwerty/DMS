@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using RecordRoom.Api.Application.Contracts;
 using RecordRoom.Api.Domain;
+using RecordRoom.Api.Infrastructure.Auth;
 using RecordRoom.Api.Infrastructure.Data;
 using RecordRoom.Api.Infrastructure.Ocr;
 
@@ -15,6 +16,12 @@ public interface IOcrService
 {
     /// <summary>Reads a stored blob and extracts its text; empty text, never an error, when nothing can be read.</summary>
     Task<OcrExtraction> ExtractAsync(string storageKey, string contentType, CancellationToken ct = default);
+
+    /// <summary>
+    /// Reads one page of a stored multi-page document; PDFs that carry a text
+    /// layer answer from it directly, rasterized pages go through tesseract.
+    /// </summary>
+    Task<OcrExtraction> ExtractAsync(string storageKey, string contentType, int pageNo, CancellationToken ct = default);
 
     /// <summary>Re-runs OCR for one scan page and stores the result.</summary>
     Task<Result<ScanOcrDto>> RunAsync(long scanId, CancellationToken ct = default);
@@ -36,6 +43,17 @@ public sealed class OcrService(
         using var memory = new MemoryStream();
         await stream.CopyToAsync(memory, ct);
         return await extractor.ExtractAsync(memory.ToArray(), contentType, ct);
+    }
+
+    public async Task<OcrExtraction> ExtractAsync(string storageKey, string contentType, int pageNo, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(storageKey)) return new OcrExtraction("", "none");
+        await using var stream = await documentStore.OpenReadAsync(storageKey, ct);
+        if (stream is null) return new OcrExtraction("", "none");
+
+        using var memory = new MemoryStream();
+        await stream.CopyToAsync(memory, ct);
+        return await extractor.ExtractAsync(memory.ToArray(), contentType, pageNo, ct);
     }
 
     public async Task<Result<ScanOcrDto>> RunAsync(long scanId, CancellationToken ct = default)

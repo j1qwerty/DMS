@@ -69,6 +69,8 @@ import {
   toPayload,
   toReportDefinition,
   toRecordFileDocument,
+  toDocumentOcrStatus,
+  toDocumentVersionPage,
   toRoom,
   toScanResult,
   toStats,
@@ -472,6 +474,41 @@ export const httpFilesService: FilesApi = {
 
   async documentBlob(fileId, documentId) {
     return getBlob(`/api/files/${fileId}/documents/${documentId}/content`);
+  },
+
+  async documentPages(fileId, documentId) {
+    return list(
+      await get<Dto[]>(`/api/files/${fileId}/documents/${documentId}/pages`),
+      toDocumentVersionPage,
+    );
+  },
+
+  async documentOcrStatus(fileId, documentId) {
+    try {
+      return toDocumentOcrStatus(
+        await get<Dto>(`/api/files/${fileId}/documents/${documentId}/ocr-status`),
+      );
+    } catch {
+      // A missing status (older API, deleted version) must not break the panel.
+      return null;
+    }
+  },
+
+  async runDocumentPageOcr(fileId, documentId, pageNo) {
+    const result = await attempt<Dto>(
+      'POST',
+      `/api/files/${fileId}/documents/${documentId}/pages/${pageNo}/ocr`,
+    );
+    return result.ok ? ok(toDocumentVersionPage(result.value)) : result;
+  },
+
+  async saveDocumentPageOcr(fileId, documentId, pageNo, text) {
+    const result = await attempt<Dto>(
+      'PUT',
+      `/api/files/${fileId}/documents/${documentId}/pages/${pageNo}/ocr/text`,
+      { text },
+    );
+    return result.ok ? ok(toDocumentVersionPage(result.value)) : result;
   },
 
   async remove(fileId) {
@@ -919,6 +956,11 @@ export const httpDigitizationService: ScanApi = {
   },
 
   async reviewPdf(derivativeId, decision, note, fileId) {
+    // A malformed id is a not-found result, not a thrown error — the local
+    // adapter answers err(...) and callers code against the Result shape.
+    if (!Number.isFinite(Number(derivativeId))) {
+      return err(`Deliverable PDF not found.`, 'derivativeId');
+    }
     const fId = fileId ? toApiId(fileId, 'file') : 0;
     const dId = toApiId(derivativeId, 'derivative');
     const path = fId > 0 ? `/api/files/${fId}/pdf/${dId}/review` : `/api/derivatives/${dId}/review`;

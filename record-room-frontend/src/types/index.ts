@@ -447,8 +447,31 @@ export interface RecordFileDocument {
   sha256: string;
   uploadedAt: string;
   uploadedBy: string;
-  /** Pages in a stored PDF; absent when the count is unknown. */
+  /** Pages in the stored PDF; absent when the count is unknown. */
   pageCount?: number;
+}
+
+/** OCR coverage of one stored document version (GET …/ocr-status). */
+export interface DocumentOcrStatus {
+  documentId: string;
+  pageCount: number;
+  pagesWithText: number;
+  /** True while the background extraction/OCR pass is still running. */
+  processing: boolean;
+}
+
+/** One page of a stored document version with its persisted OCR text. */
+export interface DocumentVersionPage {
+  id: string;
+  documentId: string;
+  pageNo: number;
+  /** Persisted OCR text — empty until the background pass has reached this page. */
+  ocrText: string;
+  /** What produced the text: "pdf-text-layer", "tesseract hin+eng", "hand-corrected". */
+  ocrMethod: string;
+  ocrRanAt?: string;
+  ocrEditedBy?: string;
+  ocrEditedAt?: string;
 }
 
 // ------------------------------------------------------------------- barcodes

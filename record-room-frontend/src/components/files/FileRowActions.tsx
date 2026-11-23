@@ -225,7 +225,7 @@ export function FileRowActions({ file, onAction, variant }: Props) {
           {canEdit && (
             <IconAction
               icon={UploadSimple}
-              label="Upload file scan"
+              label="Upload PDF"
               onClick={() => onAction('upload', file)}
             />
           )}

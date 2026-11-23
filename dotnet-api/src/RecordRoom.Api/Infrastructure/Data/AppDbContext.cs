@@ -26,6 +26,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<MapUpload> Maps => Set<MapUpload>();
     public DbSet<DocumentDerivative> Derivatives => Set<DocumentDerivative>();
     public DbSet<RecordFileDocument> FileDocuments => Set<RecordFileDocument>();
+    public DbSet<DocumentVersionPage> DocumentPages => Set<DocumentVersionPage>();
     public DbSet<BulkImportJob> BulkJobs => Set<BulkImportJob>();
     public DbSet<BulkImportRow> BulkRows => Set<BulkImportRow>();
     public DbSet<BarcodeJob> BarcodeJobs => Set<BarcodeJob>();
@@ -239,6 +240,17 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasIndex(x => new { x.RecordFileId, x.Version }).IsUnique();
             e.HasOne(x => x.RecordFile).WithMany(x => x.Documents)
                 .HasForeignKey(x => x.RecordFileId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<DocumentVersionPage>(e =>
+        {
+            e.ToTable("DocumentVersionPages");
+            e.Property(x => x.OcrMethod).HasMaxLength(64);
+            e.Property(x => x.OcrEditedBy).HasMaxLength(256);
+            // One row per page of a stored document version.
+            e.HasIndex(x => new { x.DocumentId, x.PageNo }).IsUnique();
+            e.HasOne(x => x.Document).WithMany(x => x.Pages)
+                .HasForeignKey(x => x.DocumentId).OnDelete(DeleteBehavior.Cascade);
         });
 
         b.Entity<BulkImportJob>(e =>

@@ -1,3 +1,4 @@
+using Hangfire;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using RecordRoom.Api.Application;
@@ -5,6 +6,7 @@ using RecordRoom.Api.Application.Contracts;
 using RecordRoom.Api.Domain;
 using RecordRoom.Api.Infrastructure.Auth;
 using RecordRoom.Api.Infrastructure.Data;
+using RecordRoom.Api.Infrastructure.Jobs;
 using RecordRoom.Api.Infrastructure.Realtime;
 
 namespace RecordRoom.Api.Application.Services;
@@ -15,15 +17,39 @@ public interface IRecordFileDocumentsService
     Task<Result<RecordFileDocumentDto>> UploadAsync(int fileId, IFormFile? document, CancellationToken ct = default);
     Task<PrivateDocumentContent?> OpenAsync(int fileId, long documentId, CancellationToken ct = default);
     Task<Result<bool>> DeleteAsync(int fileId, long documentId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Every page of one stored document version with its persisted OCR text —
+    /// the reader's OCR side panel and the OCR tab both render from this, so
+    /// opening either never re-runs recognition.
+    /// </summary>
+    Task<DocumentVersionPageDto[]?> ListPagesAsync(int fileId, long documentId, CancellationToken ct = default);
+
+    /// <summary>Page-count / has-text coverage of one document version.</summary>
+    Task<DocumentOcrStatusDto?> OcrStatusAsync(int fileId, long documentId, CancellationToken ct = default);
+
+    /// <summary>Re-runs recognition for one page of a stored document version and persists it.</summary>
+    Task<Result<DocumentVersionPageDto>> RunPageOcrAsync(int fileId, long documentId, int pageNo, CancellationToken ct = default);
+
+    /// <summary>Saves a hand correction of one page's OCR text.</summary>
+    Task<Result<DocumentVersionPageDto>> SavePageOcrTextAsync(int fileId, long documentId, int pageNo, string text, CancellationToken ct = default);
 }
 
 /// <summary>File-level attachments, versioned independently from page-by-page digitization.</summary>
 public sealed class RecordFileDocumentsService(
-    AppDbContext db, IPrivateDocumentStore documentStore, IAuditWriter audit,
-    ICurrentUserAccessor current, ILogger<RecordFileDocumentsService> logger) : IRecordFileDocumentsService
+    AppDbContext db,
+    IPrivateDocumentStore documentStore,
+    IAuditWriter audit,
+    ICurrentUserAccessor current,
+    IOcrService ocr,
+    IBackgroundJobClient backgroundJobs,
+    ILogger<RecordFileDocumentsService> logger) : IRecordFileDocumentsService
 {
     private static RecordFileDocumentDto ToDto(RecordFileDocument d, string barcode) =>
         new(d.Id, d.RecordFileId, barcode, d.Version, d.OriginalFileName, d.ContentType, d.SizeBytes, d.Sha256, d.UploadedAt, d.UploadedBy, d.PageCount);
+
+    private static DocumentVersionPageDto ToPageDto(DocumentVersionPage p) => new(
+        p.Id, p.DocumentId, p.PageNo, p.OcrText, p.OcrMethod, p.OcrRanAt, p.OcrEditedBy, p.OcrEditedAt);
 
     public async Task<RecordFileDocumentDto[]?> ListAsync(int fileId, CancellationToken ct = default)
     {
@@ -63,6 +89,12 @@ public sealed class RecordFileDocumentsService(
             return Result<RecordFileDocumentDto>.Fail("This record was updated by another upload. Please retry.", "document");
         }
         catch { await TryDeleteAsync(stored.StorageKey); throw; }
+
+        // Page extraction + OCR run in the background: the upload returns as
+        // soon as the bytes are stored, and the pages fill in with their text
+        // as the job finishes (the UI hears "document.ocr" announcements).
+        backgroundJobs.Enqueue<DocumentOcrJobs>(job => job.ExtractAsync(fileId, row.Id));
+
         await audit.AnnounceAsync(RealtimeChannels.Files, "file.document.uploaded", fileId.ToString(),
             $"{stored.OriginalFileName} uploaded as version {version}");
         return Result<RecordFileDocumentDto>.Ok(ToDto(row, file.Barcode));
@@ -101,6 +133,114 @@ public sealed class RecordFileDocumentsService(
         await audit.AnnounceAsync(RealtimeChannels.Files, "file.document.deleted", fileId.ToString(),
             $"{row.OriginalFileName} v{row.Version} removed from {barcode}");
         return Result<bool>.Ok(true);
+    }
+
+    // ------------------------------------------------------------------ pages
+
+    private async Task<RecordFileDocument?> FindDocumentAsync(int fileId, long documentId, CancellationToken ct) =>
+        await db.FileDocuments.AsNoTracking()
+            .FirstOrDefaultAsync(d => d.Id == documentId && d.RecordFileId == fileId, ct);
+
+    private static int PageCountOf(RecordFileDocument doc)
+    {
+        // Images are a single page; PDFs carry their page count (null only when
+        // the page tree could not be read — treat that as one page).
+        var count = doc.PageCount ?? 1;
+        return Math.Max(1, count);
+    }
+
+    public async Task<DocumentVersionPageDto[]?> ListPagesAsync(int fileId, long documentId, CancellationToken ct = default)
+    {
+        var doc = await FindDocumentAsync(fileId, documentId, ct);
+        if (doc is null) return null;
+
+        var rows = await db.DocumentPages.AsNoTracking()
+            .Where(p => p.DocumentId == documentId)
+            .OrderBy(p => p.PageNo)
+            .ToListAsync(ct);
+
+        // Rows exist only for pages the background pass has reached (or that
+        // were corrected by hand); fill the gaps so the client can rely on a
+        // dense 1..N sequence.
+        var total = PageCountOf(doc);
+        var byPage = rows.ToDictionary(p => p.PageNo);
+        var list = new List<DocumentVersionPageDto>(total);
+        for (var pageNo = 1; pageNo <= total; pageNo++)
+        {
+            list.Add(byPage.TryGetValue(pageNo, out var row)
+                ? ToPageDto(row)
+                : new DocumentVersionPageDto(0, documentId, pageNo, "", "", null, null, null));
+        }
+        return list.ToArray();
+    }
+
+    public async Task<DocumentOcrStatusDto?> OcrStatusAsync(int fileId, long documentId, CancellationToken ct = default)
+    {
+        var doc = await FindDocumentAsync(fileId, documentId, ct);
+        if (doc is null) return null;
+        var total = PageCountOf(doc);
+        var rows = await db.DocumentPages.AsNoTracking()
+            .Where(p => p.DocumentId == documentId)
+            .Select(p => new { p.PageNo, p.OcrRanAt, p.OcrText })
+            .ToListAsync(ct);
+        var withText = rows.Count(r => !string.IsNullOrWhiteSpace(r.OcrText));
+        var processed = rows.Count;
+        return new DocumentOcrStatusDto(documentId, total, withText, processed < total);
+    }
+
+    public async Task<Result<DocumentVersionPageDto>> RunPageOcrAsync(
+        int fileId, long documentId, int pageNo, CancellationToken ct = default)
+    {
+        var doc = await FindDocumentAsync(fileId, documentId, ct);
+        if (doc is null) return Result<DocumentVersionPageDto>.Fail("Document not found.", "documentId");
+        var total = PageCountOf(doc);
+        if (pageNo < 1 || pageNo > total)
+            return Result<DocumentVersionPageDto>.Fail($"Page number must be between 1 and {total}.", "pageNo");
+
+        // Re-running recognition always re-reads the stored bytes; the result
+        // is then persisted, so the next open serves it from SQL.
+        var extraction = await ocr.ExtractAsync(doc.StorageKey, doc.ContentType, pageNo, ct);
+        var row = await db.DocumentPages.FirstOrDefaultAsync(p => p.DocumentId == documentId && p.PageNo == pageNo, ct);
+        if (row is null)
+        {
+            row = new DocumentVersionPage { DocumentId = documentId, PageNo = pageNo };
+            db.DocumentPages.Add(row);
+        }
+        row.OcrText = extraction.Text;
+        row.OcrMethod = extraction.Method;
+        row.OcrRanAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+
+        await audit.AnnounceAsync(RealtimeChannels.Digitization, "document.ocr",
+            $"{documentId}:{pageNo}", $"OCR re-run for page {pageNo} of {doc.OriginalFileName}");
+        return Result<DocumentVersionPageDto>.Ok(ToPageDto(row));
+    }
+
+    public async Task<Result<DocumentVersionPageDto>> SavePageOcrTextAsync(
+        int fileId, long documentId, int pageNo, string text, CancellationToken ct = default)
+    {
+        var doc = await FindDocumentAsync(fileId, documentId, ct);
+        if (doc is null) return Result<DocumentVersionPageDto>.Fail("Document not found.", "documentId");
+        var total = PageCountOf(doc);
+        if (pageNo < 1 || pageNo > total)
+            return Result<DocumentVersionPageDto>.Fail($"Page number must be between 1 and {total}.", "pageNo");
+
+        var row = await db.DocumentPages.FirstOrDefaultAsync(p => p.DocumentId == documentId && p.PageNo == pageNo, ct);
+        if (row is null)
+        {
+            row = new DocumentVersionPage { DocumentId = documentId, PageNo = pageNo };
+            db.DocumentPages.Add(row);
+        }
+        row.OcrText = text;
+        row.OcrMethod = string.IsNullOrWhiteSpace(text) ? row.OcrMethod : "hand-corrected";
+        row.OcrRanAt ??= DateTime.UtcNow;
+        row.OcrEditedBy = current.User?.DisplayName ?? current.UserName;
+        row.OcrEditedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+
+        await audit.AnnounceAsync(RealtimeChannels.Digitization, "document.ocr",
+            $"{documentId}:{pageNo}", $"OCR text corrected for page {pageNo} of {doc.OriginalFileName}");
+        return Result<DocumentVersionPageDto>.Ok(ToPageDto(row));
     }
 
     private async Task TryDeleteAsync(string key)

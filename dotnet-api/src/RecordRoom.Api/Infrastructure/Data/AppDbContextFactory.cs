@@ -13,15 +13,23 @@ public sealed class AppDbContextFactory : IDesignTimeDbContextFactory<AppDbConte
 {
     public AppDbContext CreateDbContext(string[] args)
     {
+        var provider = Environment.GetEnvironmentVariable("RECORDROOM_PROVIDER") ?? "SqlServer";
         var connectionString =
             Environment.GetEnvironmentVariable("RECORDROOM_CONNECTION")
-            ?? "Server=localhost;Database=RecordRoom;Trusted_Connection=True;TrustServerCertificate=True";
+            ?? (string.Equals(provider, "Sqlite", StringComparison.OrdinalIgnoreCase)
+                ? "DataSource=RecordRoom.db"
+                : "Server=localhost;Database=RecordRoom;Trusted_Connection=True;TrustServerCertificate=True");
 
-        var options = new DbContextOptionsBuilder<AppDbContext>()
-            .UseSqlServer(connectionString, sql =>
-                sql.MigrationsAssembly(typeof(AppDbContext).Assembly.FullName))
-            .Options;
-
-        return new AppDbContext(options);
+        var builder = new DbContextOptionsBuilder<AppDbContext>();
+        if (string.Equals(provider, "Sqlite", StringComparison.OrdinalIgnoreCase))
+        {
+            builder.UseSqlite(connectionString);
+        }
+        else
+        {
+            builder.UseSqlServer(connectionString, sql =>
+                sql.MigrationsAssembly(typeof(AppDbContext).Assembly.FullName));
+        }
+        return new AppDbContext(builder.Options);
     }
 }

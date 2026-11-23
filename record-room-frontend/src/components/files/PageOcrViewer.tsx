@@ -1,11 +1,11 @@
-import { Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Copy,
   DownloadSimple,
   MagnifyingGlass,
   MagnifyingGlassMinus,
   MagnifyingGlassPlus,
+  Spinner,
   TextAa,
   X,
 } from '@phosphor-icons/react';
@@ -14,20 +14,21 @@ import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { Badge } from '../ui/Badge';
-import { StatusBadge } from '../ui/Flash';
-import { useFlash } from '../../hooks/useService';
-import type { FileScan } from '../../types';
-import { authoritativeScanRows } from '../../lib/scanMerge';
+import { useFlash, useService } from '../../hooks/useService';
+import type { DocumentVersionPage } from '../../types';
 import { cn } from '../../lib/utils';
 
 /**
- * The document tab's reader: the PDF with a page filmstrip beside it, the
- * OCR text on demand side-by-side, and one search box that reaches both.
+ * The document tab's reader. One clean column: the page in the middle, the OCR
+ * text on demand on the right — never a page-number filmstrip on the left.
  *
- * Search deliberately covers two sources. A typed PDF carries its own text
- * layer, and a scanned PDF often carries none — in that case the same query
- * still answers from the OCR text and lands the reader on the right page,
- * which is the whole point of OCR. Each hit says where it came from.
+ * OCR text comes from the per-page store (`documentPages`): the background
+ * extraction pass persists it once, so opening the panel serves what is stored
+ * instead of regenerating it. The explicit "Re-run" is the only thing that
+ * recomputes a page.
+ *
+ * Keyboard: ← / → move between pages (and Esc closes the OCR panel), so a
+ * hands-on-keyboard review never has to reach for the toolbar.
  */
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
@@ -51,45 +52,57 @@ function isPdfFile(name: string, mime?: string): boolean {
   return ext !== 'png' && ext !== 'jpg' && ext !== 'jpeg' && ext !== 'gif' && ext !== 'webp';
 }
 
-interface SearchHit {
-  page: number;
-  source: 'PDF text' | 'OCR text' | 'PDF + OCR';
-  snippet: string;
-}
-
-function snippetAround(text: string, needle: string, radius = 60): string {
-  const index = text.toLowerCase().indexOf(needle);
-  if (index < 0) return text.slice(0, radius * 2).trim();
-  const start = Math.max(0, index - radius);
-  const end = Math.min(text.length, index + needle.length + radius);
-  return `${start > 0 ? '…' : ''}${text.slice(start, end).trim()}${end < text.length ? '…' : ''}`;
+/** Page navigation with ← / → when nothing editable has focus. */
+function usePageKeys(active: boolean, onPrev: () => void, onNext: () => void) {
+  useEffect(() => {
+    if (!active) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      const target = event.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      )
+        return;
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        onPrev();
+      } else if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        onNext();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [active, onPrev, onNext]);
 }
 
 export function PageOcrViewer({
   docKey,
+  documentId,
   load,
   filename,
   meta,
-  scanPages,
   fileId,
+  onOcrToggle,
   toolbarExtra,
-  showOcr,
-  onToggleOcr,
 }: {
   /** Changing it re-loads the blob and resets page, zoom, search and cache. */
   docKey: string;
+  /** Stored document version id — the key the per-page OCR text is read by. */
+  documentId?: string;
   load: () => Promise<Blob>;
   filename: string;
   meta?: ReactNode;
-  scanPages: FileScan[];
-  /** For the "open the OCR tab" link of the side panel. */
   fileId?: string;
+  /** Notifies the page that the OCR side panel opened or closed. */
+  onOcrToggle?: (open: boolean) => void;
   toolbarExtra?: ReactNode;
-  /** OCR panel open — lifted so the page can widen the preview and show the
-   * version picker while OCR is open. */
-  showOcr: boolean;
-  onToggleOcr: (open: boolean) => void;
 }) {
+  const service = useService();
   const { success, danger } = useFlash();
 
   const [url, setUrl] = useState<string | null>(null);
@@ -97,36 +110,55 @@ export function PageOcrViewer({
   const [numPages, setNumPages] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
   const [scale, setScale] = useState(1);
-  const [isPdf, setIsPdf] = useState(true);
+  const [showOcr, setShowOcr] = useState(false);
+
+  // Per-page OCR text, straight from the store — never regenerated on open.
+  const [pages, setPages] = useState<DocumentVersionPage[] | null>(null);
+  const [ocrBusy, setOcrBusy] = useState(false);
 
   const [query, setQuery] = useState('');
-  const [searching, setSearching] = useState(false);
-  const [results, setResults] = useState<SearchHit[] | null>(null);
+  const [matchPage, setMatchPage] = useState<number | null>(null);
 
   const pdfRef = useRef<PDFDocumentProxy | null>(null);
   const textCache = useRef(new Map<number, string>());
 
-  const [prevDocKey, setPrevDocKey] = useState(docKey);
-  if (prevDocKey !== docKey) {
-    setPrevDocKey(docKey);
-    setFailed(false);
-    setUrl(null);
-    setNumPages(0);
-    setCurrentPage(1);
-    setResults(null);
-  }
+  // NOTE: the caller keys this component by `docKey`, so a different document
+  // is a fresh mount — page, zoom, search and the text cache all start over
+  // without any reset effect here.
+
+  // The stored page rows: fetched once per document version, refreshed after a
+  // re-run or a saved correction. Opening the panel never re-runs OCR.
+  useEffect(() => {
+    let live = true;
+    const loadPages = async () => {
+      if (!fileId || !documentId) return;
+      try {
+        const rows = await service.files.documentPages(fileId, documentId);
+        if (live) setPages(rows);
+      } catch {
+        if (live) setPages([]);
+      }
+    };
+    void loadPages();
+    return () => {
+      live = false;
+    };
+  }, [fileId, documentId, service]);
+
+  useEffect(() => {
+    onOcrToggle?.(showOcr);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showOcr]);
 
   // Blob lifecycle: one object URL per docKey, revoked on change/unmount.
   useEffect(() => {
     let live = true;
     let created: string | null = null;
-    textCache.current.clear();
     pdfRef.current = null;
     load()
       .then((blob) => {
         if (!live) return;
         const pdf = isPdfFile(filename, blob.type);
-        setIsPdf(pdf);
         created = URL.createObjectURL(
           blob.type ? blob : new Blob([blob], { type: pdf ? 'application/pdf' : 'image/jpeg' }),
         );
@@ -145,24 +177,18 @@ export function PageOcrViewer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docKey, filename]);
 
-  // OCR text per rendered page: one authoritative row per page number — the
-  // approved row the file shows as current, else the latest row. A studio
-  // draft appended for the same page number must not shadow it (issue 2).
-  const scanByPage = useMemo(() => {
-    const map = new Map<number, FileScan>();
-    for (const scan of authoritativeScanRows(scanPages)) {
-      map.set(scan.pageIndex ?? scan.pageNo, scan);
-    }
-    return map;
-  }, [scanPages]);
+  const totalPages = Math.max(
+    numPages,
+    pages?.length ? Math.max(...pages.map((p) => p.pageNo)) : 0,
+  );
 
-  const ocrByPage = useMemo(() => {
-    const map = new Map<number, string>();
-    for (const [key, scan] of scanByPage) map.set(key, scan.ocrText ?? '');
-    return map;
-  }, [scanByPage]);
+  const goPrev = () => setCurrentPage((page) => Math.max(1, page - 1));
+  const goNext = () =>
+    setCurrentPage((page) => Math.min(totalPages > 0 ? totalPages : 1, page + 1));
+  usePageKeys(true, goPrev, goNext);
 
-  const scanOfPage = useMemo(() => scanByPage.get(currentPage), [scanByPage, currentPage]);
+  const ocrPage = pages?.find((page) => page.pageNo === currentPage);
+  const ocrTextOfCurrent = ocrPage?.ocrText?.trim() ?? '';
 
   const pdfTextOf = async (pageNo: number): Promise<string> => {
     const cached = textCache.current.get(pageNo);
@@ -172,7 +198,9 @@ export function PageOcrViewer({
     try {
       const page = await pdf.getPage(pageNo);
       const content = await page.getTextContent();
-      const text = content.items.map((item) => ('str' in item ? item.str : '')).join(' ');
+      const text = content.items
+        .map((item) => ('str' in item ? (item as { str: string }).str : ''))
+        .join(' ');
       textCache.current.set(pageNo, text);
       return text;
     } catch {
@@ -182,32 +210,21 @@ export function PageOcrViewer({
 
   const runSearch = async () => {
     const needle = query.trim().toLowerCase();
-    if (!needle) return;
-    setSearching(true);
-    try {
-      const total = Math.max(numPages, ...(ocrByPage.size ? [...ocrByPage.keys()] : [0]));
-      const hits: SearchHit[] = [];
-      for (let pageNo = 1; pageNo <= total; pageNo += 1) {
-        const pdfText = (await pdfTextOf(pageNo)).toLowerCase();
-        const ocrText = (ocrByPage.get(pageNo) ?? '').toLowerCase();
-        const inPdf = pdfText.includes(needle);
-        const inOcr = ocrText.includes(needle);
-        if (!inPdf && !inOcr) continue;
-        const source: SearchHit['source'] =
-          inPdf && inOcr ? 'PDF + OCR' : inPdf ? 'PDF text' : 'OCR text';
-        hits.push({
-          page: pageNo,
-          source,
-          snippet: snippetAround(
-            inPdf ? (textCache.current.get(pageNo) ?? '') : (ocrByPage.get(pageNo) ?? ''),
-            needle,
-          ),
-        });
+    if (!needle || totalPages === 0) return;
+    let hit: number | null = null;
+    // Forward from the current page, wrapping once — the reader lands on the
+    // next page that matches, either in its text layer or in the OCR store.
+    for (let offset = 1; offset <= totalPages; offset += 1) {
+      const pageNo = ((currentPage - 1 + offset) % totalPages) + 1;
+      const pdfText = (await pdfTextOf(pageNo)).toLowerCase();
+      const ocrText = (pages?.find((p) => p.pageNo === pageNo)?.ocrText ?? '').toLowerCase();
+      if (pdfText.includes(needle) || ocrText.includes(needle)) {
+        hit = pageNo;
+        break;
       }
-      setResults(hits);
-    } finally {
-      setSearching(false);
     }
+    setMatchPage(hit);
+    if (hit !== null) setCurrentPage(hit);
   };
 
   const copyText = async (text: string) => {
@@ -219,36 +236,32 @@ export function PageOcrViewer({
     }
   };
 
+  const reRunOcr = async () => {
+    if (!fileId || !documentId) return;
+    setOcrBusy(true);
+    try {
+      const result = await service.files.runDocumentPageOcr(fileId, documentId, currentPage);
+      if (result.ok) {
+        setPages((rows) =>
+          (rows ?? []).map((row) => (row.pageNo === currentPage ? result.value : row)),
+        );
+        success(result.value.ocrText.trim() ? `OCR re-run for page ${currentPage}.` : `OCR ran for page ${currentPage} but found no text.`);
+      } else {
+        danger(result.error);
+      }
+    } finally {
+      setOcrBusy(false);
+    }
+  };
+
   const zoom = (delta: number) =>
     setScale((current) => Math.min(2.5, Math.max(0.5, Math.round((current + delta) * 10) / 10)));
 
-  // Left/right arrows switch document pages; typing in an input keeps arrows.
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
-      const target = event.target;
-      if (
-        target instanceof HTMLInputElement ||
-        target instanceof HTMLTextAreaElement ||
-        target instanceof HTMLSelectElement
-      ) {
-        return;
-      }
-      event.preventDefault();
-      setCurrentPage((page) =>
-        Math.max(1, Math.min(numPages, page + (event.key === 'ArrowRight' ? 1 : -1))),
-      );
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [numPages]);
-
-  const pageLabel = numPages > 0 ? `${currentPage} / ${numPages}` : '—';
-  const ocrTextOfCurrent = ocrByPage.get(currentPage)?.trim() ?? '';
+  const pageLabel = totalPages > 0 ? `${currentPage} / ${totalPages}` : '—';
 
   return (
     <div className="overflow-hidden rounded-2xl border border-base bg-[var(--rr-surface)]">
-      {/* Toolbar */}
+      {/* Toolbar — file identity + one row of reader controls. */}
       <div className="flex flex-col gap-3 border-b border-base p-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -261,24 +274,26 @@ export function PageOcrViewer({
           <div className="flex items-center overflow-hidden rounded-lg border border-base">
             <button
               type="button"
-              className="focus-ring px-2 py-1.5 hover:bg-[var(--rr-surface-2)] disabled:opacity-40"
-              onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+              className="focus-ring grid size-8 place-items-center hover:bg-[var(--rr-surface-2)] disabled:opacity-40"
+              onClick={goPrev}
               disabled={currentPage <= 1}
               aria-label="Previous page"
+              title="Previous page (←)"
             >
-              <span className="text-xs font-semibold">‹</span>
+              <CaretLeftIcon />
             </button>
             <span className="min-w-14 border-x border-base px-2 py-1.5 text-center text-xs font-semibold">
               {pageLabel}
             </span>
             <button
               type="button"
-              className="focus-ring px-2 py-1.5 hover:bg-[var(--rr-surface-2)] disabled:opacity-40"
-              onClick={() => setCurrentPage((page) => Math.min(numPages, page + 1))}
-              disabled={numPages === 0 || currentPage >= numPages}
+              className="focus-ring grid size-8 place-items-center hover:bg-[var(--rr-surface-2)] disabled:opacity-40"
+              onClick={goNext}
+              disabled={totalPages === 0 || currentPage >= totalPages}
               aria-label="Next page"
+              title="Next page (→)"
             >
-              <span className="text-xs font-semibold">›</span>
+              <CaretRightIcon />
             </button>
           </div>
           <div className="flex items-center overflow-hidden rounded-lg border border-base">
@@ -303,7 +318,7 @@ export function PageOcrViewer({
             </button>
           </div>
 
-          {/* One search across the PDF text layer and the OCR text. */}
+          {/* Search reaches the PDF text layer and the stored OCR text. */}
           <form
             className="flex items-center gap-1"
             onSubmit={(event) => {
@@ -328,7 +343,7 @@ export function PageOcrViewer({
                   type="button"
                   onClick={() => {
                     setQuery('');
-                    setResults(null);
+                    setMatchPage(null);
                   }}
                   className="focus-ring absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-[var(--rr-muted)] hover:text-[var(--rr-text)]"
                   aria-label="Clear search"
@@ -341,7 +356,7 @@ export function PageOcrViewer({
 
           <button
             type="button"
-            onClick={() => onToggleOcr(!showOcr)}
+            onClick={() => setShowOcr((open) => !open)}
             className={cn(
               'focus-ring inline-flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold transition',
               showOcr
@@ -375,59 +390,16 @@ export function PageOcrViewer({
         </div>
       </div>
 
-      {/* Search results — per page, with the source the hit came from. */}
-      {results !== null && (
-        <div className="max-h-56 space-y-1.5 overflow-y-auto border-b border-base bg-[var(--rr-bg)] p-3">
-          <p className="flex items-center justify-between text-xs font-semibold">
-            <span>
-              {searching ? 'Searching…' : `${results.length} page(s) match “${query.trim()}”`}
-            </span>
-            <button
-              type="button"
-              onClick={() => setResults(null)}
-              className="focus-ring muted rounded p-1 hover:text-[var(--rr-text)]"
-              aria-label="Close results"
-            >
-              <X size={13} />
-            </button>
-          </p>
-          {!searching && results.length === 0 && (
-            <p className="muted py-2 text-xs">
-              No page matches — neither in the PDF text layer nor in the OCR text.
-            </p>
-          )}
-          {results.map((hit) => (
-            <button
-              key={`${hit.page}-${hit.source}`}
-              type="button"
-              onClick={() => setCurrentPage(hit.page)}
-              className="focus-ring block w-full rounded-lg border border-base bg-[var(--rr-surface)] p-2.5 text-left transition hover:border-[var(--rr-accent)]"
-            >
-              <span className="flex items-center gap-2 text-xs font-semibold">
-                Page {hit.page}
-                <Badge
-                  tone={
-                    hit.source === 'PDF text'
-                      ? 'info'
-                      : hit.source === 'OCR text'
-                        ? 'success'
-                        : 'neutral'
-                  }
-                >
-                  {hit.source}
-                </Badge>
-              </span>
-              {hit.snippet && (
-                <span className="muted mt-1 block truncate text-[11px] leading-5">
-                  {hit.snippet}
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
+      {matchPage !== null && (
+        <p
+          role="status"
+          className="border-b border-base bg-[var(--rr-bg)] px-3 py-1.5 text-xs font-semibold"
+        >
+          {matchPage ? `Found on page ${matchPage}` : `No page matches “${query.trim()}”`}
+        </p>
       )}
 
-      {/* Reader body: filmstrip + page + OCR panel */}
+      {/* Reader body: the page centred, OCR on demand to its right. */}
       {failed ? (
         <div className="grid h-[420px] place-items-center p-6 text-center">
           <div>
@@ -446,7 +418,7 @@ export function PageOcrViewer({
               <div className="grid h-72 w-full max-w-sm animate-pulse place-items-center rounded-xl bg-[var(--rr-bg)] text-xs muted">
                 Loading document…
               </div>
-            ) : !isPdf ? (
+            ) : !isPdfFile(filename) ? (
               <div className="grid min-h-[400px] w-full place-items-center overflow-auto">
                 <img
                   src={url}
@@ -456,62 +428,50 @@ export function PageOcrViewer({
                 />
               </div>
             ) : (
-              // react-pdf 11 suspends by default while it loads a document.
-              // The boundary must be HERE, next to the reader: without it the
-              // suspension bubbles to the app-shell Suspense in App.tsx, which
-              // unmounts the whole shell into its "Loading…" fallback and, on
-              // reveal, reconnects every effect in the tree. PageOcrViewer's
-              // blob effect is among them, so it re-fetched the document,
-              // created a NEW object URL, and react-pdf — keyed on the file —
-              // suspended again: the entire page kept "refreshing" in a loop.
-              <Suspense
-                fallback={
-                  <div className="grid h-72 w-full max-w-sm animate-pulse place-items-center rounded-xl bg-[var(--rr-bg)] text-xs muted">
+              <Document
+                file={url}
+                options={PDF_OPTIONS}
+                onLoadSuccess={(pdf) => {
+                  pdfRef.current = pdf;
+                  setNumPages(pdf.numPages);
+                }}
+                onLoadError={() => setFailed(true)}
+                loading={
+                  <div className="grid h-72 w-full max-w-sm place-items-center rounded-xl bg-[var(--rr-bg)] text-xs muted">
                     Loading document…
                   </div>
                 }
+                error={
+                  <div className="grid h-72 place-items-center p-6 text-center text-xs muted">
+                    This PDF could not be rendered. Try downloading it.
+                  </div>
+                }
               >
-                <Document
-                  file={url}
-                  options={PDF_OPTIONS}
-                  onLoadSuccess={(pdf) => {
-                    pdfRef.current = pdf;
-                    setNumPages(pdf.numPages);
-                  }}
-                  onLoadError={() => setFailed(true)}
+                <Page
+                  key={`${docKey}-${currentPage}-${scale}`}
+                  pageNumber={Math.min(Math.max(1, currentPage), Math.max(1, totalPages))}
+                  scale={scale}
+                  renderTextLayer={false}
+                  renderAnnotationLayer={false}
+                  className="mx-auto shadow-sm"
                   loading={
-                    <div className="grid h-72 w-full max-w-sm place-items-center rounded-xl bg-[var(--rr-bg)] text-xs muted">
-                      Loading document…
-                    </div>
+                    <div className="h-[600px] w-[440px] animate-pulse rounded bg-[var(--rr-bg)]" />
                   }
-                  error={
-                    <div className="grid h-72 place-items-center p-6 text-center text-xs muted">
-                      This PDF could not be rendered. Try downloading it.
-                    </div>
-                  }
-                >
-                  <Page
-                    key={`${docKey}-${currentPage}-${scale}`}
-                    pageNumber={Math.min(Math.max(1, currentPage), Math.max(1, numPages))}
-                    scale={scale}
-                    renderTextLayer={false}
-                    renderAnnotationLayer={false}
-                    className="mx-auto shadow-sm"
-                    loading={
-                      <div className="h-[600px] w-[440px] animate-pulse rounded bg-[var(--rr-bg)]" />
-                    }
-                  />
-                </Document>
-              </Suspense>
+                />
+              </Document>
             )}
           </div>
 
-          {/* OCR side panel — open only on request, so the default view is the scan. */}
+          {/* OCR side panel — open only on request. Shows the stored text of
+              exactly the page being previewed; re-run is explicit. */}
           {showOcr && (
-            <div className="flex max-h-[60vh] w-full flex-col border-t border-base lg:max-h-none lg:w-80 lg:border-l lg:border-t-0">
+            <div className="flex max-h-[60vh] w-full flex-col border-t border-base lg:max-h-none lg:w-96 lg:border-l lg:border-t-0">
               <div className="flex items-center justify-between gap-2 border-b border-base px-3 py-2.5">
                 <p className="flex items-center gap-1.5 text-xs font-semibold">
                   <TextAa size={14} className="text-accent" /> OCR text · page {currentPage}
+                  {ocrPage?.ocrMethod ? (
+                    <Badge tone="neutral">{ocrPage.ocrMethod}</Badge>
+                  ) : null}
                 </p>
                 <div className="flex items-center gap-1">
                   {ocrTextOfCurrent && (
@@ -526,7 +486,7 @@ export function PageOcrViewer({
                   )}
                   <button
                     type="button"
-                    onClick={() => onToggleOcr(false)}
+                    onClick={() => setShowOcr(false)}
                     className="focus-ring rounded p-1 text-[var(--rr-muted)] hover:text-[var(--rr-text)]"
                     aria-label="Close OCR panel"
                   >
@@ -535,15 +495,6 @@ export function PageOcrViewer({
                 </div>
               </div>
               <div className="flex-1 overflow-y-auto p-3">
-                {scanOfPage && (
-                  <div className="mb-2 flex flex-wrap items-center gap-1.5">
-                    <StatusBadge status={scanOfPage.status} />
-                    <span className="muted text-[11px]">
-                      v{scanOfPage.version}
-                      {scanOfPage.dpi ? ` · ${scanOfPage.dpi} DPI` : ''}
-                    </span>
-                  </div>
-                )}
                 {ocrTextOfCurrent ? (
                   <p className="whitespace-pre-wrap break-words font-mono text-[12px] leading-6">
                     {ocrTextOfCurrent}
@@ -551,26 +502,48 @@ export function PageOcrViewer({
                 ) : (
                   <div className="muted space-y-2 py-6 text-center text-xs leading-5">
                     <TextAa size={22} className="mx-auto text-[var(--rr-muted)]" />
-                    <p>No OCR text for this page.</p>
+                    <p>No OCR text for this page yet.</p>
                     <p>
-                      Scanned pages get their text from the background OCR pass; typed PDFs keep
-                      theirs in the text layer (the search box still reaches it).
+                      The background pass fills every page after upload; typed PDFs answer from
+                      their own text layer.
                     </p>
-                    {fileId && (
-                      <Link
-                        to={`/files/${fileId}/ocr`}
-                        className="focus-ring inline-block font-semibold text-accent"
-                      >
-                        Open the OCR tab to run or fix it →
-                      </Link>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => void reRunOcr()}
+                      disabled={ocrBusy || !fileId || !documentId}
+                      className="focus-ring inline-flex items-center gap-1.5 rounded-lg border border-base bg-[var(--rr-bg)] px-2.5 py-1.5 text-[11px] font-semibold hover:bg-[var(--rr-surface-2)] disabled:opacity-40"
+                    >
+                      {ocrBusy ? <Spinner size={12} className="animate-spin" /> : <TextAa size={12} />}
+                      Run OCR for this page
+                    </button>
                   </div>
                 )}
               </div>
+              {ocrTextOfCurrent && (
+                <div className="border-t border-base p-2">
+                  <button
+                    type="button"
+                    onClick={() => void reRunOcr()}
+                    disabled={ocrBusy}
+                    className="focus-ring inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-base bg-[var(--rr-bg)] px-2.5 py-1.5 text-[11px] font-semibold hover:bg-[var(--rr-surface-2)] disabled:opacity-40"
+                  >
+                    {ocrBusy ? <Spinner size={12} className="animate-spin" /> : <TextAa size={12} />}
+                    Re-run OCR for page {currentPage}
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
       )}
     </div>
   );
+}
+
+function CaretLeftIcon() {
+  return <span className="text-xs font-semibold">‹</span>;
+}
+
+function CaretRightIcon() {
+  return <span className="text-xs font-semibold">›</span>;
 }

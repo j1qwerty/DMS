@@ -15,8 +15,10 @@ import { session } from './session';
 import {
   addLocalRecordDocument,
   deleteLocalRecordDocument,
+  listLocalDocumentPages,
   listLocalRecordDocuments,
   localRecordDocumentBlob,
+  saveLocalDocumentPageOcr,
 } from './document-storage';
 
 const MAX_POSITION = 100;
@@ -473,6 +475,35 @@ export const filesService: FilesApi = {
 
   async documentBlob(fileId, documentId) {
     return localRecordDocumentBlob(fileId, documentId);
+  },
+
+  async documentPages(fileId, documentId) {
+    return listLocalDocumentPages(fileId, documentId);
+  },
+
+  async documentOcrStatus(fileId, documentId) {
+    // Demo mode fills every page synchronously, so nothing is ever in flight.
+    const rows = listLocalDocumentPages(fileId, documentId);
+    if (rows.length === 0) return null;
+    return {
+      documentId,
+      pageCount: rows.length,
+      pagesWithText: rows.filter((row) => row.ocrText.trim()).length,
+      processing: false,
+    };
+  },
+
+  async runDocumentPageOcr(fileId, documentId, pageNo) {
+    // Demo mode: page text is deterministic per page, so a re-run just returns it.
+    const rows = listLocalDocumentPages(fileId, documentId);
+    const row = rows.find((item) => item.pageNo === pageNo);
+    return row ? ok(row) : err('Page not found.', 'pageNo');
+  },
+
+  async saveDocumentPageOcr(fileId, documentId, pageNo, text) {
+    const updated = saveLocalDocumentPageOcr(fileId, documentId, pageNo, text, session.actorName());
+    if (!updated) return err('Page not found.', 'pageNo');
+    return ok(updated);
   },
 
   async deleteDocument(fileId, documentId) {

@@ -39,17 +39,31 @@ else
 var connectionString = builder.Configuration.GetConnectionString("Default")
     ?? throw new InvalidOperationException("ConnectionStrings:Default is required.");
 
+// Database:Provider=Sqlite (with ConnectionStrings:Default=DataSource=rr.db) is
+// the local/no-SQL-Server boot: it lets the API run on a laptop — and the
+// frontend's live contract tests exercise it — without an instance. SQL Server
+// stays the deployment default and the only provider that can use full-text
+// search (the probe degrades to LIKE everywhere else).
+var databaseProvider = builder.Configuration["Database:Provider"] ?? "SqlServer";
+
 builder.Services.AddDbContext<AppDbContext>(options =>
 {
-    // No EnableRetryOnFailure on purpose: the EF Core retrying execution strategy
-    // cannot be combined with user-initiated transactions, and this API relies on
-    // explicit transactions for issue/return and location writes. Transaction
-    // correctness wins over transient-fault resilience.
-    options.UseSqlServer(connectionString, sql =>
-        sql.MigrationsAssembly(typeof(AppDbContext).Assembly.FullName));
+    if (string.Equals(databaseProvider, "Sqlite", StringComparison.OrdinalIgnoreCase))
+    {
+        options.UseSqlite(connectionString);
+    }
+    else
+    {
+        // No EnableRetryOnFailure on purpose: the EF Core retrying execution strategy
+        // cannot be combined with user-initiated transactions, and this API relies on
+        // explicit transactions for issue/return and location writes. Transaction
+        // correctness wins over transient-fault resilience.
+        options.UseSqlServer(connectionString, sql =>
+            sql.MigrationsAssembly(typeof(AppDbContext).Assembly.FullName));
 
-    if (builder.Environment.IsDevelopment())
-        options.EnableDetailedErrors().EnableSensitiveDataLogging();
+        if (builder.Environment.IsDevelopment())
+            options.EnableDetailedErrors().EnableSensitiveDataLogging();
+    }
 });
 
 // Bind through the options system so IOptions<JwtOptions> resolves for any service
@@ -195,6 +209,7 @@ builder.Services.AddScoped<IOcrService, OcrService>();
 builder.Services.AddScoped<IReportsService, ReportsService>();
 builder.Services.AddScoped<RecordRoomJobs>();
 builder.Services.AddScoped<ScanProcessingJobs>();
+builder.Services.AddScoped<DocumentOcrJobs>();
 // The background worker: it dequeues both the recurring definitions below and
 // the fire-and-forget jobs the request paths enqueue (the scan OCR pass after
 // an upload), so it is registered unconditionally — EnableScheduling gates
@@ -290,8 +305,20 @@ using (var scope = app.Services.CreateScope())
     {
         try
         {
-            await db.Database.MigrateAsync();
-            logger.LogInformation("Database migrations applied.");
+            if (string.Equals(databaseProvider, "Sqlite", StringComparison.OrdinalIgnoreCase))
+            {
+                // The migrations are scaffolded with SQL Server column types, so
+                // applying them under SQLite would rewrite every column. The
+                // SQLite boot creates the schema straight from the model
+                // instead — the same approach the integration tests use.
+                await db.Database.EnsureCreatedAsync();
+                logger.LogInformation("SQLite database created from the model.");
+            }
+            else
+            {
+                await db.Database.MigrateAsync();
+                logger.LogInformation("Database migrations applied.");
+            }
         }
         catch (Exception ex)
         {
@@ -310,7 +337,7 @@ using (var scope = app.Services.CreateScope())
             // install still gets its bootstrap rows — permission matrix, feature
             // switch defaults and the standard users — but no demo files.
             var demoMode = app.Configuration.GetValue("App:DemoMode", true);
-            await DatabaseSeeder.SeedAsync(db, logger, demoMode, default);
+            await DatabaseSeeder.SeedAsync(db, logger, demoMode, default, app.Configuration);
         }
         catch (Exception ex)
         {
@@ -397,7 +424,10 @@ app.MapGet("/api/health", async (AppDbContext db, ICacheService cache) =>
         // Reachability is not the same as a usable schema. A migration that fails
         // on boot leaves the process alive and the port open, so without this the
         // deploy health check passes while every data endpoint returns 500.
-        if (dbOk)
+        // The SQLite boot creates its schema from the model (there is no
+        // __EFMigrationsHistory under EnsureCreated), so its usable-schema
+        // proof is that its tables exist at all.
+        if (dbOk && !string.Equals(databaseProvider, "Sqlite", StringComparison.OrdinalIgnoreCase))
         {
             var pending = (await db.Database.GetPendingMigrationsAsync()).ToArray();
             if (pending.Length > 0)

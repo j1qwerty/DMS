@@ -51,4 +51,44 @@ public sealed class RecordFileDocumentsController(IRecordFileDocumentsService do
     [HttpDelete("{documentId:long}")]
     public async Task<IResult> Delete(int fileId, long documentId, CancellationToken ct) =>
         ApiResults.FromResult(await documents.DeleteAsync(fileId, documentId, ct));
+
+    // ---------------------------------------------------------------------- OCR
+    // The OCR text of a stored document version lives in SQL, one row per page.
+    // Opening it never re-runs recognition: only the explicit re-run below does.
+
+    /// <summary>Every page of one document version with its persisted OCR text.</summary>
+    [HttpGet("{documentId:long}/pages")]
+    public async Task<IResult> Pages(int fileId, long documentId, CancellationToken ct)
+    {
+        var rows = await documents.ListPagesAsync(fileId, documentId, ct);
+        return rows is null
+            ? Results.NotFound()
+            : Results.Ok(ApiResponse<DocumentVersionPageDto[]>.Ok(rows));
+    }
+
+    /// <summary>How many pages carry text, and whether the background pass is still running.</summary>
+    [HttpGet("{documentId:long}/ocr-status")]
+    public async Task<IResult> OcrStatus(int fileId, long documentId, CancellationToken ct)
+    {
+        var status = await documents.OcrStatusAsync(fileId, documentId, ct);
+        return status is null ? Results.NotFound() : Results.Ok(ApiResponse<DocumentOcrStatusDto>.Ok(status));
+    }
+
+    /// <summary>
+    /// Re-runs recognition for one page of the stored document version and
+    /// persists the result. The explicit, audited re-run — the reader itself
+    /// always serves what is already stored.
+    /// </summary>
+    [Authorize(Policy = "perm:digitization.upload")]
+    [HttpPost("{documentId:long}/pages/{pageNo:int}/ocr")]
+    public async Task<IResult> RunPageOcr(int fileId, long documentId, int pageNo, CancellationToken ct) =>
+        ApiResults.FromResult(await documents.RunPageOcrAsync(fileId, documentId, pageNo, ct));
+
+    /// <summary>Saves a hand correction of one page's OCR text.</summary>
+    [Authorize(Policy = "perm:digitization.upload")]
+    [HttpPut("{documentId:long}/pages/{pageNo:int}/ocr/text")]
+    public async Task<IResult> SavePageOcrText(
+        int fileId, long documentId, int pageNo, OcrTextInput input, CancellationToken ct) =>
+        ApiResults.FromResult(
+            await documents.SavePageOcrTextAsync(fileId, documentId, pageNo, input?.Text ?? string.Empty, ct));
 }

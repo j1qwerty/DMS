@@ -15,13 +15,21 @@ public static class DatabaseSeeder
     public const string DemoPassword = "Demo@12345";
 
     public static async Task SeedAsync(
-        AppDbContext db, ILogger logger, bool demoMode = true, CancellationToken ct = default)
+        AppDbContext db,
+        ILogger logger,
+        bool demoMode = true,
+        CancellationToken ct = default,
+        Microsoft.Extensions.Configuration.IConfiguration? configuration = null)
     {
         // ---------------------------------------------------------------- switches
         // The feature groups seed independently of the demo dataset: a
         // deployment that has data but no rows yet should still get its Zila
         // Panchayat defaults (all four groups hidden) written once. Rows are
         // only added when absent, so an Admin's later choice is never undone.
+        // A first boot honours the configuration it started with (a developer
+        // who sets Features__RecordRoomEnabled=true gets a row that says so);
+        // the seeded default stays "off" for the keys configuration leaves
+        // unset — the Zila Panchayat default.
         var known = RecordRoom.Api.Infrastructure.Features.FeatureFlags.KnownKeys;
         var existingFeatures = await db.FeatureSettings
             .Select(s => s.FeatureKey)
@@ -30,7 +38,8 @@ public static class DatabaseSeeder
             db.FeatureSettings.Add(new FeatureSetting
             {
                 FeatureKey = key,
-                Enabled = false,
+                Enabled = RecordRoom.Api.Infrastructure.Features.FeatureFlags.Parse(
+                    configuration?[$"Features:{key}Enabled"], fallback: false),
                 UpdatedBy = "seed",
                 UpdatedAt = DateTime.UtcNow,
             });

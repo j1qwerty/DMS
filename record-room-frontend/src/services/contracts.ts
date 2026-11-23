@@ -27,6 +27,8 @@ import type {
   DashboardStats,
   Department,
   DocumentDerivative,
+  DocumentOcrStatus,
+  DocumentVersionPage,
   Employee,
   FileCreateInput,
   FileScan,
@@ -231,6 +233,23 @@ export interface FilesApi {
   /** Destructive: removes one stored scan version. Admin-only on the API. */
   deleteDocument(fileId: string, documentId: string): Promise<Result<true>>;
   documentBlob(fileId: string, documentId: string): Promise<Blob>;
+  /** Every page of one stored document version with its persisted OCR text. */
+  documentPages(fileId: string, documentId: string): Promise<DocumentVersionPage[]>;
+  /** Coverage of the stored text and whether the background pass still runs. */
+  documentOcrStatus(fileId: string, documentId: string): Promise<DocumentOcrStatus | null>;
+  /** Re-runs recognition for one page of a stored document version. */
+  runDocumentPageOcr(
+    fileId: string,
+    documentId: string,
+    pageNo: number,
+  ): Promise<Result<DocumentVersionPage>>;
+  /** Saves a hand correction of one stored document page's OCR text. */
+  saveDocumentPageOcr(
+    fileId: string,
+    documentId: string,
+    pageNo: number,
+    text: string,
+  ): Promise<Result<DocumentVersionPage>>;
   remove(fileId: string): Promise<Result<true>>;
 }
 

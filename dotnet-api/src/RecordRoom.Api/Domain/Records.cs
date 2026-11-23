@@ -71,6 +71,33 @@ public class RecordFileDocument
     public DateTime UploadedAt { get; set; } = DateTime.UtcNow;
     public required string UploadedBy { get; set; }
     public RecordFile? RecordFile { get; set; }
+
+    /// <summary>
+    /// One row per page of the stored document, carrying the OCR text that was
+    /// extracted for exactly that page. Rows are written once by the background
+    /// extraction job and re-served from SQL afterwards, so opening the OCR view
+    /// never re-runs tesseract. A page without a row simply has no text yet.
+    /// </summary>
+    public List<DocumentVersionPage> Pages { get; set; } = [];
+}
+
+/// <summary>Per-page OCR text of one stored document version.</summary>
+public class DocumentVersionPage
+{
+    public long Id { get; set; }
+    public long DocumentId { get; set; }
+    /// <summary>1-based page number inside the stored document.</summary>
+    public int PageNo { get; set; }
+    /// <summary>OCR text of the page; empty until the background pass has run.</summary>
+    public string OcrText { get; set; } = string.Empty;
+    /// <summary>What produced the text ("tesseract hin+eng", "pdf-text-layer", "none").</summary>
+    public string OcrMethod { get; set; } = string.Empty;
+    /// <summary>Null while the background OCR pass has not reached this page yet.</summary>
+    public DateTime? OcrRanAt { get; set; }
+    public string? OcrEditedBy { get; set; }
+    public DateTime? OcrEditedAt { get; set; }
+
+    public RecordFileDocument? Document { get; set; }
 }
 
 /// <summary>

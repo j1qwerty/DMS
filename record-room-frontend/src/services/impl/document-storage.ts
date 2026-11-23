@@ -1,5 +1,5 @@
 import { err, ok } from '../contracts';
-import type { RecordFileDocument } from '../../types';
+import type { DocumentVersionPage, RecordFileDocument } from '../../types';
 import { validateDocumentFile } from '../../lib/document';
 import { newId, timestamp } from '../store';
 import { session } from './session';
@@ -264,6 +264,69 @@ export function localRecordDocumentBlob(fileId: string, documentId: string): Blo
   return localDocumentBlob('record', documentId);
 }
 
+// ------------------------------------------------------- per-page OCR (demo)
+// The API persists one row per document page; demo mode keeps the same shape in
+// memory (page text is generated once per page, not on every open).
+
+const documentPages = new Map<string, DocumentVersionPage[]>();
+
+/** Demo-mode page text: deterministic per document+page so re-opens match. */
+function demoPageText(documentId: string, pageNo: number): string {
+  const subjects = [
+    'Registry record page',
+    'Receipt counterfoil',
+    'Correspondence note',
+    'Inspection memorandum',
+    'Approval sheet',
+  ];
+  const subject = subjects[(pageNo - 1) % subjects.length];
+  return [
+    `${subject} ${pageNo}`,
+    `Document ${documentId} · page ${pageNo} of the stored scan.`,
+    'Digitized by the record room; text extracted by the background OCR pass.',
+    `Reference RR/${String(pageNo).padStart(3, '0')}/2026 — entered for search.`,
+  ].join('\n');
+}
+
+export function listLocalDocumentPages(
+  fileId: string,
+  documentId: string,
+): DocumentVersionPage[] {
+  const doc = (recordDocuments.get(fileId) ?? []).find((item) => item.id === documentId);
+  if (!doc) return [];
+  let rows = documentPages.get(documentId);
+  if (!rows) {
+    const total = Math.max(1, doc.pageCount ?? 1);
+    rows = Array.from({ length: total }, (_, index) => ({
+      id: newId('docpage'),
+      documentId,
+      pageNo: index + 1,
+      ocrText: demoPageText(documentId, index + 1),
+      ocrMethod: 'pdf-text-layer',
+      ocrRanAt: timestamp(),
+    }));
+    documentPages.set(documentId, rows);
+  }
+  return rows;
+}
+
+export function saveLocalDocumentPageOcr(
+  fileId: string,
+  documentId: string,
+  pageNo: number,
+  text: string,
+  actor: string,
+): DocumentVersionPage | null {
+  const rows = listLocalDocumentPages(fileId, documentId);
+  const row = rows.find((item) => item.pageNo === pageNo);
+  if (!row) return null;
+  row.ocrText = text;
+  row.ocrMethod = text.trim() ? 'hand-corrected' : row.ocrMethod;
+  row.ocrEditedBy = actor;
+  row.ocrEditedAt = timestamp();
+  return row;
+}
+
 /** Removes one stored scan version and its bytes; mirrors the API's delete. */
 export async function deleteLocalRecordDocument(
   fileId: string,
@@ -276,6 +339,7 @@ export async function deleteLocalRecordDocument(
     fileId,
     rows.filter((item) => item.id !== documentId),
   );
+  documentPages.delete(documentId);
   blobs.delete(blobKey('record', documentId));
   await idbDelete(blobKey('record', documentId));
   return { filename: row.filename, version: row.version };
@@ -284,6 +348,7 @@ export async function deleteLocalRecordDocument(
 export async function clearLocalDocumentStorage(): Promise<void> {
   blobs.clear();
   recordDocuments.clear();
+  documentPages.clear();
   derivativeBytes.clear();
   await idbClear();
 }

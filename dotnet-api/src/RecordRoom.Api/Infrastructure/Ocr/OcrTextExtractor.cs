@@ -67,6 +67,56 @@ public sealed class OcrTextExtractor(
         return new OcrExtraction("", "none");
     }
 
+    /// <summary>
+    /// One page of a stored document version. A typed PDF answers from its own
+    /// text layer (fast and exact); a scanned PDF page is rasterized and read
+    /// by tesseract like the scan-page path. Images are page 1 of themselves.
+    /// </summary>
+    public async Task<OcrExtraction> ExtractAsync(byte[] blob, string contentType, int pageNo, CancellationToken ct = default)
+    {
+        if (!Enabled || blob.Length == 0) return new OcrExtraction("", "none");
+        if (pageNo < 1) return new OcrExtraction("", "none");
+
+        if (contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!engine.IsAvailable) return new OcrExtraction("", "none");
+            var imageText = pageNo == 1 ? await engine.RunAsync(blob, ct) : null;
+            return new OcrExtraction(imageText ?? "", imageText is null ? "none" : $"tesseract {engine.Languages}");
+        }
+
+        if (contentType != "application/pdf") return new OcrExtraction("", "none");
+
+        // Typed PDFs keep their text in the page tree — reading it costs one
+        // Docnet call instead of a raster + tesseract pass.
+        var typed = ReadPdfTextLayer(blob, pageNo);
+        if (typed is not null) return new OcrExtraction(typed, "pdf-text-layer");
+
+        if (!engine.IsAvailable) return new OcrExtraction("", "none");
+        var png = RenderPdfPage(blob, pageNo - 1);
+        if (png is null) return new OcrExtraction("", "none");
+        var ocrText = await engine.RunAsync(png, ct);
+        return new OcrExtraction(ocrText ?? "", ocrText is null ? "none" : $"tesseract {engine.Languages}");
+    }
+
+    /// <summary>The embedded text of one PDF page; null when the page carries none (a scan).</summary>
+    private string? ReadPdfTextLayer(byte[] pdf, int pageNo)
+    {
+        try
+        {
+            using var doc = DocLib.Instance.GetDocReader(
+                pdf, new Docnet.Core.Models.PageDimensions(RenderWidth, RenderHeight));
+            if (pageNo < 1 || pageNo > doc.GetPageCount()) return null;
+            using var reader = doc.GetPageReader(pageNo - 1);
+            var text = reader.GetText();
+            return string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "PDFium could not read the text layer of page {PageNo}.", pageNo);
+            return null;
+        }
+    }
+
     /// <summary>Each page as PNG bytes at the OCR render size; empty when PDFium cannot open the bytes.</summary>
     private List<byte[]> RenderPdfPages(byte[] pdf)
     {
@@ -77,26 +127,8 @@ public sealed class OcrTextExtractor(
             var pages = new List<byte[]>();
             for (var i = 0; i < Math.Min(doc.GetPageCount(), MaxPdfPages); i++)
             {
-                using var reader = doc.GetPageReader(i);
-                // Docnet hands back B-G-R-A, four bytes per pixel; reading it as
-                // three-channel data sheared every row and gave tesseract garbage.
-                var raw = reader.GetImage();
-                var handle = System.Runtime.InteropServices.GCHandle.Alloc(
-                    raw, System.Runtime.InteropServices.GCHandleType.Pinned);
-                try
-                {
-                    using var wrapped = Mat.FromPixelData(
-                        reader.GetPageHeight(), reader.GetPageWidth(), MatType.CV_8UC4,
-                        handle.AddrOfPinnedObject());
-                    using var bgr = new Mat();
-                    Cv2.CvtColor(wrapped, bgr, ColorConversionCodes.BGRA2BGR);
-                    Cv2.ImEncode(".png", bgr, out var bytes);
-                    pages.Add(bytes);
-                }
-                finally
-                {
-                    handle.Free();
-                }
+                var png = RenderPdfPage(doc, i);
+                if (png is not null) pages.Add(png);
             }
             return pages;
         }
@@ -104,6 +136,47 @@ public sealed class OcrTextExtractor(
         {
             logger.LogWarning(ex, "PDFium could not rasterize this document for OCR.");
             return [];
+        }
+    }
+
+    /// <summary>One page as PNG bytes, or null when it cannot be rasterized.</summary>
+    private byte[]? RenderPdfPage(byte[] pdf, int pageIndex)
+    {
+        try
+        {
+            using var doc = DocLib.Instance.GetDocReader(
+                pdf, new Docnet.Core.Models.PageDimensions(RenderWidth, RenderHeight));
+            return RenderPdfPage(doc, pageIndex);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "PDFium could not rasterize page {PageIndex} for OCR.", pageIndex + 1);
+            return null;
+        }
+    }
+
+    private byte[]? RenderPdfPage(Docnet.Core.Readers.IDocReader doc, int pageIndex)
+    {
+        if (pageIndex < 0 || pageIndex >= doc.GetPageCount()) return null;
+        using var reader = doc.GetPageReader(pageIndex);
+        // Docnet hands back B-G-R-A, four bytes per pixel; reading it as
+        // three-channel data sheared every row and gave tesseract garbage.
+        var raw = reader.GetImage();
+        var handle = System.Runtime.InteropServices.GCHandle.Alloc(
+            raw, System.Runtime.InteropServices.GCHandleType.Pinned);
+        try
+        {
+            using var wrapped = Mat.FromPixelData(
+                reader.GetPageHeight(), reader.GetPageWidth(), MatType.CV_8UC4,
+                handle.AddrOfPinnedObject());
+            using var bgr = new Mat();
+            Cv2.CvtColor(wrapped, bgr, ColorConversionCodes.BGRA2BGR);
+            Cv2.ImEncode(".png", bgr, out var bytes);
+            return bytes;
+        }
+        finally
+        {
+            handle.Free();
         }
     }
 }

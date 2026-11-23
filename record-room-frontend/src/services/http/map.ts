@@ -12,6 +12,8 @@
 
 import type {
   DocumentDerivative,
+  DocumentOcrStatus,
+  DocumentVersionPage,
   AppUser,
   Area,
   AuditEntry,
@@ -449,6 +451,28 @@ export function toRecordFileDocument(dto: Record<string, unknown>): RecordFileDo
     uploadedAt: str(dto.uploadedAt),
     uploadedBy: str(dto.uploadedBy),
     pageCount: dto.pageCount == null ? undefined : num(dto.pageCount),
+  };
+}
+
+export function toDocumentOcrStatus(dto: Record<string, unknown>): DocumentOcrStatus {
+  return {
+    documentId: toId(dto.documentId as number),
+    pageCount: num(dto.pageCount, 0),
+    pagesWithText: num(dto.pagesWithText, 0),
+    processing: dto.processing === true,
+  };
+}
+
+export function toDocumentVersionPage(dto: Record<string, unknown>): DocumentVersionPage {
+  return {
+    id: toId(dto.id as number),
+    documentId: toId(dto.documentId as number),
+    pageNo: num(dto.pageNo, 1),
+    ocrText: dto.ocrText == null ? '' : String(dto.ocrText),
+    ocrMethod: str(dto.ocrMethod),
+    ocrRanAt: dto.ocrRanAt ? str(dto.ocrRanAt) : undefined,
+    ocrEditedBy: dto.ocrEditedBy ? str(dto.ocrEditedBy) : undefined,
+    ocrEditedAt: dto.ocrEditedAt ? str(dto.ocrEditedAt) : undefined,
   };
 }
 

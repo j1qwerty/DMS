@@ -155,7 +155,11 @@ public sealed class FilesService(
                     || EF.Functions.Contains(f.Area!, prefix)
                     || EF.Functions.Contains(f.Holder!, prefix)
                     || db.ScanPages.Any(p => p.Barcode == f.Barcode
-                        && p.OcrText != null && EF.Functions.Contains(p.OcrText, prefix)));
+                        && p.OcrText != null && EF.Functions.Contains(p.OcrText, prefix))
+                    // Uploaded document versions carry their own per-page OCR
+                    // text; the registry search reaches it the same way.
+                    || db.FileDocuments.Any(d => d.RecordFileId == f.Id
+                        && d.Pages.Any(p => EF.Functions.Contains(p.OcrText, prefix))));
             }
             else
             {
@@ -169,7 +173,9 @@ public sealed class FilesService(
                     || (f.EOfficeReference != null && f.EOfficeReference.StartsWith(needle))
                     || (f.Holder != null && f.Holder.Contains(needle))
                     || db.ScanPages.Any(p => p.Barcode == f.Barcode
-                        && p.OcrText != null && p.OcrText.Contains(needle)));
+                        && p.OcrText != null && p.OcrText.Contains(needle))
+                    || db.FileDocuments.Any(d => d.RecordFileId == f.Id
+                        && d.Pages.Any(p => p.OcrText.Contains(needle))));
             }
         }
 
@@ -247,6 +253,14 @@ public sealed class FilesService(
                         && p.OcrText != null && p.OcrText.Contains(needle))
                     .Select(p => p.Barcode).Distinct().ToListAsync(ct))
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            // Uploaded document versions carry their own persisted per-page OCR
+            // text (DocumentVersionPages) — the same search must reach it.
+            var docBarcodes = (await db.FileDocuments.AsNoTracking()
+                    .Where(d => d.RecordFileId != 0 && pageBarcodes.Contains(d.RecordFile!.Barcode)
+                        && d.Pages.Any(p => p.OcrText.Contains(needle)))
+                    .Select(d => d.RecordFile!.Barcode).Distinct().ToListAsync(ct))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            ocrBarcodes.UnionWith(docBarcodes);
             if (ocrBarcodes.Count > 0)
             {
                 items = items.Select(dto => ocrBarcodes.Contains(dto.FileBarcode)

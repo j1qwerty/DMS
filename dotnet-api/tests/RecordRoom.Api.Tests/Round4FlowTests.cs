@@ -74,6 +74,9 @@ public sealed class Round4FlowTests
         public Task<OcrExtraction> ExtractAsync(string storageKey, string contentType, CancellationToken ct = default) =>
             Task.FromResult(new OcrExtraction(Text, "fake-engine"));
 
+        public Task<OcrExtraction> ExtractAsync(string storageKey, string contentType, int pageNo, CancellationToken ct = default) =>
+            Task.FromResult(new OcrExtraction(Text, "fake-engine"));
+
         public Task<Result<ScanOcrDto>> RunAsync(long scanId, CancellationToken ct = default) =>
             Task.FromResult(Result<ScanOcrDto>.Fail("not used in flow tests"));
     }
@@ -84,6 +87,9 @@ public sealed class Round4FlowTests
         public const string Text = "हिंदी ओसीआर पाठ";
 
         public Task<OcrExtraction> ExtractAsync(string storageKey, string contentType, CancellationToken ct = default) =>
+            Task.FromResult(new OcrExtraction(Text, "hindi-fake"));
+
+        public Task<OcrExtraction> ExtractAsync(string storageKey, string contentType, int pageNo, CancellationToken ct = default) =>
             Task.FromResult(new OcrExtraction(Text, "hindi-fake"));
 
         public Task<Result<ScanOcrDto>> RunAsync(long scanId, CancellationToken ct = default) =>
