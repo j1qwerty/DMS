@@ -7,7 +7,7 @@ import type { Permission } from '../services/permissions';
 interface Tab {
   label: string;
   to: string;
-  permission?: Permission;
+  permission?: Permission | Permission[];
   /** Shown only while barcode features are on. */
   barcode?: boolean;
   /** Feature group this tab belongs to; hidden while the group is off. */
@@ -30,8 +30,11 @@ const GROUPS: Group[] = [
     title: 'Record room · Issue & return',
     match: ['/issue', '/return', '/movement', '/scan'],
     tabs: [
-      { label: 'Issue files', to: '/issue', permission: 'issue.issue' },
-      { label: 'Return files', to: '/return', permission: 'issue.return' },
+      {
+        label: 'issue and return',
+        to: '/issue',
+        permission: ['issue.issue', 'issue.return'],
+      },
       { label: 'Movement log', to: '/movement' },
       { label: 'Scan a barcode', to: '/scan', barcode: true },
     ],
@@ -56,7 +59,10 @@ export function SubNav() {
     (tab) =>
       (!tab.barcode || features.barcode) &&
       (!tab.feature || features[tab.feature]) &&
-      (!tab.permission || allowed(tab.permission)),
+      (!tab.permission ||
+        (Array.isArray(tab.permission)
+          ? tab.permission.some((permission) => allowed(permission))
+          : allowed(tab.permission))),
   );
   if (tabs.length < 2) return null;
 

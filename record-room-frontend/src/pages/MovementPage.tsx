@@ -6,13 +6,13 @@ import {
   Clock,
   MagnifyingGlass,
   Scan,
-  WarningCircle,
 } from '@phosphor-icons/react';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Card } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
 import { SelectInput, TextInput } from '../components/ui/Field';
 import { EmptyState } from '../components/ui/EmptyState';
+import { Pagination } from '../components/ui/Pagination';
 import { RowSkeleton } from '../components/ui/Skeletons';
 import { Flash } from '../components/ui/Flash';
 import { useService, useQuery } from '../hooks/useService';
@@ -21,6 +21,7 @@ import type { MovementKind, MovementEvent, IssueRecord } from '../types';
 
 const EMPTY_MOVEMENTS: MovementEvent[] = [];
 const EMPTY_ISSUES: IssueRecord[] = [];
+const DEFAULT_PAGE_SIZE = 10;
 
 const KINDS: Array<MovementKind | 'All'> = [
   'All',
@@ -54,22 +55,20 @@ export function MovementPage() {
 
   const [search, setSearch] = useState('');
   const [kind, setKind] = useState<MovementKind | 'All'>('All');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
 
   const { data: rows, loading } = useQuery(
-    () => service.movements.list({ search, kind, limit: 200 }),
+    () => service.movements.list({ search, kind, limit: 10_000 }),
     [search, kind],
     EMPTY_MOVEMENTS,
     // Any write produces a movement event; this is the live log.
     ['movements'],
   );
+  const pagedRows = rows.slice((page - 1) * pageSize, page * pageSize);
   // Overdue receipts and the unfiltered total do not depend on the filters above,
   // so they are asked for once rather than on every keystroke.
   const { data: overdue } = useQuery(() => service.issues.overdue(), [], EMPTY_ISSUES, ['issues']);
-  const { data: allEvents } = useQuery(
-    () => service.movements.list({ limit: 10_000 }),
-    [],
-    EMPTY_MOVEMENTS,
-  );
   const labels = useFileLabels(
     rows.filter((row) => !row.fileNumber).map((row) => row.fileBarcode),
     !barcode,
@@ -116,7 +115,10 @@ export function MovementPage() {
             />
             <TextInput
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              onChange={(event) => {
+                setSearch(event.target.value);
+                setPage(1);
+              }}
               placeholder={
                 barcode
                   ? 'Barcode, subject, actor, from or to…'
@@ -128,7 +130,10 @@ export function MovementPage() {
           </div>
           <SelectInput
             value={kind}
-            onChange={(event) => setKind(event.target.value as MovementKind | 'All')}
+            onChange={(event) => {
+              setKind(event.target.value as MovementKind | 'All');
+              setPage(1);
+            }}
             aria-label="Filter by movement kind"
           >
             {KINDS.map((item) => (
@@ -150,7 +155,7 @@ export function MovementPage() {
           </div>
         ) : (
           <div className="divide-y divide-[var(--rr-border)]">
-            {rows.map((row) => (
+            {pagedRows.map((row) => (
               <div
                 key={row.id}
                 className="grid gap-4 p-5 lg:grid-cols-[1.1fr_.9fr_1fr_auto] lg:items-center"
@@ -181,6 +186,19 @@ export function MovementPage() {
             ))}
           </div>
         )}
+        {rows.length > 0 && (
+          <Pagination
+            page={page}
+            pageSize={pageSize}
+            total={rows.length}
+            onPage={setPage}
+            onPageSize={(nextPageSize) => {
+              setPage(1);
+              setPageSize(nextPageSize);
+            }}
+            label="movement events"
+          />
+        )}
       </Card>
 
       {overdue.length > 0 && (
@@ -192,18 +210,6 @@ export function MovementPage() {
         />
       )}
 
-      <Card>
-        <div className="mb-4 flex items-center gap-2">
-          <WarningCircle className="text-accent" size={18} />
-          <p className="text-sm font-semibold">How this log is produced</p>
-        </div>
-        <p className="muted text-sm leading-6">
-          {allEvents.length} events exist in the local dataset. Every issue, return, relocation,
-          file creation and digitization release appends one row inside the same write that changes
-          the record, so the log cannot disagree with the registry. The full history for 25 lakh
-          files belongs in the API with server-side pagination.
-        </p>
-      </Card>
     </div>
   );
 }

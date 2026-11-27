@@ -13,6 +13,7 @@ import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { EmptyState } from '../components/ui/EmptyState';
+import { Pagination } from '../components/ui/Pagination';
 import { Field, SelectInput, TextInput } from '../components/ui/Field';
 import { StatusBadge } from '../components/ui/Flash';
 import { RowSkeleton } from '../components/ui/Skeletons';
@@ -51,6 +52,8 @@ export function IssueReturnDeskPage({
 
   const [section, setSection] = useState<'none' | 'issue' | 'return'>(initialSection);
   const [returnReceiptId, setReturnReceiptId] = useState('');
+  const [receiptPage, setReceiptPage] = useState(1);
+  const [receiptPageSize, setReceiptPageSize] = useState(50);
 
   const canIssue = allowed('issue.issue');
   const canReturn = allowed('issue.return');
@@ -60,7 +63,12 @@ export function IssueReturnDeskPage({
     data: receipts,
     loading: loadingReceipts,
     reload: reloadReceipts,
-  } = useQuery(() => service.issues.list({ pageSize: 50 }), [], EMPTY_RECEIPTS, ['issues']);
+  } = useQuery(
+    () => service.issues.list({ page: receiptPage, pageSize: receiptPageSize }),
+    [receiptPage, receiptPageSize],
+    EMPTY_RECEIPTS,
+    ['issues'],
+  );
 
   const { data: borrowers, reload: reloadBorrowers } = useQuery(
     () => service.issues.borrowers(),
@@ -136,8 +144,7 @@ export function IssueReturnDeskPage({
             <div>
               <p className="text-sm font-semibold">Receipt log</p>
               <p className="muted mt-0.5 text-xs">
-                Latest {Math.min(receipts.items.length, 50)} receipt(s) — issue, part-return and
-                return history
+                {receipts.items.length} shown — issue, part-return and return history
               </p>
             </div>
             <Badge tone="neutral">{receipts.total} total</Badge>
@@ -218,6 +225,19 @@ export function IssueReturnDeskPage({
                 </tbody>
               </table>
             </div>
+          )}
+          {receipts.items.length > 0 && (
+            <Pagination
+              page={receipts.page}
+              pageSize={receipts.pageSize}
+              total={receipts.total}
+              onPage={setReceiptPage}
+              onPageSize={(pageSize) => {
+                setReceiptPage(1);
+                setReceiptPageSize(pageSize);
+              }}
+              label="receipts"
+            />
           )}
         </Card>
 

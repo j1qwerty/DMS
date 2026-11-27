@@ -1093,7 +1093,7 @@ export function ScanStudioPage() {
 
             {/* OCR on demand — only when asked for */}
             {showOcr && (
-              <div className="hidden w-80 shrink-0 flex-col overflow-hidden rounded-xl bg-[var(--rr-surface)] lg:flex">
+              <div className="hidden w-80 shrink-0 flex-col overflow-hidden rounded-xl border border-base bg-[var(--rr-surface)] text-[var(--rr-text)] lg:flex">
                 <div className="flex items-center justify-between border-b border-base px-3 py-2">
                   <p className="flex items-center gap-1.5 text-xs font-semibold">
                     <TextAa size={13} className="text-accent" /> OCR text
